@@ -33,7 +33,7 @@
 // Cuando done/error: el upload "se gradúa" — se quita del panel
 // Activos y se invalida la query del Historial para que aparezca.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import * as tus from "tus-js-client";
@@ -74,6 +74,11 @@ const ACCEPTED_EXTENSIONS = [
   ".ts", ".vob", ".mpg", ".mpeg",
   ".srt", ".ass", ".vtt",
 ];
+
+// Set para lookups O(1) en validateFiles() que recorre cada fichero
+// del drop. El array de arriba se conserva para el `accept=` del input
+// (el atributo nativo necesita la lista comma-separated).
+const ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS);
 
 export default function Uploads() {
   const { t } = useTranslation();
@@ -140,9 +145,20 @@ export default function Uploads() {
   // Cleanup en unmount: abortar uploads activos para no dejar bytes
   // huérfanos en el staging. La pipeline.Aborted del server libera
   // la cuota y borra el blob.
+  //
+  // Patrón "latest value via ref": el unmount cleanup necesita leer
+  // el estado actualizado de `active`. Añadirlo a deps re-ejecutaría
+  // el cleanup en cada cambio (abortando uploads activos cada vez
+  // que cambian estado). El ref se actualiza en un effect dedicado
+  // y el cleanup lee `.current` al disparar, garantizando snapshot
+  // fresco — todo dentro de effects, satisfaciendo react-hooks/refs.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
   useEffect(() => {
     return () => {
-      for (const u of active) {
+      for (const u of activeRef.current) {
         if (u.tusUpload && (u.status === "uploading" || u.status === "queued")) {
           try {
             u.tusUpload.abort(true);
@@ -152,8 +168,7 @@ export default function Uploads() {
         }
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount/unmount only
+  }, []);
 
   function startUpload(file: File, libraryID: string, subpath: string, overwrite: boolean = false) {
     const localID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -420,7 +435,7 @@ function UploadDropzone({
     for (const f of arr) {
       const dot = f.name.lastIndexOf(".");
       const ext = dot >= 0 ? f.name.slice(dot).toLowerCase() : "";
-      if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+      if (!ACCEPTED_EXTENSIONS_SET.has(ext)) {
         setRejectReason(
           t("uploads.rejectExtension", { name: f.name, ext: ext || "—" }),
         );
@@ -596,8 +611,12 @@ function UploadDropzone({
         <div className="flex flex-col gap-3 rounded-[--radius-md] border border-border bg-bg-elevated p-4">
           <ul className="flex flex-col gap-1">
             {files.map((f, i) => (
+              // name+size+lastModified hace la key única por fichero
+              // sin depender del índice (varios ficheros con mismo
+              // nombre pero distinto tamaño no colisionan). El índice
+              // sigue haciendo falta para removeFromQueue().
               <li
-                key={`${f.name}-${i}`}
+                key={`${f.name}-${f.size}-${f.lastModified}`}
                 className="flex items-center justify-between gap-3 text-sm"
               >
                 <span className="flex items-center gap-2 truncate">
@@ -824,6 +843,10 @@ function CollisionModal({
   onConfirm: (items: CollisionItem[]) => void;
 }) {
   const { t } = useTranslation();
+  // `items` se usa SÓLO como semilla inicial — el modal acumula las
+  // decisiones del usuario en `state` hasta que pulse Confirmar.
+  // Derivarlo en render reiniciaría las decisiones en cada re-render
+  // del padre, perdiendo el trabajo del usuario.
   const [state, setState] = useState(items);
 
   function applyAll(d: CollisionDecision) {
@@ -846,10 +869,15 @@ function CollisionModal({
       role="dialog"
       aria-modal="true"
       onClick={onCancel}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
     >
       <div
+        role="presentation"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
         className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg border border-border bg-bg-base shadow-2xl flex flex-col"
       >
         <header className="border-b border-border px-5 py-4">
@@ -898,7 +926,13 @@ function CollisionModal({
 
         <ul className="flex-1 overflow-y-auto divide-y divide-border/40">
           {state.map((it, i) => (
-            <li key={i} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+            // libraryID + subpath + nombre = ruta destino única, no
+            // hay dos colisiones distintas que apunten al mismo path.
+            // El índice sigue haciendo falta para setDecision(i, …).
+            <li
+              key={`${it.libraryID}:${it.subpath}/${it.existingName}`}
+              className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3"
+            >
               <span className="flex flex-1 items-center gap-2 truncate text-sm">
                 <FileVideo
                   size={14}

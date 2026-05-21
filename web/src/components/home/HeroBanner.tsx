@@ -318,7 +318,7 @@ function buildMetaParts(item: MediaItem, hideYear: boolean): MetaPart[] {
       key: "rating",
       node: (
         <span className="flex items-center gap-1 text-white/90">
-          <svg className="h-3.5 w-3.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
+          <svg className="size-3.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </svg>
           {item.community_rating.toFixed(1)}
@@ -352,7 +352,7 @@ function MetaRow({ parts }: { parts: MetaPart[] }) {
       {parts.map((part, i) => (
         <span key={part.key} className="flex items-center gap-2">
           {i > 0 && (
-            <span aria-hidden="true" className="h-1 w-1 rounded-full bg-white/30" />
+            <span aria-hidden="true" className="size-1 rounded-full bg-white/30" />
           )}
           {part.node}
         </span>
@@ -386,7 +386,7 @@ function PlayCta({
       onClick={() => navigate(href)}
       className="flex items-center gap-2 rounded-lg bg-white px-7 py-3 text-sm font-bold text-black transition-all hover:bg-white/90 hover:scale-105 active:scale-95"
     >
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+      <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
         <path d="M8 5v14l11-7z" />
       </svg>
       {label}
@@ -422,7 +422,7 @@ function TitleBlock({
         </div>
       ) : (
         <div className="flex flex-col gap-1">
-          <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl drop-shadow-[0_2px_20px_rgba(0,0,0,0.8)]">
+          <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl drop-shadow-[0_2px_20px_rgba(0,0,0,0.8)]">
             {headline}
           </h1>
           {smallTitle && (
@@ -592,7 +592,7 @@ export function HeroBanner(props: HeroBannerProps) {
             // posters (Transformers / superhero ensembles especially).
             // 50% 28% biases up enough to preserve heads without
             // exposing letterboxing on landscape-heavy backdrops.
-            className={`absolute inset-0 h-full w-full object-cover [object-position:50%_28%] transition-opacity duration-1000 ${
+            className={`absolute inset-0 size-full object-cover [object-position:50%_28%] transition-opacity duration-1000 ${
               i === safeIndex ? "opacity-100" : "opacity-0"
             }`}
           />

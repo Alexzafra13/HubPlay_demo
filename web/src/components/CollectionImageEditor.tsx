@@ -136,10 +136,10 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
             <img
               src={previewSrc}
               alt={collection.name}
-              className="h-full w-full object-cover"
+              className="size-full object-cover"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-text-muted">
+            <div className="flex size-full items-center justify-center text-text-muted">
               {t("collectionImage.noImage", {
                 defaultValue: "Sin imagen (TMDb no provee esta para esta colección).",
               })}
@@ -201,7 +201,7 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
                     src={img.url}
                     alt=""
                     loading="lazy"
-                    className="h-full w-full object-cover"
+                    className="size-full object-cover"
                   />
                   {img.language && (
                     <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 py-0 text-[9px] font-mono font-semibold uppercase text-white">
@@ -247,7 +247,7 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
               className="flex-1 rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 text-sm text-text placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
             />
             <Button type="submit" variant="primary" disabled={!urlInput.trim() || busy}>
-              {setURL.isPending ? <Spinner size="sm" /> : <Check className="h-4 w-4" />}
+              {setURL.isPending ? <Spinner size="sm" /> : <Check className="size-4" />}
               {t("collectionImage.applyURL", { defaultValue: "Aplicar URL" })}
             </Button>
           </div>
@@ -286,14 +286,14 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
             onClick={() => fileInputRef.current?.click()}
             disabled={busy}
           >
-            {uploadFile.isPending ? <Spinner size="sm" /> : <Upload className="h-4 w-4" />}
+            {uploadFile.isPending ? <Spinner size="sm" /> : <Upload className="size-4" />}
             {t("collectionImage.chooseFile", { defaultValue: "Elegir archivo" })}
           </Button>
         </div>
 
         {anyError && (
           <div className="flex items-start gap-2 rounded-[--radius-md] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <AlertCircle className="h-4 w-4 shrink-0" />
+            <AlertCircle className="size-4 shrink-0" />
             <span>
               {t("collectionImage.errorGeneric", {
                 defaultValue:
@@ -308,7 +308,7 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
             {clear.isPending ? (
               <Spinner size="sm" />
             ) : (
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="size-4" />
             )}
             {t("collectionImage.reset", {
               defaultValue: "Restaurar imagen de TMDb",

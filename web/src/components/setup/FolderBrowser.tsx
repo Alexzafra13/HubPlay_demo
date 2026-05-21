@@ -101,7 +101,7 @@ const FolderBrowserContent: FC<FolderBrowserContentProps> = ({
             return (
               <div key={segmentPath} className="flex items-center gap-1">
                 <svg
-                  className="h-3 w-3 shrink-0 text-text-muted"
+                  className="size-3 shrink-0 text-text-muted"
                   viewBox="0 0 20 20"
                   fill="currentColor"
                 >
@@ -156,7 +156,7 @@ const FolderBrowserContent: FC<FolderBrowserContentProps> = ({
         {isError && (
           <div className="flex flex-col items-center justify-center gap-2 py-16 px-4">
             <svg
-              className="h-6 w-6 text-error"
+              className="size-6 text-error"
               viewBox="0 0 20 20"
               fill="currentColor"
             >
@@ -181,7 +181,7 @@ const FolderBrowserContent: FC<FolderBrowserContentProps> = ({
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-text-secondary hover:bg-bg-elevated transition-colors cursor-pointer"
               >
                 <svg
-                  className="h-4 w-4 shrink-0"
+                  className="size-4 shrink-0"
                   viewBox="0 0 20 20"
                   fill="currentColor"
                 >
@@ -209,7 +209,7 @@ const FolderBrowserContent: FC<FolderBrowserContentProps> = ({
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-text-primary hover:bg-bg-elevated transition-colors cursor-pointer"
               >
                 <svg
-                  className="h-4 w-4 shrink-0 text-accent"
+                  className="size-4 shrink-0 text-accent"
                   viewBox="0 0 20 20"
                   fill="currentColor"
                 >
@@ -274,4 +274,3 @@ const FolderBrowser: FC<FolderBrowserProps> = ({
 };
 
 export { FolderBrowser, FolderBrowserContent };
-export type { FolderBrowserProps, FolderBrowserContentProps };

@@ -2811,6 +2811,13 @@ components:
             people:
               type: array
               items: { $ref: "#/components/schemas/CreditEntry" }
+            collection:
+              type: object
+              nullable: true
+              description: "Movie-collection (TMDb saga) the item belongs to, when matched. Drives the 'Part of: X' affordance on movie detail screens."
+              properties:
+                id:   { type: string, description: "Canonical id `collection:<tmdb_id>`" }
+                name: { type: string }
 
     Image:
       type: object

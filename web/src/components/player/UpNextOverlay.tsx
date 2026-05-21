@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -82,20 +82,24 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
     return () => window.clearInterval(interval);
   }, [durationSeconds]);
 
-  const handleEsc = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-      }
-    },
-    [onCancel],
-  );
+  // Patrón "latest value via ref" — el listener se monta una vez en
+  // mount/unmount, no se re-suscribe cada vez que el padre cambia la
+  // identidad de onCancel.
+  const cancelRef = useRef(onCancel);
+  useEffect(() => {
+    cancelRef.current = onCancel;
+  }, [onCancel]);
 
   useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        cancelRef.current();
+      }
+    };
     document.addEventListener("keydown", handleEsc);
     return () => document.removeEventListener("keydown", handleEsc);
-  }, [handleEsc]);
+  }, []);
 
   const code = formatEpisodeCode(nextUp.seasonNumber, nextUp.episodeNumber);
   const progress = 1 - Math.min(1, Math.max(0, remaining / durationSeconds));
@@ -116,7 +120,7 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
           <img
             src={nextUp.backdropUrl ?? nextUp.posterUrl ?? ""}
             alt=""
-            className="h-full w-full object-cover"
+            className="size-full object-cover"
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />
@@ -142,11 +146,14 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
         <div className="flex items-center gap-2">
           <button
             type="button"
+            // Foco automático intencionado: el overlay aparece al final
+            // del episodio y queremos que Enter confirme "Reproducir
+            // ahora" sin tocar el ratón. Test cubre este orden.
             autoFocus
             onClick={onPlayNow}
             className="flex flex-1 items-center justify-center gap-2 rounded-[--radius-md] bg-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card cursor-pointer"
           >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7z" />
             </svg>
             {t("upNext.playIn", { seconds })}
@@ -155,11 +162,11 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+            className="flex size-8 items-center justify-center rounded-full border border-border text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
             aria-label={t("upNext.cancel")}
             title={t("upNext.cancel")}
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>

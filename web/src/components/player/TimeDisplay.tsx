@@ -71,4 +71,3 @@ const TimeDisplay: FC<TimeDisplayProps> = ({ currentTime, duration }) => {
 };
 
 export { TimeDisplay };
-export type { TimeDisplayProps };

@@ -27,7 +27,9 @@ import type {
   MediaItem,
   PaginatedResponse,
   PatchChannelRequest,
+  PeerStreamSessionResponse,
   PreflightResult,
+  StudioDetail,
   PublicCountry,
   PublicEPGSource,
   SetupStatus,
@@ -1096,19 +1098,11 @@ export class ApiClient {
     return this.request<PersonDetail>("GET", `/people/${id}`);
   }
 
-  // Studio browse + detail. The detail endpoint returns the studio
-  // header (logo, name) plus every item the catalogue has from this
-  // studio, sorted year-desc. Drives the click-on-the-studio-mark
-  // collection page on /studios/{slug}.
-  async getStudios(): Promise<{ studios: import("./types").StudioListEntry[] }> {
-    return this.request<{ studios: import("./types").StudioListEntry[] }>(
-      "GET",
-      "/studios",
-    );
-  }
-
-  async getStudio(slug: string): Promise<import("./types").StudioDetail> {
-    return this.request<import("./types").StudioDetail>(
+  // Studio detail. Returns the studio header (logo, name) plus every
+  // item the catalogue has from this studio, sorted year-desc. Drives
+  // the click-on-the-studio-mark collection page on /studios/{slug}.
+  async getStudio(slug: string): Promise<StudioDetail> {
+    return this.request<StudioDetail>(
       "GET",
       `/studios/${encodeURIComponent(slug)}`,
     );
@@ -2072,7 +2066,7 @@ export class ApiClient {
   async startPeerStreamSession(
     peerID: string,
     itemID: string,
-  ): Promise<import("./types").PeerStreamSessionResponse> {
+  ): Promise<PeerStreamSessionResponse> {
     return this.request("POST", `/me/peers/${peerID}/stream/${itemID}/session`, {
       body: {},
     });

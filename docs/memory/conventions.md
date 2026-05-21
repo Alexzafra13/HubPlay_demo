@@ -1078,3 +1078,121 @@ Queries que viven como raw SQL en el repo porque sqlc 1.31.1 las trunca o las pa
 8. `LibraryRepository.ListForUser` — JOIN + COALESCE + ORDER BY trip (2026-05-11).
 
 Cuando upstream publique sqlc 1.32+ con el parser fix, abrir tarea "migrate raw-SQL holdouts back to sqlc" — son ~15 min cada una.
+
+## Frontend — Patrones React Doctor (añadidos 2026-05-20)
+
+Tras la integración de [React Doctor](https://github.com/millionco/react-doctor) en CI (PR #358) y las dos PRs de quick wins (#359 + #360), el repo adopta los siguientes patrones obligatorios para que el score se mantenga ≥71 y no introduzcamos regresiones:
+
+### Iteración + ordenación
+
+- `arr.toSorted((a,b) => …)` en lugar de `[...arr].sort((a,b) => …)`. ES2023, sin spread allocation.
+- `.flatMap(it => cond ? [it] : [])` para combinar filter+map en una sola pasada cuando el resultado va al JSX. Listas con cientos de elementos (canales IPTV, items de biblioteca) se benefician notablemente.
+- `.reduce()` o `for...of` cuando el flatMap empeora la legibilidad.
+
+### Tailwind
+
+- `size-N` siempre, NUNCA `w-N h-N` con el mismo N.
+- `p-N` siempre, NUNCA `px-N py-N` con el mismo N.
+- `font-semibold` (600) en headings `<hN>`, NUNCA `font-bold` (700) o `font-extrabold` (800). El compilador del proyecto enforza esto vía React Doctor.
+
+### Keys de React
+
+- NUNCA `key={index}` excepto en arrays REALMENTE estáticos (skeleton placeholders donde N es fijo y el orden nunca cambia). En ese caso usar prefijo descriptivo: `key={`peer-recent-skeleton-${i}`}`.
+- Para listas dinámicas: ID del backend si existe; si el item no tiene ID estable, añadir `localId: crypto.randomUUID()` al type local (ver `LibrariesStep.tsx`).
+- Composite keys (`${item.field1}-${item.field2}`) cuando garantiza unicidad sin índice.
+
+### Framer-motion
+
+- `LazyMotion strict` envolviendo el Router en `App.tsx` con `domAnimation` (subset suficiente para todas nuestras animaciones).
+- `import { m } from "framer-motion"` y `<m.div>`, NUNCA `import { motion }` ni `<motion.div>`.
+- Ahorra ~30 KB del bundle base; el motor completo sólo se carga si algún consumer pide features explícitamente.
+
+### Fechas
+
+- `formatDateTime`, `formatDate`, `formatTime`, `epochOf` desde [`src/utils/dateFormat.ts`](../../web/src/utils/dateFormat.ts).
+- NUNCA `new Date(iso).toLocale*()` directo en JSX o en callbacks alcanzables desde JSX.
+- Los helpers toleran inputs vacíos/inválidos (devuelven `""` en lugar de "Invalid Date").
+
+### Tipografía en JSX
+
+- Em-dash (`—`) NUNCA en JSX text: lee como output AI.
+  - Para "sin valor": en-dash (`–`).
+  - Para separador inline: bullet (`·`).
+
+### Accesibilidad
+
+- `autoFocus` prohibido. Si la UX lo justifica (overlay que aparece y debe confirmar con Enter):
+  - Patrón: `useEffect + ref.current.focus()` (no atributo).
+  - Si DE VERDAD necesitas el atributo: `// eslint-disable-next-line jsx-a11y/no-autofocus` con justificación inline + test que cubre el orden de foco.
+
+### React Compiler
+
+- Plugin `eslint-plugin-react-compiler` activo con regla `react-compiler/react-compiler: 'error'`. Las regresiones de compatibilidad rompen el CI.
+- `react-compiler-healthcheck` hard gate en CI: el job FALLA si la tasa de compatibilidad baja de 100%.
+- Patrón "Adjusting state when a prop changes" (render-time guarded setState con `useState` de tracking) en lugar de `useState + useEffect` que sincroniza state derivado.
+
+### Quality gates en CI
+
+- `typecheck` (`tsc -b`) — hard gate.
+- `react-compiler-healthcheck` — hard gate, 100% requerido.
+- `react-doctor` — visibility-only, comenta inline en cada PR con regresiones/mejoras del score.
+- `knip` — info-only, `--no-exit-code` (cuando lleguemos a 0 unused, elevar a hard).
+
+### Squash merge audit (regla nueva 2026-05-20)
+
+Tras descubrir que el squash merge de PR #360 descartó silenciosamente 54 líneas de un commit (migración LazyMotion sobre 7 archivos) — se mergeó la activación de `LazyMotion strict` en `App.tsx` pero NO los cambios `motion` → `m` en los call sites, lo que habría roto runtime al primer render con animación:
+
+- **Tras mergear cualquier PR que aplica un script masivo** (sed-like changes, code mods, migraciones cross-archivo), `git diff origin/main~1 origin/main -- <archivo_clave>` para verificar que los cambios reales aterrizaron. El visor de "files changed" del PR de GitHub puede esconder conflict resolutions silenciosas durante el squash.
+- **Si una regla del lint que se eliminó vuelve a aparecer** en un PR posterior, primero auditar main (`git show origin/main:<file>`) antes de asumir que el autor del nuevo PR la introdujo. La regresión puede venir del merge anterior.
+- **Para scripts masivos próximamente**: idealmente, hacerlos en commits separados pequeños o usar `git merge --no-ff` en lugar de squash si la PR contiene scripts de mass-edit, para que el historial preserve la atomicidad del cambio.
+
+### Patrones añadidos en el push final a 75 ("Great")
+
+Una segunda tanda de patrones que vinieron al cruzar el umbral del 75 con PR #367:
+
+- **`forwardRef` PROHIBIDO en componentes nuevos**. React 19 acepta `ref` como prop normal en componentes función. Declarar `ref?: Ref<HTML*Element>` en la interfaz de props y desestructurar en el componente. Migrados: Button, Input.
+
+- **Patrón "latest value via ref"** sustituye a `useEffectEvent` (aún experimental):
+  ```tsx
+  const cbRef = useRef(cb);
+  useEffect(() => { cbRef.current = cb; }, [cb]);
+  useEffect(() => {
+    const handle = () => cbRef.current();
+    el.addEventListener("x", handle);
+    return () => el.removeEventListener("x", handle);
+  }, [/* SIN cb */]);
+  ```
+  Aplica cuando un listener depende de un prop callable pero el effect NO debería re-suscribirse al cambiar la identidad del callable. Aplicado en BottomSheet, VideoPlayer, ImageManager.
+
+- **NUNCA closures `const renderX = (...) => <jsx>` en cuerpo de render**. Extraer a un componente real (`<X />` con props explícitas). Mejora reconciliación y satisface `react-doctor/no-render-in-render`.
+
+- **`Set` para lookups en bucles**: si un array se consulta con `.includes()` dentro de un loop, exponer también un `Set` del mismo dataset. Caso real: `ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS)` en Uploads.tsx (array para el `accept=` del `<input>`, Set para validación O(1) en `validateFiles()`).
+
+- **Animaciones**: `scale: 0` PROHIBIDO en entradas. Usar `{ scale: 0.95, opacity: 0 }` → `{ scale: 1, opacity: 1 }`. Los elementos deben "desinflar" naturalmente, no aparecer de la nada.
+
+- **`<video>` containers y otros widgets de pantalla completa**: `role="application"` + `aria-label` para que lectores de pantalla los anuncien correctamente como widgets interactivos.
+
+- **Backdrops de modal con `<button>` siempre que sea posible**. Si no (porque contiene otros botones internos), `<div role="dialog">` con `onClick` + `onKeyDown` (Escape) + body interno `role="presentation"` con `stopPropagation` en ambos.
+
+### Conflicto documentado: `rerender-state-only-in-handlers`
+
+React Doctor pide reemplazar `useState` que nunca se lee en JSX por `useRef`. Pero el patrón canónico para "Adjusting state when a prop changes" (recomendado por React docs + `react-hooks/set-state-in-effect`) usa `useState` tracking. Cambiar a `useRef` con `ref.current = value` durante render viola `react-hooks/refs`.
+
+**Decisión**: ignorar la regla `rerender-state-only-in-handlers` para este patrón. **También se ignora `no-derived-useState` en los mismos sitios** porque la única alternativa sería volver al patrón useEffect+setState que `react-hooks/set-state-in-effect` prohíbe. La consistencia con react-hooks importa más que el score numérico de react-doctor. Casos vivos: `MediaGrid.tsx:43` (prevItems), `UserAvatar.tsx:64` (prevSrc), y `ExternalSubsModal.tsx:39` (langs — caso diferente: state es edición local, derivar reiniciaría la selección).
+
+### knip hard gate (2026-05-21): 0 unused
+
+Tras #375 + #377 el repo llegó a 0 unused files / deps / exports / types. CI ahora bloquea PRs que reintroduzcan dead code (job `knip` en `ci.yml`, sin `--no-exit-code`).
+
+**Gotcha**: knip NO detecta el patrón `import("./types").Foo` en el tipo de retorno o anotación. Usar siempre imports normales al top del archivo:
+
+```ts
+// ❌ knip lo marca unused incluso si se usa
+async getStudio(slug: string): Promise<import("./types").StudioDetail> { … }
+
+// ✅ knip lo detecta correctamente
+import type { StudioDetail } from "./types";
+async getStudio(slug: string): Promise<StudioDetail> { … }
+```
+
+**Convención**: types `*Props` / `*Variant` / `*Size` que sólo se usan dentro del archivo del componente NO se exportan. Mantenerlos como `interface FooProps {…}` sin `export`. El componente público importa fine — el type interno no.

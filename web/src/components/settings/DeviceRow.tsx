@@ -30,7 +30,7 @@ export function DeviceRow({
   return (
     <li className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
       <div className="rounded-md bg-bg-elevated p-2 text-text-secondary">
-        <Icon className="h-4 w-4" />
+        <Icon className="size-4" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -84,7 +84,7 @@ export function DeviceRow({
           defaultValue: "Cerrar esta sesión",
         })}
       >
-        <LogOut className="-ml-0.5 mr-1 h-3.5 w-3.5" />
+        <LogOut className="-ml-0.5 mr-1 size-3.5" />
         {t("settings.devices.revoke", { defaultValue: "Cerrar sesión" })}
       </Button>
     </li>

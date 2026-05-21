@@ -27,7 +27,17 @@ const preserveGitkeep = {
 
 export default defineConfig({
   plugins: [
-    react(),
+    react({
+      // Activa el React Compiler (optimización automática de React 19):
+      // memoiza componentes y hooks sin que el usuario tenga que envolver
+      // a mano con useMemo / useCallback / React.memo. El healthcheck
+      // confirma 533/533 componentes compatibles; el plugin
+      // `eslint-plugin-react-compiler` (en eslint.config.js) garantiza
+      // que cada PR siga siéndolo.
+      babel: {
+        plugins: [['babel-plugin-react-compiler', {}]],
+      },
+    }),
     tailwindcss(),
     // PWA: hace que el frontend sea instalable como app nativa
     // (icono en escritorio/menú, ventana standalone sin barra del

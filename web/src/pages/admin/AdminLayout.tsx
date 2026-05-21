@@ -19,7 +19,7 @@ export default function AdminLayout() {
 
   return (
     <div className="flex flex-col gap-6 px-4 py-6 sm:px-10 sm:py-8">
-      <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+      <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
         {t('admin.title')}
       </h1>
 

@@ -67,22 +67,31 @@ export default function PairThisDevice() {
     });
   }, [start, deviceName]);
 
-  // Kick off the flow once on mount.
-  useEffect(() => {
+  // Kick off the flow once on mount. Tracked via useState so React 19's
+  // ref-access-during-render rule stays satisfied; the guarded setState
+  // pattern is the canonical replacement for an empty-deps useEffect
+  // mount initialiser. StrictMode double-invokes still trip a single
+  // beginFlow because the second invocation finds started === true.
+  const [started, setStarted] = useState(false);
+  if (!started) {
+    setStarted(true);
     beginFlow();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }
+
+  // Reset the QR immediately when `pair` changes — render-time guarded
+  // so the stale svg doesn't flash while the new one renders. The
+  // async render of the new svg still lives inside the effect below.
+  const [lastPair, setLastPair] = useState(pair);
+  if (pair !== lastPair) {
+    setLastPair(pair);
+    setQrSvg(null);
+  }
 
   // Render the QR whenever the pair URL changes. SVG mode keeps the
   // bundle light and avoids canvas issues on older smart-TV browsers.
   useEffect(() => {
+    if (!pair) return;
     let cancelled = false;
-    if (!pair) {
-      setQrSvg(null);
-      return () => {
-        cancelled = true;
-      };
-    }
     QRCode.toString(pair.verificationURIComplete, {
       type: "svg",
       margin: 1,
@@ -112,7 +121,7 @@ export default function PairThisDevice() {
     const src = new EventSource(url);
     sourceRef.current = src;
 
-    src.addEventListener("approved", () => {
+    const onApproved = () => {
       setStatus("approved");
       // One poll consumes the code + sets the auth cookies. After
       // that the browser is logged in for every subsequent /api/v1.
@@ -126,31 +135,39 @@ export default function PairThisDevice() {
         },
       });
       src.close();
-    });
-    src.addEventListener("expired", () => {
+    };
+    const onExpired = () => {
       setStatus("expired");
       src.close();
-    });
-    src.addEventListener("consumed", () => {
+    };
+    const onConsumed = () => {
       setStatus("expired");
       src.close();
-    });
+    };
+    src.addEventListener("approved", onApproved);
+    src.addEventListener("expired", onExpired);
+    src.addEventListener("consumed", onConsumed);
     src.onerror = () => {
       // EventSource auto-reconnects on transient errors, so don't
       // flip to "error" here — only the explicit terminal events do.
     };
     return () => {
+      src.removeEventListener("approved", onApproved);
+      src.removeEventListener("expired", onExpired);
+      src.removeEventListener("consumed", onConsumed);
       src.close();
       sourceRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pair]);
+    // poll/navigate son identidades estables (tanstack-query mutate +
+    // react-router navigate); incluirlas en las deps no re-corre el
+    // effect en la práctica y satisface el linter del compiler.
+  }, [pair, poll, navigate]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-6 p-6 sm:p-10">
       <BrandWordmark />
       <header className="text-center">
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
           {t("pair.title", { defaultValue: "Vincular este dispositivo" })}
         </h1>
         <p className="mt-2 text-sm text-text-muted">
@@ -195,7 +212,7 @@ export default function PairThisDevice() {
       {pair && (status === "waiting" || status === "approved") ? (
         <section className="flex w-full flex-col items-center gap-6 rounded-2xl border border-border bg-bg-card p-6 sm:flex-row sm:items-stretch sm:gap-8">
           <div
-            className="flex h-56 w-56 items-center justify-center rounded-xl bg-white p-3"
+            className="flex size-56 items-center justify-center rounded-xl bg-white p-3"
             aria-label={t("pair.qrAlt", {
               defaultValue: "Código QR para vincular este dispositivo",
             })}
@@ -203,7 +220,7 @@ export default function PairThisDevice() {
             {qrSvg ? (
               <div
                 dangerouslySetInnerHTML={{ __html: qrSvg }}
-                className="h-full w-full"
+                className="size-full"
               />
             ) : (
               <div className="text-xs text-text-muted">

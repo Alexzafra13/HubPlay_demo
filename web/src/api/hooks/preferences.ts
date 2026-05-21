@@ -17,7 +17,7 @@ export function useMyPreferences() {
   });
 }
 
-export function useSetMyPreference() {
+function useSetMyPreference() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, { key: string; value: string }>({
     mutationFn: ({ key, value }) => api.setMyPreference(key, value),

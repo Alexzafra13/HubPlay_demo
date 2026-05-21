@@ -6,23 +6,333 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-20)
+## 🔭 Estado actual (2026-05-21, cierre tarde-noche)
 
-- Branch principal: `main`, working tree limpio.
+- Branch principal: `main`, working tree limpio. PRs abiertas pendiente review: **#388, #389, #390** (todas de la sesión de tarde — refactors estructurales del audit con CI verde).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: backend `go test ./...` verde tras los fixes cross-platform; frontend 622/622 vitest; `tsc -b` limpio; production build limpio.
+- Tests: `go test -race ./...` verde en CI; frontend **646/646** vitest verdes (+30 hoy); `tsc -b` limpio; production build limpio (~25 s con React Compiler + LazyMotion activados).
+- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard)**, `react-doctor` (visibility-only con comentarios inline en PRs).
+- **Score React Doctor: ≥75/100 ("Great")** post-VideoPlayer-split (PR #381 mergeada). El offender principal de las reglas estructurales (`no-cascading-set-state`) eliminado; `no-giant-component` reducido de 1003 a 663 lines; `prefer-useReducer` de 12 useState a 5.
+- **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types**. Hard gate en CI.
+- **Audit 2026-05-14 — Iteración 4 cerrada al 100 %**: olores **QQ** (auth.Service), **P** (ItemHandler), **Z** (library.Service) split via embedding facade. Olor **CC** (iptv.Service) en fase 1 — falta ChannelOrderOps (646 LoC) en una sesión siguiente.
+- **Dependabot alerts**: 8 → 2 (1 critical eliminada). PR #385 reemplazó `to-ico` por `png-to-ico` cerrando 5 vulns; queda picomatch (dependabot abierto) + file-type (transitive de node-vibrant — esperar upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
 
-### PRs abiertas (a falta de review humano)
+---
 
-| PR | Tema | Estado tests |
+## 🔧 Sesión 2026-05-21 (tarde-noche) — Audit Iter 4 cerrada + seguridad Dependabot
+
+Sesión larga (10 PRs en una tarde). Tres olores estructurales del audit 2026-05-14 cerrados al 100 % (QQ + P + Z) + uno en fase parcial (CC). Dos PRs de seguridad cerraron 6 de 8 alertas Dependabot (1 critical). Tests vitest de páginas grandes cubiertos. Memoria del repo limpiada (un spec obsoleto identificado y archivado).
+
+### PRs cerradas y abiertas
+
+| PR | Tema | Estado | Cambio principal |
+|---|---|---|---|
+| [#381](https://github.com/Alexzafra13/HubPlay_demo/pull/381) | VideoPlayer split en 4 hooks + 2 overlays | ✅ merged | VideoPlayer.tsx 1166 → 817 LoC (−30 %) |
+| [#382](https://github.com/Alexzafra13/HubPlay_demo/pull/382) | Tests vitest Home / LiveTV / Search / Movies / Series | ✅ merged | +30 tests (616 → 646), 90 test files |
+| [#383](https://github.com/Alexzafra13/HubPlay_demo/pull/383) | Archivar `per-user-channel-order-pending.md` (shipped) | ✅ merged | memoria limpia |
+| [#384](https://github.com/Alexzafra13/HubPlay_demo/pull/384) | **Olor QQ** — auth.Service split en 4 sub-services | ✅ merged | service.go 764 → 180 LoC (−76 %) |
+| [#385](https://github.com/Alexzafra13/HubPlay_demo/pull/385) | to-ico → png-to-ico (seguridad) | ✅ merged | **5 CVEs cerradas (1 critical)**, −87 paquetes pnpm |
+| [#386](https://github.com/Alexzafra13/HubPlay_demo/pull/386) | **Olor P** — ItemHandler split fases 1-2 (3 sub-handlers) | ✅ merged | items.go 1211 → 444 LoC |
+| [#388](https://github.com/Alexzafra13/HubPlay_demo/pull/388) | Olor P fases 3-4 (MetadataHandler + ItemDetailHandler) — cierre completo | 🟡 open | items.go 444 → 266 LoC (−78 % total) |
+| [#389](https://github.com/Alexzafra13/HubPlay_demo/pull/389) | **Olor Z** — library.Service split (AccessControl + ItemQueries) | 🟡 open | service.go 593 → 498 LoC |
+| [#390](https://github.com/Alexzafra13/HubPlay_demo/pull/390) | **Olor CC fase 1** — iptv.Service Favorites + WatchHistory + Health | 🟡 open | 3 sub-services extraídos |
+
+### Patrón refactor: embedding facade + shared publisher
+
+Mismo patrón aplicado para los 4 olores estructurales (QQ + P + Z + CC fase 1) — establecido una vez en QQ (auth.Service) y replicado mecánicamente en los otros tres:
+
+```go
+type Service struct {
+    *SubServiceA   // 5 methods (promoted via embedding)
+    *SubServiceB   // 3 methods
+    *SubServiceC   // 7 methods
+    // ... core state que se queda en el facade
+
+    pub *publisher // compartido por puntero con sub-services que publican
+}
+
+func (s *Service) SetEventBus(bus *event.Bus) {
+    s.pub.setBus(bus) // muta el publisher → ambos sub-services ven el cambio
+}
+```
+
+**Características del patrón:**
+
+1. Sub-services son structs propios con sus deps mínimas — la audit nota "cada constructor toma 3-4 deps en vez de 13".
+2. Facade Service embed punteros — method promotion intra-paquete preserva el surface externo. Handlers + tests + router siguen llamando `svc.Method(...)` exactamente como antes.
+3. Constructor distribuye args del `NewXxx` pre-split a sub-constructors. La firma pública del constructor se preserva para minimum-blast-radius.
+4. Estado compartido (rate-limiter, event bus, issuer de sesiones) via struct dedicado compartido por puntero — un solo `SetEventBus` muta el campo en todos los sub-services a la vez.
+5. **Tests pre-existentes pasan SIN CAMBIOS**. Cero churn en ningún caller externo.
+
+**Aplicado en orden de tamaño creciente:**
+
+| Olor | God-service / handler | Sub-units | LoC delta |
+|---|---|---|---|
+| **QQ** | auth.Service (18 métodos, 6 responsabilidades) | LoginService + AccountService + SessionService + ProfileService | 764 → 180 (−76 %) |
+| **P** | ItemHandler (19 métodos, 14 fields, 4 responsabilidades) | ItemDetailHandler + TrickplayHandler + SearchHandler + RecommendationsHandler + MetadataHandler | 1211 → 266 (−78 %) |
+| **Z** | library.Service (27 métodos, 6 responsabilidades) | AccessControl + ItemQueries + facade (CRUD/scan/lifecycle) | 593 → 498 (−16 %, menos drástico porque el core CRUD+scan se queda) |
+| **CC fase 1** | iptv.Service (45 métodos, 11 sub-features) | FavoritesOps + WatchHistoryOps + HealthOps + facade (M3U/EPG/...) | 343 → 379 (+36, overhead doc — saca 12 métodos del facade) |
+
+### Seguridad: Dependabot alerts (8 → 2)
+
+De 8 alerts (2 critical, 6 medium) bajamos a 2 medium con una PR + un dependabot pendiente:
+
+- **#385** reemplazó `to-ico@1.1.5` (devDep con cadena `jimp@0.2.28 → resize-img → request 2.88.2 → form-data 2.3.3 / qs / tough-cookie / minimist 0.0.8`) por `png-to-ico@3.0.1` (3 deps directas, todas current). Cierra **5 alertas**:
+  - #34 critical: `form-data` unsafe random for boundary
+  - #35 medium: `qs` arrayLimit bypass → DoS
+  - #33 medium: `tough-cookie` Prototype Pollution
+  - #32 medium: `request` SSRF (paquete EOL)
+  - #27 medium: `minimist` Prototype Pollution
+- PR de dependabot **#289** (picomatch 4.0.3 → 4.0.4) cuando se mergee cerrará la 6ª (medium).
+- Quedan **2 medium**: `file-type` (transitive de `node-vibrant@4.0.4` que ya está en latest — bloqueada hasta que upstream actualice jimp interno) + otro. No bloqueable sin breaks.
+
+### Aprendizajes para futuras sesiones
+
+- **Squash merge puede dropear commits posteriores al título del PR**. PR #386 fue mergeada con título "fases 1-2" cuando el branch ya tenía fases 3-4 commiteadas encima. El squash sólo aplicó lo que el título describía; los commits posteriores se quedaron en el branch sin llegar a main. Recovery: nueva PR (#388) desde origin/main fresh con sólo el diff de las fases pendientes. **Lección para PRs incrementales con título "fase X"**: actualizar el título antes del merge si se añaden fases, O crear PRs nuevas por incremento.
+
+- **El patrón embedding facade se establece una vez (auth) y se reaplica mecánicamente** a P/Z/CC. Las 4 PRs estructurales salieron en ~6 horas combinadas. El audit estructura los olores P/Z/CC como god-services todos del mismo flavor, así un patrón único cierra los tres.
+
+- **Frontend tests masivos (+30) usaron `vi.hoisted` + stub agresivo de subcomponentes pesados** (rails de Home, EPGGrid de LiveTV, MediaGrid de MediaBrowse, etc.). Plantilla en `MediaBrowse.test.tsx` ya existía — el copy/paste/customize fue rápido.
+
+- **Spec docs en `docs/memory/` pueden quedarse stale sin que nadie lo note**. El `per-user-channel-order-pending.md` decía "NOT IMPLEMENTED" pero la feature llevaba meses en main (migraciones 042 + 043, `LiveTvCustomize.tsx`, etc.). Al arrancar a trabajarla descubrí la duplicación accidental potencial. **Convención**: cuando una feature ship, mover el spec a `archive/` con header "SHIPPED" + diferencias respecto al spec original. Lo hace PR #383.
+
+- **`png-to-ico` es el reemplazo moderno de `to-ico`** (~10 años sin actualizar). API compatible (acepta array de PNG buffers), 3 deps en vez de 50+, mantenido 2024.
+
+- **El field promotion intra-paquete funciona para fields no exportados**. En P fase 4, `ItemDetailHandler.identifier` (lowercase) sigue accesible vía `itemHandler.identifier` desde otros métodos del mismo paquete `handlers` porque `*ItemHandler` embed `*ItemDetailHandler`. Cross-paquete sería distinto pero no aplica aquí.
+
+### Métricas globales
+
+- **10 PRs abiertas en la sesión** (7 mergeadas, 3 abiertas esperando review)
+- **3 olores del audit cerrados** (QQ + P + Z) + 1 en fase parcial (CC fase 1)
+- **8 → 2 vulnerabilidades Dependabot** (75 % reducción, 1 critical eliminada)
+- **+30 tests vitest** (616 → 646, 5 nuevas páginas cubiertas)
+- LoC shrunk: VideoPlayer −349, auth.Service −584, ItemHandler −945 (78 %), library.Service −95
+
+---
+
+## 🧹 Sesión 2026-05-21 (mañana) — Cleanup knip a 0 + React Doctor quick wins + hard gate
+
+Sesión corta y limpia. Tres PRs encadenadas para cerrar la deuda de dead code que arrastraba desde la integración inicial de knip (PR #355) y atacar los 3 issues mecánicos de React Doctor que aparecieron tras el cleanup.
+
+### PRs cerradas
+
+| PR | Tema | Diff |
 |---|---|---|
-| [#339](https://github.com/Alexzafra13/HubPlay_demo/pull/339) | Opt-out runtime del update checker desde el panel admin | verde |
-| [#341](https://github.com/Alexzafra13/HubPlay_demo/pull/341) | LICENSE GPL-3.0-or-later en el root + wizard de Inno + `web/package.json` | verde |
-| [#342](https://github.com/Alexzafra13/HubPlay_demo/pull/342) | 5 fallos pre-existentes en `go test ./...` por incompatibilidades cross-platform | verde |
-| [#343](https://github.com/Alexzafra13/HubPlay_demo/pull/343) | `Service.BaseURL` inyectable en `updates` + tests E2E HTTP (cierra 2 `t.Skip`) | verde |
+| [#375](https://github.com/Alexzafra13/HubPlay_demo/pull/375) | 5 unused files + 2 unused deps (`@radix-ui/react-dialog`, `@radix-ui/react-tooltip`) | −739 |
+| [#377](https://github.com/Alexzafra13/HubPlay_demo/pull/377) | 7 hooks + 9 huérfanos + 30+ exports/types: `export` → interno o borrado entero | −327 |
+| [#378](https://github.com/Alexzafra13/HubPlay_demo/pull/378) | 3 mecánicos React Doctor: skeleton keys, animation 1.8s→900ms, `new Date()` JSX → helper | +19/−12 |
+| Este branch | `pnpm knip` elevado a hard gate en CI + memoria actualizada | — |
 
-PR mergeada hoy: [#340](https://github.com/Alexzafra13/HubPlay_demo/pull/340) — URL mDNS en `/admin/system` con botón copiar.
+### Cleanup knip: lo que se aprendió
+
+- **`import("./types").Foo` se cuela sin que knip lo detecte.** Patrón usado en `client.ts` y `media.ts` para algunos types — knip los marca como unused aunque sí se usen. Solución: sustituir por imports normales al top. Detectados 2 (PeerStreamSessionResponse, StudioDetail) y migrados.
+- **Hooks "anti-pair" hibernando.** `useEnableChannel` existía como complemento de `useDisableChannel` que sí está conectado a UI; el enable nunca se conectó. Mismo patrón: `useSetChannelVisibility` admin sin UI. Si vuelven a hacer falta cuando se implemente la feature, son 5 líneas — borrarlos hoy fue safe.
+- **El barrel `*/index.ts` no añade valor si todos los consumers importan archivos directos.** Casos: `components/layout/index.ts` y `pages/admin/index.ts` (5 líneas cada uno, 0 importadores). Borrados enteros.
+- **`*Props` types nunca se importan**, aunque el component se importa miles de veces. Limpieza: quitar `export` keyword del type, mantener como tipo interno usado por el `function Component(props: Props)`. Cero impacto en consumers.
+
+### Falsos positivos React Doctor — documentados, NO se tocan
+
+Convención del repo: cuando una regla react-doctor entra en conflicto con un patrón oficial de React 19 o con `react-hooks/refs`, se prefiere el patrón oficial y se suprime el aviso con justificación inline.
+
+| Regla | Archivo | Por qué se deja |
+|---|---|---|
+| `rerender-state-only-in-handlers` + `no-derived-useState` | MediaGrid.tsx:43, UserAvatar.tsx:64 | Patrón "[Adjusting state when a prop changes](https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)" (React 19 oficial). El `useState` de tracking se mueve a render-time guarded `setState`. Usar `useRef` aquí dispara `react-hooks/refs` (no asignar `ref.current` en render). Es el único patrón que satisface las dos reglas estrictas de react-hooks. |
+| `no-derived-useState` | ExternalSubsModal.tsx:39 | El state es **edición local del usuario** tras inicializar desde prop. Derivar en render reiniciaría su selección de idiomas cada vez que el padre se re-renderice. |
+
+### Issues React Doctor estructurales pendientes — todos en `VideoPlayer.tsx`
+
+VideoPlayer es 1003 líneas, 12 `useState`, un `useEffect` con 9 `setState` en cadena, y un `useEffect` que resetea state cuando un prop cambia (debería ser `key` prop). Las reglas implicadas:
+
+- `no-giant-component` (1003 LoC)
+- `prefer-useReducer` (12 useState)
+- `no-cascading-set-state` (línea 509 — 9 setState en un effect)
+- `no-derived-state-effect` (línea 628 — reset por prop change)
+
+Para atacar de forma sensata hay que **split de VideoPlayer en subcomponentes** y consolidar el state en `useReducer`. Es refactor estructural, no auto-fix mecánico. Requiere backend corriendo en preview para verificar playback / seek / quality switching tras el split — sesión dedicada.
+
+Mismas reglas también disparan en `HeroSection.tsx` (192 LoC) y `SeriesHero.tsx` (61 LoC) pero más manejables.
+
+---
+
+## 🩺 Sesión 2026-05-20 (noche) — React Doctor onboarding + 9 reglas eliminadas
+
+**[React Doctor](https://github.com/millionco/react-doctor)** (de millionco, MIT, basado en Oxlint) audita 60+ reglas en performance, correctness, accessibility, architecture, security y bundle size, y resume todo en un score 0-100. Integrado en CI como visibility-only (PR #358) — la GitHub Action comenta inline en cada PR con las regresiones/mejoras del score. Fórmula: `score = 100 - (errores únicos × 1.5) - (warnings únicos × 0.75)`. Bandas: 75+ "Great" / 50-74 "Needs work" / <50 "Critical".
+
+**Baseline al integrar**: 67/100, 645 issues, 47 reglas únicas.
+**Final tras 5 PRs de quick wins + el fix del squash bug**: **75/100 ("Great"), 166 issues, 34 reglas únicas**.
+
+### PRs cerradas
+
+| PR | Reglas eliminadas | Casos resueltos |
+|---|---|---|
+| [#358](https://github.com/Alexzafra13/HubPlay_demo/pull/358) | — | Integración CI (job nuevo `react-doctor`, visibility-only con `continue-on-error`) |
+| [#359](https://github.com/Alexzafra13/HubPlay_demo/pull/359) | `js-tosorted-immutable`, `js-combine-iterations`, `design-no-redundant-size-axes` | ~430 reemplazos en ~140 archivos |
+| [#360](https://github.com/Alexzafra13/HubPlay_demo/pull/360) | `design-no-redundant-padding-axes`, `design-no-bold-heading`, `no-autofocus`, `design-no-em-dash-in-jsx-text`, `use-lazy-motion`, `rendering-hydration-mismatch-time` | 6 reglas mecánicas, −30 KB bundle, helper `dateFormat` nuevo. **Squash merge perdió 54 líneas del LazyMotion — fixed en #364** (ver abajo) |
+| [#363](https://github.com/Alexzafra13/HubPlay_demo/pull/363) | `click-events-have-key-events`, `no-static-element-interactions` | 17 + 13 casos de a11y. Backdrops de modal con `onKeyDown` (Escape), bodies con `role="presentation"`, VideoPlayer container con `role="application"` + `aria-label` |
+| [#364](https://github.com/Alexzafra13/HubPlay_demo/pull/364) | `use-lazy-motion` (otra vez) | Re-aplicar los 54 reemplazos `motion` → `m` que perdió el squash de #360 |
+| [#365](https://github.com/Alexzafra13/HubPlay_demo/pull/365) | — | Memoria: bug del squash + regla "audit del merge" en conventions |
+| [#367](https://github.com/Alexzafra13/HubPlay_demo/pull/367) | `no-array-index-as-key` (×2), `no-render-in-render`, `js-set-map-lookups`, `prefer-use-effect-event` (×2), `advanced-event-handler-refs`, `no-react19-deprecated-apis` (`forwardRef`), `no-scale-from-zero` | **Cruza el umbral 75 ("Great")**. Patrón "latest value via ref" (sustituto pragmático de `useEffectEvent`), `<ProfilePicker />` extraído del closure inline, `forwardRef` → `ref` prop |
+
+### ⚠️ Bug del squash merge — 54 líneas de LazyMotion perdidas en #360
+
+Descubierto el 2026-05-20 noche por el CI report de React Doctor en PR #363: la regla `use-lazy-motion` reapareció en `WhoIsWatching.tsx:27` aunque PR #360 supuestamente la había eliminado.
+
+**Qué pasó**: el commit `LazyMotion + helper de fechas` migró 7 archivos de `motion` → `m` (54 reemplazos verificados localmente). Pero el squash merge de la PR a main aplicó SÓLO las modificaciones de otro commit anterior (autoFocus → useEffect+ref, ~8 líneas) y descartó silenciosamente las 54 líneas de LazyMotion sobre los mismos 7 archivos. `App.tsx` SÍ se mergeó con `LazyMotion strict` activado, dejando los archivos rotos: el primer usuario que llegase a Login, WhoIsWatching, MainNav, etc, vería `Error: You are rendering "motion" without LazyMotion features loaded`.
+
+**Cómo se cazó**: React Doctor en CI dice "Score unavailable in offline mode" pero sí lista los issues. La regla `use-lazy-motion` apareció DE NUEVO en `WhoIsWatching.tsx:27` cuando ya debería estar resuelta. Auditados los 7 archivos del PR original: ninguno tenía la migración. Re-aplicado el mismo script en PR #363.
+
+**Lección aprendida** (en `conventions.md`):
+- Tras cualquier squash merge donde un script modifica decenas de archivos, **verificar en main** que los cambios reales coinciden con el diff del commit local. El visor de PR de GitHub puede ocultar conflict resolutions silenciosas.
+- Si una regla del lint que se eliminó vuelve a aparecer en un PR posterior, NO asumir que es un regreso nuevo del autor — comprobar si el bug del lint ya estaba en main por un merge previo malo.
+
+### Patrones nuevos en el proyecto
+
+- **`[arr].toSorted()` en lugar de `[...arr].sort()`** (ES2023): ya el patrón canónico en el repo, evita el spread allocation.
+- **`.flatMap()` para combinar filter+map**: en JSX o reductores rápidos. Evita el doble recorrido sobre listas grandes (cientos de canales).
+- **Tailwind `size-N` y `p-N` consolidados**: nunca `w-4 h-4` o `px-2 py-2`. Convención del proyecto a partir de ahora.
+- **`<m.*>` de framer-motion** en lugar de `<motion.*>`. `LazyMotion strict` en `App.tsx` carga sólo `domAnimation` por defecto (~30 KB menos en el bundle base).
+- **`react-compiler/react-compiler: 'error'`** en ESLint. Las regresiones de compatibilidad con el compiler rompen el CI.
+- **Helper centralizado [`src/utils/dateFormat.ts`](../../web/src/utils/dateFormat.ts)**: `formatDateTime`, `formatDate`, `formatTime`, `epochOf`. Nunca `new Date(...).toLocale*()` directo en JSX.
+- **`localId: crypto.randomUUID()`** en entradas de listas dinámicas (LibrariesStep del setup wizard) para que React keys no usen índices (evita perder foco al reordenar).
+- **`font-semibold` (no `font-bold`)** en headings `<hN>`: peso 700+ aplasta las contraformas a display sizes.
+- **Em-dash (—) en JSX text NUNCA**: usar en-dash (–) para "sin valor" o bullet (·) para separadores inline. Em-dash lee como output AI.
+- **`autoFocus` evitado**: interfere con lectores de pantalla. Cuando es UX-crítico (UpNextOverlay, WhoIsWatching PIN), patrón `useEffect + ref.current.focus()`.
+- **Patrón "latest value via ref"** (sustituto pragmático de `useEffectEvent`, que aún es experimental en React 19): cuando un effect monta un listener cuyo handler depende de un prop/state pero el effect NO debería re-suscribirse al cambiar esa identidad:
+  ```tsx
+  const cbRef = useRef(onClose);
+  useEffect(() => { cbRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const handle = (e: Event) => { /* … */ cbRef.current(); };
+    el.addEventListener("event", handle);
+    return () => el.removeEventListener("event", handle);
+  }, [isOpen]); // onClose ya NO es dep
+  ```
+  Aplicado en BottomSheet (escape), VideoPlayer (onEndedCallback) y ImageManager (escape). Sin esto, cada re-render del padre re-suscribiría el listener y perdería eventos durante el churn.
+- **`forwardRef` eliminado de Button/Input** (React 19): ahora `ref` es prop normal en componentes función. Declarar `ref?: Ref<HTML*Element>` en la interfaz de props y desestructurar en el componente.
+- **Closures de render → componente real**: ejemplo `WhoIsWatching`, donde `const renderPicker = (...)` inline se extrajo a `<ProfilePicker />` con props explícitas. Mejora reconciliación y satisface `react-doctor/no-render-in-render`.
+- **Set para lookups en bucles**: `ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS)` en `Uploads.tsx`. `.includes()` en loop = O(n²); Set = O(1).
+- **Backdrops de modal accesibles**: `<button>` semántico cuando es posible, o `<div role="dialog">` con `onClick`+`onKeyDown` (Escape) + body interno `role="presentation"` con `stopPropagation` en ambos handlers.
+- **`<video>` container con `role="application"`**: comunica al lector de pantalla que es un widget interactivo; añade `aria-label`.
+
+### Reglas no eliminadas (decisiones documentadas como deuda técnica)
+
+| Regla | Casos | Por qué se deja |
+|---|---|---|
+| `no-pure-black-background` | 7 | `bg-black` en contenedores de video. Cambiar a `bg-bg-base` dejaría borde gris alrededor. |
+| `query-mutation-missing-invalidation` | 12 | Falsos positivos: mutations read-only (probe peer, test DB, preflight M3U, deviceAuth tres) o invalidación vía helper indirecto que el lint no detecta (images.ts). |
+| `rerender-state-only-in-handlers` | 23 | **Conflicto irreconciliable** entre `react-hooks/refs` (no asignar `ref.current` en render) y `react-doctor` (que pide ese patrón). El `useState` de tracking del patrón "Adjusting state when a prop changes" satisface las dos reglas de react-hooks aunque viole esta de react-doctor. |
+| `no-derived-useState` | ~6 falsos positivos | Casos donde `useState` se inicializa de un prop PERO el estado representa edición local del usuario (CollisionPicker decisiones, ExternalSubsModal langs). Derivar en render reiniciaría el trabajo del usuario en cada re-render del padre. Suprimidos narrow con justificación. |
+
+### Reglas pendientes para próxima(s) sesión(es)
+
+**Decisión 2026-05-20 noche**: aplazar la segunda ola **hasta que la web
+esté en estado "terminada"** (menos churn de componentes). El criterio de
+entrada para la segunda ola es:
+
+1. **Subir el gate del CI** a `min-score: 80` o `85` en
+   `.github/workflows/ci.yml` y quitar `continue-on-error`. Convierte
+   visibility-only en hard gate y bloquea regresiones.
+2. **Refactor mayor de los grandes**: aquí es donde hay rendimiento real,
+   no en los micro-quick-wins.
+   - `no-giant-component` (15): UsersAdmin, VideoPlayer, AuditLogPanel,
+     WhoIsWatching, LogsPanel — split por sub-componentes con
+     responsabilidad única.
+   - `prefer-useReducer` (22) + `no-cascading-set-state` (7): consolidar.
+     **useHls (23 setState en un effect)** es el más urgente — cada
+     setState dispara un render durante la carga del stream, un reducer
+     único lo colapsa a uno.
+3. **`no-array-index-as-key` restantes** (13) cuando el backend exponga
+   IDs estables o se generen con `crypto.randomUUID()` al ingest.
+4. **`rendering-hydration-mismatch-time` complejos** (15): callbacks de
+   Recharts y datos paginated. No hacemos SSR; riesgo real bajo, pero
+   limpia.
+
+### Reglas que NUNCA se van a eliminar (falsos positivos legítimos)
+
+Documentar aquí para que ningún PR futuro pierda tiempo:
+
+- `rerender-state-only-in-handlers` (23): **conflicto irreconciliable**
+  con `react-hooks/refs`. El patrón "Adjusting state when a prop changes"
+  viola esta regla pero satisface las dos de react-hooks (que son
+  hard-gates). Ganan los hooks.
+- `query-mutation-missing-invalidation` (12): falsos positivos —
+  mutations read-only (probe peer, test DB, preflight M3U, deviceAuth) o
+  invalidación vía helper indirecto que el lint no detecta (images.ts).
+- `no-derived-useState` (6 de 8): casos donde el `useState` representa
+  edición local del usuario (CollisionPicker decisiones, ExternalSubsModal
+  langs). Derivar en render reiniciaría el trabajo del usuario en cada
+  re-render del padre. Suprimidos narrow con justificación.
+- `no-pure-black-background` (7): `bg-black` en contenedores de video.
+  Cambiar a `bg-bg-base` dejaría borde gris alrededor.
+- `label-has-associated-control` (6): asociación implícita (`<label>`
+  envolviendo `<input>`) **ES a11y válida**. Falso positivo del lint.
+- `async-await-in-loop` (2): stream reader (DatabasePanel SSE) + retry
+  loop con backoff (api/client). Secuencial por diseño.
+- `async-defer-await` (2): la awaited value SÍ se usa después del
+  early-return (ItemDetail onClose, useVibrantColors swatches).
+- `no-derived-state-effect` (1): VideoPlayer:628 con `key={itemId}` re-
+  montaría hls.js. Documentado in-line con eslint-disable.
+- `client-localstorage-no-version` (2) + `js-cache-storage` (1): test
+  files. Cambiar la key rompe migración real (production usa
+  `hubplay_user`).
+
+### PRs dependabot abiertas (estado)
+
+Las que sobrevivieron a la limpieza de tarde (#247, #289, #352 ya mergeadas, #330 cerrada por redundancia):
+
+| PR | Tema | Estado |
+|---|---|---|
+| Nuevas dependabot semanales | — | A revisar la próxima vez que se abran (lunes) |
+
+---
+
+## 🏗️ Sesión 2026-05-20 (tarde) — Limpieza profunda: lockfile, React Compiler y quality gates
+
+Sesión larga (~10 PRs en una tarde) iniciada como "revisar PRs dependabot" y derivada hacia un saneamiento general del frontend. Catch importante: **main estaba rojo** en CI / Lint y CI / Test Backend, y casi todas las PRs de dependabot heredaban esos fallos sin que tuviera nada que ver con ellas.
+
+### Cadena de causa → efecto descubierta
+
+1. **CI / Lint roto** en main: 8 issues que aparecieron cuando `golangci/golangci-lint-action@v7` empezó a resolver al binario `v2.5.0` con reglas más estrictas (ineffassign, ST1023, SA9003, ST1019, QF1001, unused). Lo bloqueaba cualquier dependabot trivial (postcss bump, picomatch bump, etc).
+2. **CI / Test Backend roto** en main: dos flakes en `internal/iptv` aparecían bajo `-race -coverprofile` cuando el watcher goroutine se preempta más de lo previsto. `TestTransmuxManager_PromotesToReencodeOnCodecCrash` y `TestTransmuxManager_Touch_KeepsSessionAlive`.
+3. **Workflow Release roto**: `git describe` se calculaba en dos jobs distintos (`build` y `windows-installer`), y entre ambos `release-nightly` reescribía el tag `nightly`. Resultado: nombres de zip desalineados, `unzip exit 9` rompiendo el instalador Windows.
+4. **`pnpm-lock.yaml` corrupto**: `lru-cache@11.5.0` triplicado en `packages:` y `snapshots:` tras mergear 4 PRs de dependabot npm en sucesión rápida en la mañana (#290 → #338 → #248 → #141 en ~30 min). GitHub squash-merge no detecta colisiones semánticas de YAML.
+5. **`web/package-lock.json` huérfano** commiteado desde el inicio del repo aunque el proyecto usa pnpm. Nunca se sincronizaba con `pnpm-lock.yaml`.
+
+### Lo que se cerró (mergeado a main esta tarde)
+
+- **[#345](https://github.com/Alexzafra13/HubPlay_demo/pull/345)** — Release workflow: nuevo job `meta` centraliza `git describe` y el resto consume `needs.meta.outputs.*`. Race del tag `nightly` desaparece.
+- **[#346](https://github.com/Alexzafra13/HubPlay_demo/pull/346)** — Lint cleanups (8 issues) + deadline interno del flake `PromotesToReencodeOnCodecCrash` 5s → 15s.
+- **[#347](https://github.com/Alexzafra13/HubPlay_demo/pull/347)** — `git rm web/package-lock.json` + añadir al `.gitignore` (junto con `yarn.lock`).
+- **[#348](https://github.com/Alexzafra13/HubPlay_demo/pull/348)** — Flake `Touch_KeepsSessionAlive`: IdleTimeout 200ms → 500ms, Wait 700ms → 1500ms, ctx 5s → 10s, + Touch sincrónico antes de lanzar la goroutine.
+- **[#349](https://github.com/Alexzafra13/HubPlay_demo/pull/349)** — Fix quirúrgico del lockfile corrompido (12 líneas borradas, sin tocar versiones).
+- **[#350](https://github.com/Alexzafra13/HubPlay_demo/pull/350)** — `dependabot.yml`: `open-pull-requests-limit` npm 5 → 1 para prevenir futuras colisiones de lockfile.
+- **6 PRs de dependabot mergeadas en cadena**: #137 (golangci-lint-action), #138 (setup-qemu), #141 (jsdom 28→29 major), #248 (go-deps group, 7 paquetes), #290 (postcss), #338 (tough-cookie 2→6, transitive lockfile-only). Más #280 (vite dev), #351 (go-deps), #353 (download-artifact) en la última pasada.
+
+### Lo que queda en flight (abierto al cierre de sesión)
+
+- **[#354](https://github.com/Alexzafra13/HubPlay_demo/pull/354) — Activación del React Compiler**. Resultado final: 0 errors de lint, 616/616 vitest, build limpio, healthcheck 542/542 compatibles. Cambios:
+  - `babel-plugin-react-compiler@1.0.0` integrado vía `react({ babel: { plugins: [...] } })` en `vite.config.ts`.
+  - `eslint-plugin-react-compiler@19.1.0-rc.2` con regla `react-compiler/react-compiler: 'error'`.
+  - `eslint-plugin-react-hooks` 7.0.1 → 7.1.1 (las reglas estrictas que destaparon los anti-patterns).
+  - **15 anti-patterns refactorizados** + 5 extras que sólo aparecían en CI:
+    - **`set-state-in-effect` → render-time guarded setState** (patrón oficial React 19 "Adjusting state when a prop changes"): MainNav (route change), SearchBar (URL ?q=), LinkDevice (URL code), LibraryNewPage (validation reset), UsersAdmin (×2: access draft + libraryIds seed), useVibrantColors (palette swap), PairThisDevice (×2: mount-once + qrSvg reset).
+    - **`refs during render`**: useLiveHls (ref-assign movido a useEffect), PlayerControls (`reportMenu` envuelto en useCallback), MainNav (`clearTimers` con disable narrow + justificación porque cancelar el timer es necesario funcionalmente).
+    - **`immutability`**: HeroTrailer (`handleDismiss` declarado antes del useEffect que lo usa, envuelto en useCallback).
+    - **`exhaustive-deps`**: VideoPlayer (`BURNABLE_CODECS` a module scope), MyNotifications + PeerLibraryItemsPage (derivar dentro del useMemo).
+    - **5 fixes extra del CI** (no aparecieron en mi lint local porque mi script de filtrado descartó `react-compiler/*` como derivados, cuando algunos son detecciones primarias): useHls + usePlayerKeyboard (suppress narrow para mutar `HTMLMediaElement.src` / `.currentTime` que es API estándar del DOM, no state); useProgressReporter (añadir `[videoRef, itemId, peerId]` a deps reales del effect del cleanup); PairThisDevice (añadir `[poll, navigate]` a deps SSE); Uploads (patrón "latest value via ref" con useEffect dedicado para actualizar el ref + cleanup que lo lee al desmontar — sin esto, añadir `active` a deps abortaría uploads en cada cambio de estado).
+- **[#355](https://github.com/Alexzafra13/HubPlay_demo/pull/355) — Quality gates extra en CI**. Tres nuevos steps:
+  - **`pnpm typecheck`** (`tsc -b`) — hard gate. Antes el typecheck sólo corría en `pnpm build`, que CI no ejecuta para frontend.
+  - **`pnpm dlx react-compiler-healthcheck`** — hard gate. Falla si la compatibilidad baja del 100%. Funciona independientemente de si el compiler está activado.
+  - **`pnpm knip`** con `--no-exit-code` — info-only (job separado). Hoy reporta 5 unused files + 2 unused deps + 38 unused exports + 115 unused types. Cuando lleguemos a 0, elevamos a hard gate.
+
+### Aprendizajes que se aplican a futuras sesiones
+
+- **Antes de "arreglar" una PR de dependabot que falla en lint o test backend, comprobar primero si main está rojo**. La mitad del tiempo el problema no es del bump, es heredado.
+- **`open-pull-requests-limit: 1` para npm** es la respuesta correcta a "GitHub squash-merge corrompe lockfiles cuando dos PRs lo tocan en paralelo". El precio (bumps serializados) es barato comparado con `ERR_PNPM_BROKEN_LOCKFILE` en producción.
+- **`eslint-plugin-react-compiler` es estricto pero correcto**. Cuando reporta "Component skipped because rules were disabled", suele ser señal de que el `eslint-disable react-hooks/*` esconde un anti-pattern real, no que el plugin sea pedante.
+- **No te fíes de tu lint local si filtra reglas**. Cinco anti-patterns aparecieron sólo en CI porque mi script filtraba `react-compiler/*` como "derivados" — pero el compiler también detecta cosas primarias.
 
 ---
 
@@ -109,19 +419,51 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 
 ## 🎯 Cola priorizada para la próxima sesión
 
-### Cortos / autocontenidos
-Cerrados en la sesión 2026-05-20. Quedan los grandes.
+### Audit 2026-05-14 — lo que queda
 
-### Medianos (vale la pena cuando arranque la siguiente sesión)
+Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md) + [intervention-2026-05-14.md](intervention-2026-05-14.md).
 
-1. **Tests frontend de páginas grandes**. Coverage Vitest cubre admin panels + componentes comunes; faltan **Home**, **LiveTV**, **Search**, **Movies**, **Series**. Son las páginas con más LOC del repo y las más visibles para el usuario.
-2. **Refactor estructural pendiente** del audit 2026-05-14 ([audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md) + [intervention-2026-05-14.md](intervention-2026-05-14.md)). Iteraciones 4-7 abiertas: split de god-handlers/services (P, Z, QQ), refactor estructural de `iptv/` (CC), composition root (G, H, V, Q, LL, JJ), schema + cosmética (D, X, W, BB, UUU-mig).
-3. **Per-user channel order + hide en Live TV**. Spec en [per-user-channel-order-pending.md](per-user-channel-order-pending.md). Migración + servicio + API + UI. ~1 sesión.
+**Iteración 4 — cerrada al 100 %** en sesión 2026-05-21 tarde:
+- ~~QQ~~ ✅ auth.Service split (PR #384, mergeada)
+- ~~P~~ ✅ ItemHandler split (PRs #386 mergeada + #388 abierta)
+- ~~Z~~ ✅ library.Service split (PR #389 abierta)
+
+**Iteración 5 — en curso**:
+- **CC fase 2** — `ChannelOrderOps` extraído de `service_channel_order.go` (646 LoC, 16 métodos, 5 repos + `iptvOrgLogos` post-construction setter). Mismo patrón embedding que CC fase 1 (PR #390). ~1-2 horas.
+
+**Iteración 6 — composition root**:
+- G, H, V, LL, JJ — limpiar `cmd/hubplay/main.go` + `router.go` (acceso a `deps.Config.*` directo, fanout de dependencias, etc.). Q ya se cerró en sweep M.5.
+
+**Iteración 7 — cosmética + schema**:
+- **W** — `scanner.go` 1270 LoC en un fichero, split por responsabilidad.
+- **X** — frontera `library/` vs `scanner/` artificial (promover scanner a sub-paquete).
+- **D** — cosmética (no leído el detalle).
+- **BB** — comentarios en inglés masivos en `internal/library/` y otros → traducir al español (convención del repo). Mecánico pero grande.
+
+**Iteración 8 — polish**:
+- F14-X, F15-X, F16-X (varios) — calidad de código residual.
+
+**Iteración 9 — verificación empírica**:
+- `go test -race` + `goleak` + `govulncheck` post-merge.
+
+### Frontend
+
+**Segunda ola VideoPlayer** (opcional):
+- React Doctor residuales tras PR #381: `no-giant-component` (663 LoC residuales en VideoPlayer), `prefer-useReducer` (5 useState residuales), `no-derived-state-effect:496`. Requiere más extracciones de JSX + `useReducer` para UI flags + `key={itemId}` para reset.
+
+**file-type vuln** (medium):
+- Transitive de `node-vibrant@4.0.4` (que ya está en latest). Bloqueada hasta que node-vibrant actualice su jimp interno.
+
+### Dependabot abierto
+
+- **#376** — web-deps group (17 updates), todo verde — 1 click pendiente.
+- **#289** — picomatch 4.0.3→4.0.4 (cierra alert #18 cuando se mergee). Necesita rebase tras los recientes merges.
+- **#247** — docker/setup-buildx-action 3→4. Necesita rebase.
 
 ### Grandes (requieren ventana dedicada)
 
-4. **Firma del installer Windows con SignPath Foundation**. **Es gratis para OSS** (verificado en signpath.org el 2026-05-20). Apply via `apply.signpath.io` — la verificación tarda días/semanas pero la integración con el workflow es directa (action `signpath/github-action-submit-signing-request`). Mientras llega el approval, SmartScreen sigue avisando — no urgente.
-5. **Auto-update one-click + cert TLS en LAN**. Estilo `*.plex.direct`: el server obtiene un cert real para `<hash>.hubplay.direct` o similar, lo sirve en LAN sin warnings, y el client comprueba el feed de updates y aplica binarios firmados in-place. Feature grande, sin presión de calendario.
+- **Firma del installer Windows con SignPath Foundation**. **Es gratis para OSS** (verificado en signpath.org el 2026-05-20). Apply via `apply.signpath.io` — la verificación tarda días/semanas pero la integración con el workflow es directa (action `signpath/github-action-submit-signing-request`). Mientras llega el approval, SmartScreen sigue avisando — no urgente.
+- **Auto-update one-click + cert TLS en LAN**. Estilo `*.plex.direct`: el server obtiene un cert real para `<hash>.hubplay.direct` o similar, lo sirve en LAN sin warnings, y el client comprueba el feed de updates y aplica binarios firmados in-place. Feature grande, sin presión de calendario.
 
 ---
 
@@ -132,7 +474,6 @@ Cerrados en la sesión 2026-05-20. Quedan los grandes.
 - **[audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md)** — review vivo por fases. Iteraciones 4-7 pendientes (ver intervention).
 - **[intervention-2026-05-14.md](intervention-2026-05-14.md)** — tracker de iteración del review 2026-05-14. Marca olores cerrados por commit.
 - **[perf-benchmarks-2026-05-17.md](perf-benchmarks-2026-05-17.md)** — baseline benchmarks dual-backend (SQLite + Postgres) para repos del hot-path.
-- **[per-user-channel-order-pending.md](per-user-channel-order-pending.md)** — spec de feature pendiente Live TV.
 
 ## 🗄️ Archivo (`docs/memory/archive/`)
 

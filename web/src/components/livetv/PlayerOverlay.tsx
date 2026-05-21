@@ -174,7 +174,7 @@ function UpcomingList({ items }: { items: EPGProgram[] }) {
         return (
           <li
             key={p.id || p.start_time}
-            className="flex items-center gap-3 rounded-tv-sm px-2 py-2 hover:bg-tv-bg-2/60"
+            className="flex items-center gap-3 rounded-tv-sm p-2 hover:bg-tv-bg-2/60"
           >
             <span className="w-12 shrink-0 font-mono text-xs tabular-nums text-tv-fg-2">
               {formatTime(p.start_time)}
@@ -229,7 +229,7 @@ function SimilarGrid({
             bg={ch.logo_bg}
             fg={ch.logo_fg}
             name={ch.name}
-            className="h-9 w-9 shrink-0 rounded-tv-xs"
+            className="size-9 shrink-0 rounded-tv-xs"
             textClassName="text-[10px] font-bold"
           />
           <div className="min-w-0 flex-1">

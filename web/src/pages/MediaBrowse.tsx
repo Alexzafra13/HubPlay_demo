@@ -11,7 +11,7 @@ import {
 } from "@/components/media/MediaBrowseFilters";
 import { SORT_OPTIONS, type SortOption } from "@/utils/sort";
 
-export type BrowseType = "movie" | "series";
+type BrowseType = "movie" | "series";
 
 interface MediaBrowseProps {
   type: BrowseType;
@@ -154,7 +154,7 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
           {t(`${ns}.title`)}
         </h1>
         <BrowseControls

@@ -420,8 +420,8 @@ export default function LiveTV() {
   // a separate stripe.
   const heroHeaderOverlay = (
     <div>
-      <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 drop-shadow-md md:text-2xl">
-        <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
+      <h1 className="flex items-center gap-2 text-xl font-semibold text-tv-fg-0 drop-shadow-md md:text-2xl">
+        <span className="inline-flex size-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
         {t('liveTV.title')}
       </h1>
       <p className="mt-1 text-xs text-tv-fg-1 drop-shadow">
@@ -478,7 +478,7 @@ export default function LiveTV() {
               className="inline-flex items-center gap-1 whitespace-nowrap text-sm text-text-muted hover:text-text"
               aria-label={t("livetv.customize.linkAria")}
             >
-              <Sliders className="h-4 w-4" />
+              <Sliders className="size-4" />
               <span className="hidden sm:inline">{t("livetv.customize.link")}</span>
             </Link>
           </div>

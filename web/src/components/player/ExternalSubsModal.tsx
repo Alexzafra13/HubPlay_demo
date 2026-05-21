@@ -32,6 +32,10 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
+  // `preferredLangs` es la semilla; el usuario añade/quita idiomas en
+  // el modal antes de buscar y `langs` mantiene esa selección viva.
+  // Derivar en render reiniciaría la selección en cada re-render del
+  // padre.
   const [langs, setLangs] = useState<string[]>(preferredLangs);
   const [results, setResults] = useState<ExternalSubtitleResult[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -85,14 +89,19 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
 
   return (
     <div
+      role="presentation"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
     >
       <div
         role="dialog"
         aria-label={t("externalSubs.title")}
         className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-[--radius-lg] border border-border bg-bg-card shadow-2xl shadow-black/50 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
@@ -105,7 +114,7 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
             className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-elevated cursor-pointer"
             aria-label={t("common.close")}
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -184,4 +193,3 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
 };
 
 export { ExternalSubsModal };
-export type { ExternalSubsModalProps };

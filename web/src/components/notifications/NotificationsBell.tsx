@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Bell } from "lucide-react";
 import { useMyNotifications } from "@/api/hooks/notifications";
 import { NotificationsDropdown } from "./NotificationsDropdown";
@@ -78,13 +78,13 @@ export function NotificationsBell() {
         aria-expanded={open}
         aria-haspopup="menu"
         className={[
-          "relative flex items-center justify-center w-10 h-10 rounded-lg",
+          "relative flex items-center justify-center size-10 rounded-lg",
           "text-text-secondary hover:text-text-primary hover:bg-bg-hover",
           "transition-colors",
           open ? "bg-bg-hover text-text-primary" : "",
         ].join(" ")}
       >
-        <Bell className="h-[19px] w-[19px]" strokeWidth={1.7} />
+        <Bell className="size-[19px]" strokeWidth={1.7} />
         {unread > 0 && (
           <span
             aria-hidden
@@ -96,7 +96,7 @@ export function NotificationsBell() {
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -4, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
@@ -108,7 +108,7 @@ export function NotificationsBell() {
               unreadCount={unread}
               onClose={() => setOpen(false)}
             />
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

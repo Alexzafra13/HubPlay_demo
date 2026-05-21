@@ -32,7 +32,7 @@ export function LinkedDevicesList({ sessions }: { sessions: MySession[] }) {
       className="mt-2 flex flex-col gap-3"
     >
       <header className="flex items-center gap-2">
-        <Tv className="h-4 w-4 text-text-secondary" aria-hidden />
+        <Tv className="size-4 text-text-secondary" aria-hidden />
         <h2
           id="linked-devices-heading"
           className="text-sm font-semibold text-text-primary"

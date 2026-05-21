@@ -94,7 +94,7 @@ export default function LibrariesAdmin() {
             <ul className="flex flex-col gap-2">
               {Array.from({ length: 2 }, (_, i) => (
                 <li
-                  key={i}
+                  key={`${section.type}-skeleton-${i}`}
                   className="rounded-[--radius-lg] border border-border bg-bg-card overflow-hidden"
                 >
                   <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
@@ -189,7 +189,7 @@ export default function LibrariesAdmin() {
                   </span>
                   <span
                     aria-hidden
-                    className={["h-1.5 w-1.5 rounded-full", dotClass].join(" ")}
+                    className={["size-1.5 rounded-full", dotClass].join(" ")}
                   />
                   <span
                     className={[

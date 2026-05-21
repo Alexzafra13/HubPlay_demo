@@ -36,13 +36,14 @@ export default function MyNotifications() {
   const markAllRead = useMarkAllNotificationsRead();
   const [filter, setFilter] = useState<Filter>("all");
 
-  const all = data?.data ?? [];
   const unreadCount = data?.unread_count ?? 0;
+  const totalCount = data?.data?.length ?? 0;
 
   const visible = useMemo(() => {
+    const all = data?.data ?? [];
     if (filter === "unread") return all.filter((n) => !n.read_at);
     return all;
-  }, [all, filter]);
+  }, [data, filter]);
 
   if (isLoading && !data) {
     return (
@@ -57,7 +58,7 @@ export default function MyNotifications() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-accent/10 p-2.5 text-accent">
-            <Bell className="h-5 w-5" />
+            <Bell className="size-5" />
           </div>
           <div>
             <h1 className="text-xl font-semibold text-text-primary sm:text-2xl">
@@ -82,7 +83,7 @@ export default function MyNotifications() {
             disabled={markAllRead.isPending}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
           >
-            <CheckCheck className="h-3.5 w-3.5" />
+            <CheckCheck className="size-3.5" />
             {t("notifications.markAllRead", {
               defaultValue: "Marcar todas leídas",
             })}
@@ -95,7 +96,7 @@ export default function MyNotifications() {
           active={filter === "all"}
           onClick={() => setFilter("all")}
           label={t("notifications.filter.all", { defaultValue: "Todas" })}
-          count={all.length}
+          count={totalCount}
         />
         <FilterChip
           active={filter === "unread"}
@@ -161,7 +162,7 @@ function NotificationRow({ notif }: { notif: AppNotification }) {
   const navigate = useNavigate();
   const markRead = useMarkNotificationRead();
 
-  function handleClick() {
+  function openNotification() {
     if (!notif.read_at) {
       markRead.mutate(notif.id);
     }
@@ -181,7 +182,7 @@ function NotificationRow({ notif }: { notif: AppNotification }) {
     <li>
       <button
         type="button"
-        onClick={handleClick}
+        onClick={openNotification}
         className={[
           "flex w-full items-start gap-3 rounded-md border px-4 py-3 text-left transition-colors",
           notif.read_at
@@ -211,10 +212,10 @@ function NotificationRow({ notif }: { notif: AppNotification }) {
                 })}
                 className="flex-none rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-primary"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="size-3.5" />
               </button>
             ) : (
-              <Check className="mt-0.5 h-3.5 w-3.5 flex-none text-text-muted/60" />
+              <Check className="mt-0.5 size-3.5 flex-none text-text-muted/60" />
             )}
           </div>
           {notif.body && (
@@ -257,11 +258,11 @@ function NotificationIcon({
   return (
     <div
       className={[
-        "flex h-9 w-9 flex-none items-center justify-center rounded-full bg-bg-base",
+        "flex size-9 flex-none items-center justify-center rounded-full bg-bg-base",
         color,
       ].join(" ")}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="size-4" />
     </div>
   );
 }
@@ -271,7 +272,7 @@ function EmptyState({ filter }: { filter: Filter }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-bg-elevated px-6 py-16 text-center">
       <div className="rounded-full bg-bg-base p-4 text-text-muted">
-        <Inbox className="h-8 w-8" />
+        <Inbox className="size-8" />
       </div>
       <p className="text-sm font-medium text-text-primary">
         {filter === "unread"

@@ -55,7 +55,7 @@ export function PendingRequestsSection() {
     return (
       <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-bg-elevated px-6 py-10 text-center">
         <div className="rounded-full bg-bg-base p-3 text-text-muted">
-          <Inbox className="h-6 w-6" />
+          <Inbox className="size-6" />
         </div>
         <div>
           <p className="text-sm font-medium text-text-primary">
@@ -79,7 +79,7 @@ export function PendingRequestsSection() {
       {incoming.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <ArrowDownToLine className="h-4 w-4 text-accent" />
+            <ArrowDownToLine className="size-4 text-accent" />
             <h4 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               {t("admin.federation.pending.incomingHeading", {
                 defaultValue: "Peticiones recibidas",
@@ -100,7 +100,7 @@ export function PendingRequestsSection() {
       {outgoing.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <ArrowUpFromLine className="h-4 w-4 text-text-muted" />
+            <ArrowUpFromLine className="size-4 text-text-muted" />
             <h4 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               {t("admin.federation.pending.outgoingHeading", {
                 defaultValue: "Peticiones enviadas",
@@ -176,7 +176,7 @@ function IncomingRequestRow({ request }: { request: FederationPendingRequest }) 
             size="sm"
             onClick={() => setExpanded((e) => !e)}
           >
-            <Fingerprint className="mr-1.5 h-3.5 w-3.5" />
+            <Fingerprint className="mr-1.5 size-3.5" />
             {expanded
               ? t("admin.federation.pending.hideFingerprint", {
                   defaultValue: "Ocultar huella",
@@ -192,7 +192,7 @@ function IncomingRequestRow({ request }: { request: FederationPendingRequest }) 
             onClick={handleDecline}
             disabled={decline.isPending || accept.isPending}
           >
-            <X className="mr-1 h-3.5 w-3.5" />
+            <X className="mr-1 size-3.5" />
             {t("admin.federation.pending.decline", {
               defaultValue: "Rechazar",
             })}
@@ -204,7 +204,7 @@ function IncomingRequestRow({ request }: { request: FederationPendingRequest }) 
             isLoading={accept.isPending}
             disabled={decline.isPending}
           >
-            <Check className="mr-1 h-3.5 w-3.5" />
+            <Check className="mr-1 size-3.5" />
             {t("admin.federation.pending.accept", {
               defaultValue: "Aceptar",
             })}
@@ -226,7 +226,7 @@ function IncomingRequestRow({ request }: { request: FederationPendingRequest }) 
             </code>
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Volume2 className="h-3.5 w-3.5 self-center text-text-muted" />
+            <Volume2 className="size-3.5 self-center text-text-muted" />
             {request.fingerprint_words.map((w) => (
               <span
                 key={w}
@@ -294,7 +294,7 @@ function OutgoingRequestRow({ request }: { request: FederationPendingRequest }) 
           </p>
         </div>
         <span className="inline-flex items-center gap-1 rounded-full bg-bg-elevated px-2 py-0.5 text-[11px] text-text-muted">
-          <Clock className="h-3 w-3" />
+          <Clock className="size-3" />
           {remaining}
         </span>
         <Button
@@ -304,7 +304,7 @@ function OutgoingRequestRow({ request }: { request: FederationPendingRequest }) 
           onClick={handleCancel}
           disabled={cancel.isPending}
         >
-          <X className="mr-1 h-3.5 w-3.5" />
+          <X className="mr-1 size-3.5" />
           {t("admin.federation.pending.cancel", {
             defaultValue: "Cancelar",
           })}

@@ -83,7 +83,7 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
         {item.poster_blurhash && !imageLoaded && (
           <BlurhashPlaceholder
             hash={item.poster_blurhash}
-            className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
+            className="absolute inset-0 size-full object-cover transition-opacity duration-300"
           />
         )}
         {item.poster_url ? (
@@ -93,10 +93,10 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
             loading="lazy"
             decoding="async"
             onLoad={() => setImageLoaded(true)}
-            className="relative h-full w-full object-cover"
+            className="relative size-full object-cover"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
             <span className="text-4xl font-bold text-text-muted">
               {item.title.charAt(0).toUpperCase()}
             </span>
@@ -105,9 +105,9 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
 
         {/* Hover: subtle play icon, no text overlay */}
         <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover:bg-black/30">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm opacity-0 scale-90 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100">
+          <div className="flex size-11 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm opacity-0 scale-90 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100">
             <svg
-              className="h-5 w-5 text-white ml-0.5"
+              className="size-5 text-white ml-0.5"
               viewBox="0 0 24 24"
               fill="currentColor"
             >
@@ -132,7 +132,7 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
             alto, así que no pelean). */}
         {item.community_rating != null && (
           <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-[--radius-sm] bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[11px] font-semibold text-white">
-            <svg className="h-2.5 w-2.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
+            <svg className="size-2.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
             </svg>
             {formatRating(item.community_rating)}
@@ -144,11 +144,11 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
             ud.played server-side via mark-unplayed. */}
         {watched && (
           <div
-            className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white shadow-md shadow-black/40"
+            className="absolute top-2 left-2 flex size-6 items-center justify-center rounded-full bg-accent text-white shadow-md shadow-black/40"
             aria-label={t("posterCard.watched", { defaultValue: "Watched" })}
             title={t("posterCard.watched", { defaultValue: "Watched" })}
           >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
@@ -229,4 +229,3 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
 PosterCard.displayName = "PosterCard";
 
 export { PosterCard };
-export type { PosterCardProps };

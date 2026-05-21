@@ -31,6 +31,13 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
 
+      - name: Type check
+        working-directory: web
+        # `tsc -b` honra el `noEmit: true` de tsconfig.app.json — sólo
+        # valida tipos sobre el grafo de referencias. Más rápido y
+        # estricto que esperar a que se rompa `pnpm build`.
+        run: pnpm typecheck
+
       - name: Lint
         working-directory: web
         run: pnpm lint
@@ -38,6 +45,83 @@ jobs:
       - name: Run tests
         working-directory: web
         run: pnpm test
+
+      - name: React Compiler healthcheck
+        working-directory: web
+        # Audita cada componente contra el React Compiler (la
+        # optimización automática de React 19). El job FALLA si la
+        # tasa de compatibilidad baja del 100 % — esto evita regresiones
+        # silenciosas que harían que el compiler se "bail out" en
+        # componentes nuevos. Ver web/eslint.config.js para la regla
+        # lint correspondiente.
+        run: |
+          OUT=$(pnpm dlx react-compiler-healthcheck 2>&1)
+          echo "$OUT"
+          # Espera formato "Successfully compiled N out of N components."
+          if echo "$OUT" | grep -qE "compiled ([0-9]+) out of \1 components"; then
+            echo "All components compatible."
+          else
+            echo "Healthcheck reports incompatible components — bail out."
+            exit 1
+          fi
+
+  knip:
+    name: Dead code (knip)
+    runs-on: ubuntu-latest
+    # Hard gate desde la sesión 2026-05-21: tras #375 + #377 el repo
+    # llegó a 0 unused files / deps / exports / types. Si un PR vuelve
+    # a introducir dead code, el CI lo bloquea. Para suprimir un falso
+    # positivo concreto, edita web/knip.config.ts.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Run knip
+        working-directory: web
+        run: pnpm knip
+
+  react-doctor:
+    name: React Doctor (score)
+    runs-on: ubuntu-latest
+    # Visibility-only: el step compila un score numérico (0-100) del
+    # codebase React y lo publica en el log + summary del run. Baseline
+    # actual: 67/100 ("Needs work"). No bloquea hoy — la idea es ver
+    # cómo evoluciona el score con cada PR y empezar a remediar las
+    # categorías más numerosas (a11y, perf, correctness). Cuando
+    # subamos a 75+ ("Great"), podemos elevar a hard gate añadiendo
+    # `min-score: 75` y quitando continue-on-error.
+    permissions:
+      contents: read
+      pull-requests: write # para que la action comente en la PR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Necesario para que `--diff main` calcule sólo los cambios de
+          # la PR en runs de pull_request — el push a main usa el snapshot
+          # completo igualmente.
+          fetch-depth: 0
+
+      - name: Run React Doctor
+        uses: millionco/react-doctor@main
+        continue-on-error: true
+        with:
+          # En pull_request: comenta inline en los hunks introducidos.
+          # En push a main: sólo el score en el summary del run.
+          diff: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   test:
     name: Test Backend

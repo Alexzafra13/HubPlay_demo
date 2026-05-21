@@ -3,19 +3,19 @@ import type { RefObject } from "react";
 import Hls from "hls.js";
 import { destroyHlsInstance } from "./hlsLifecycle";
 
-export interface AudioTrack {
+interface AudioTrack {
   id: number;
   name: string;
   lang: string;
 }
 
-export interface SubtitleTrack {
+interface SubtitleTrack {
   id: number;
   name: string;
   lang: string;
 }
 
-export interface QualityLevel {
+interface QualityLevel {
   id: number;        // index into hls.levels
   height: number;    // 1080, 720, ...
   bitrate: number;   // bits/sec
@@ -290,6 +290,12 @@ export function useHls({
           );
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Native HLS path (Safari/iOS). Mutar `video.src` es la API
+        // estándar del HTMLMediaElement — no estamos mutando un valor
+        // que React considere inmutable (el ref), sino una propiedad
+        // del DOM node. Suprimido narrow para que el compiler no
+        // confunda el patrón con state mutation.
+        // eslint-disable-next-line react-compiler/react-compiler
         video.src = url;
         video.addEventListener(
           "loadedmetadata",

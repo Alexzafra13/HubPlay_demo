@@ -93,6 +93,10 @@ export function useProgressReporter(
           .catch(() => {});
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only; itemId/peerId are stable for the player's life
-  }, []);
+    // Deps included properly: if itemId/peerId change mid-flight (rare
+    // — the parent doesn't recycle the player across items), the cleanup
+    // persists the OLD progress before the new effect captures fresh
+    // refs. Same end result as the previous empty-deps version, and
+    // satisfies the React Compiler's "all rules of React" requirement.
+  }, [videoRef, itemId, peerId]);
 }

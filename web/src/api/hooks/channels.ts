@@ -120,32 +120,6 @@ export function useResetLibraryChannelOrder() {
   });
 }
 
-export function useSetLibraryChannelVisibility() {
-  const qc = useQueryClient();
-  return useMutation<
-    void,
-    Error,
-    { libraryId: string; channelId: string; hidden: boolean }
-  >({
-    mutationFn: ({ libraryId, channelId, hidden }) =>
-      api.setLibraryChannelVisibility(libraryId, channelId, hidden),
-    onSuccess: (_, { libraryId }) => {
-      qc.invalidateQueries({ queryKey: ["channels", libraryId, "admin-order"] });
-      qc.invalidateQueries({ queryKey: ["channels"] });
-    },
-  });
-}
-
-export function useSetChannelVisibility() {
-  const qc = useQueryClient();
-  return useMutation<void, Error, { channelId: string; hidden: boolean }>({
-    mutationFn: ({ channelId, hidden }) => api.setChannelVisibility(channelId, hidden),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["channels"] });
-    },
-  });
-}
-
 // ─── Channel favorites ────────────────────────────────────────────────
 
 export function useChannelFavoriteIDs(
@@ -231,10 +205,9 @@ export function useBulkSchedule(
   channelIds: string[],
   options?: Partial<UseQueryOptions<Record<string, EPGProgram[]>>>,
 ) {
-  // Sort the id list before hashing it so cache hits work regardless of
-  // channel ordering. The previous implementation sliced to the first 10
-  // which caused stale cache hits on libraries larger than 10 channels.
-  const cacheKey = [...channelIds].sort().join(",");
+  // Ordena los ids antes de hashearlos para que el cache acierte
+  // independientemente del orden de los canales en el array de entrada.
+  const cacheKey = channelIds.toSorted().join(",");
   return useQuery<Record<string, EPGProgram[]>>({
     queryKey: ["bulk-schedule", cacheKey] as const,
     queryFn: () => api.getBulkSchedule(channelIds),

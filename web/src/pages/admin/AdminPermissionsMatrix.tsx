@@ -260,7 +260,7 @@ export function AdminPermissionsMatrix({
                     return (
                       <td key={col.key} className="px-3 py-2">
                         <label
-                          className={`inline-flex items-center justify-center w-7 h-7 rounded ${
+                          className={`inline-flex items-center justify-center size-7 rounded ${
                             editable
                               ? "cursor-pointer hover:bg-neutral-800"
                               : "cursor-not-allowed opacity-60"
@@ -275,7 +275,7 @@ export function AdminPermissionsMatrix({
                         >
                           <input
                             type="checkbox"
-                            className="w-4 h-4 accent-amber-500"
+                            className="size-4 accent-amber-500"
                             checked={checked}
                             disabled={!editable}
                             onChange={(e) =>

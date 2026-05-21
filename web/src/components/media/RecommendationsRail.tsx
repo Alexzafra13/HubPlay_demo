@@ -55,10 +55,10 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
             alt={rec.title}
             loading="lazy"
             decoding="async"
-            className="h-full w-full object-cover"
+            className="size-full object-cover"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-2xl font-bold text-text-muted">
+          <div className="flex size-full items-center justify-center text-2xl font-bold text-text-muted">
             {rec.title.charAt(0)}
           </div>
         )}

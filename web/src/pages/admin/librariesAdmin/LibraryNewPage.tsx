@@ -57,11 +57,14 @@ export default function LibraryNewPage() {
 
   // Clear the inline validation message whenever the user edits a
   // field — they're showing intent to fix it; nagging the previous
-  // error would feel hostile.
-  useEffect(() => {
+  // error would feel hostile. Render-time guarded setState reacting
+  // to the joint key of all four fields.
+  const fieldsKey = `${name}|${path}|${type}|${String(liveState)}`;
+  const [lastFieldsKey, setLastFieldsKey] = useState(fieldsKey);
+  if (fieldsKey !== lastFieldsKey) {
+    setLastFieldsKey(fieldsKey);
     if (validationError) setValidationError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, path, type, liveState]);
+  }
 
   function close() {
     navigate("/admin/libraries");
@@ -296,7 +299,7 @@ function PageHeader({
         aria-label="Back"
       >
         <svg
-          className="h-4 w-4"
+          className="size-4"
           viewBox="0 0 20 20"
           fill="none"
           stroke="currentColor"

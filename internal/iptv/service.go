@@ -27,42 +27,32 @@ import (
 // skips recording it as a job-level error.
 var ErrRefreshInProgress = errors.New("refresh already in progress")
 
-// Service manages IPTV libraries: M3U import, EPG sync, channel operations.
+// Service manages IPTV libraries: M3U import, EPG sync, channel
+// operations.
 //
-// The methods split across several service_*.go files by concern
-// (favorites, M3U, EPG, channels, health, overrides, epg sources). They
-// all hang off the same struct — Go allows methods in multiple files on
-// the same package, and keeping them on one Service means callers (the
-// HTTP handlers) inject a single dependency instead of six.
+// Cierre del olor CC del audit 2026-05-14 (god-service de 45 métodos
+// en 11 sub-features). En CC fase 1 (PR #390) se extrajeron Favorites,
+// WatchHistory y Health. En CC fase 2 (esta sesión) se extrae
+// ChannelOrderOps — los 16 métodos del bloque "orden / visibilidad /
+// logo" (per-user overlay + library admin curation + logo overrides +
+// iptv-org refresh). Lo que queda en el core son M3U import + EPG
+// sync + EPG sources + channel overrides + el lifecycle de refresh
+// (httpClient + mu + refreshes map + bgCtx) — tightly-coupled.
 type Service struct {
-	channels            *db.ChannelRepository
-	epgPrograms         *db.EPGProgramRepository
-	libraries           *db.LibraryRepository
-	favorites           *db.ChannelFavoritesRepository
-	channelOrder        *db.UserChannelOrderRepository
-	libraryChannelOrder *db.LibraryChannelOrderRepository
-	epgSources          *db.LibraryEPGSourceRepository
-	overrides           *db.ChannelOverrideRepository
-	logoOverrides       *db.ChannelLogoOverrideRepository
-	// iptvOrgLogos resuelve tvg-ids contra la base pública iptv-org
-	// para rellenar logos faltantes en bulk. nil-safe: si no se cablea,
-	// el endpoint /iptv-org/refresh-logos devuelve 503.
-	iptvOrgLogos        *IPTVOrgLogoLookup
-	watchHistory        *db.ChannelWatchHistoryRepository
-	logger              *slog.Logger
+	*FavoritesOps
+	*WatchHistoryOps
+	*HealthOps
+	*ChannelOrderOps
+
+	channels    *db.ChannelRepository
+	epgPrograms *db.EPGProgramRepository
+	libraries   *db.LibraryRepository
+	epgSources  *db.LibraryEPGSourceRepository
+	overrides   *db.ChannelOverrideRepository
+	logger      *slog.Logger
 
 	mu        sync.Mutex
 	refreshes map[string]bool // tracks ongoing refreshes by library ID
-
-	// healthMu guards lastKnownBucket. Kept separate from `mu` so a
-	// long-running M3U refresh doesn't block per-probe health writes.
-	healthMu sync.Mutex
-	// lastKnownBucket maps channelID → last published health bucket
-	// ("ok" / "degraded" / "dead"). Used to gate ChannelHealthChanged
-	// events so we publish only on real transitions, not on every
-	// probe tick. In-memory only — on restart we re-emit on the first
-	// probe per channel, which is what an admin actually wants.
-	lastKnownBucket map[string]string
 
 	httpClient *http.Client
 
@@ -73,7 +63,12 @@ type Service struct {
 	httpInsecureClient *http.Client
 	httpInsecureOnce   sync.Once
 
-	bus *event.Bus // optional; nil-safe
+	// pub es el contenedor compartido del *event.Bus opcional. Service,
+	// HealthOps (ChannelHealthChanged events) y futuros sub-services
+	// que publiquen tienen un puntero al mismo `*publisher`, así un
+	// único `SetEventBus(bus)` muta los publishers de todos a la vez
+	// sin que cada uno exponga su propio setter.
+	pub *publisher
 
 	// proberWorker is wired post-construction (the worker depends on
 	// the service for the ChannelHealthReporter interface, so we'd
@@ -93,6 +88,30 @@ type Service struct {
 	bgWG     sync.WaitGroup
 }
 
+// publisher es el contenedor compartido del *event.Bus opcional. Los
+// sub-services que publican (HealthOps con ChannelHealthChanged,
+// Service con PlaylistRefreshed/EPGUpdated) tienen un puntero al
+// mismo `*publisher`, así un único `Service.SetEventBus(bus)` mutate
+// el campo de todos a la vez. Patrón replica del split QQ
+// (auth.Service).
+type publisher struct {
+	bus *event.Bus
+}
+
+func (p *publisher) publish(e event.Event) {
+	if p == nil || p.bus == nil {
+		return
+	}
+	p.bus.Publish(e)
+}
+
+func (p *publisher) setBus(bus *event.Bus) {
+	if p == nil {
+		return
+	}
+	p.bus = bus
+}
+
 // proberRunner is the minimal capability surface the service needs
 // from a prober worker. Defined on the consumer side (sink pattern)
 // so the *Service has no dependency on the worker's internals.
@@ -101,22 +120,28 @@ type proberRunner interface {
 }
 
 // SetEventBus wires an event bus so the service publishes PlaylistRefreshed
-// / EPGUpdated events at the end of the respective refresh. Nil-safe.
-func (s *Service) SetEventBus(bus *event.Bus) { s.bus = bus }
+// / EPGUpdated events at the end of the respective refresh. También
+// hace que HealthOps publique ChannelHealthChanged. Nil-safe.
+func (s *Service) SetEventBus(bus *event.Bus) {
+	s.pub.setBus(bus)
+}
 
-// SetIPTVOrgLogos wires the iptv-org logo lookup post-construction —
-// nil-safe, sin él el endpoint de auto-discovery devuelve 503.
-func (s *Service) SetIPTVOrgLogos(l *IPTVOrgLogoLookup) { s.iptvOrgLogos = l }
+// SetIPTVOrgLogos lo expone ChannelOrderOps vía method promotion —
+// el setter externo `service.SetIPTVOrgLogos(l)` resuelve a
+// `service.ChannelOrderOps.SetIPTVOrgLogos(l)` sin que el facade lo
+// declare.
 
 // SetProberWorker wires the active prober worker. Optional: a service
 // without one still works, it just won't auto-probe channels after an
 // M3U refresh — the periodic worker tick will catch them eventually.
 func (s *Service) SetProberWorker(w proberRunner) { s.proberWorker = w }
 
+// publish es un atajo intra-paquete a `pub.publish`. Los métodos del
+// Service que publican (M3U → PlaylistRefreshed, EPG → EPGUpdated)
+// lo llaman sin saber que es un wrapper sobre el publisher
+// compartido.
 func (s *Service) publish(e event.Event) {
-	if s.bus != nil {
-		s.bus.Publish(e)
-	}
+	s.pub.publish(e)
 }
 
 // NewService creates a new IPTV service.
@@ -133,23 +158,30 @@ func NewService(
 	watchHistory *db.ChannelWatchHistoryRepository,
 	logger *slog.Logger,
 ) *Service {
+	iptvLogger := logger.With("module", "iptv")
 	bgCtx, bgCancel := context.WithCancel(context.Background())
+	pub := &publisher{}
 	return &Service{
-		channels:            channels,
-		epgPrograms:         epgPrograms,
-		libraries:           libraries,
-		favorites:           favorites,
-		channelOrder:        channelOrder,
-		libraryChannelOrder: libraryChannelOrder,
-		epgSources:          epgSources,
-		overrides:           overrides,
-		logoOverrides:       logoOverrides,
-		watchHistory:        watchHistory,
-		logger:          logger.With("module", "iptv"),
-		refreshes:       make(map[string]bool),
-		lastKnownBucket: make(map[string]string),
-		bgCtx:           bgCtx,
-		bgCancel:        bgCancel,
+		// Sub-services con sus deps específicas. HealthOps comparte el
+		// `pub` con Service así un único SetEventBus muta ambos.
+		// ChannelOrderOps lleva los 4 repos del bloque order/visibility/
+		// logo + el lookup iptv-org (post-construction setter via
+		// method promotion).
+		FavoritesOps:    newFavoritesOps(favorites),
+		WatchHistoryOps: newWatchHistoryOps(channels, watchHistory),
+		HealthOps:       newHealthOps(channels, pub, iptvLogger),
+		ChannelOrderOps: newChannelOrderOps(channels, channelOrder, libraryChannelOrder, logoOverrides, iptvLogger),
+
+		channels:    channels,
+		epgPrograms: epgPrograms,
+		libraries:   libraries,
+		epgSources:  epgSources,
+		overrides:   overrides,
+		logger:      iptvLogger,
+		refreshes:   make(map[string]bool),
+		pub:         pub,
+		bgCtx:       bgCtx,
+		bgCancel:    bgCancel,
 		httpClient: &http.Client{
 			// 5 min ceiling: large M3U providers (e.g. MEGAOTT,
 			// 8k+ channels) can take 1–2 min to stream the full

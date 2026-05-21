@@ -118,8 +118,8 @@ function ResultSection({
     <section>
       <header className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2.5">
-          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-accent/10 ring-1 ring-accent/20">
-            <Icon className="h-[15px] w-[15px] text-accent" strokeWidth={1.8} />
+          <span className="flex items-center justify-center size-7 rounded-lg bg-accent/10 ring-1 ring-accent/20">
+            <Icon className="size-[15px] text-accent" strokeWidth={1.8} />
           </span>
           <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-text-primary">
             {label}
@@ -171,13 +171,13 @@ function ResultCard({
             src={poster}
             alt=""
             loading="lazy"
-            className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+            className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
           />
         )}
         {/* Subtle play affordance on hover */}
         <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
-            <Play className="h-4 w-4 text-text-primary fill-current ml-0.5" strokeWidth={0} />
+          <span className="flex items-center justify-center size-10 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
+            <Play className="size-4 text-text-primary fill-current ml-0.5" strokeWidth={0} />
           </span>
         </span>
       </div>
@@ -195,7 +195,10 @@ function ResultCard({
         {meta.length > 0 && (
           <div className="mt-2 flex items-center gap-2 text-[11.5px] text-text-muted">
             {meta.map((m, i) => (
-              <span key={i} className="flex items-center gap-1">
+              // El propio valor del metadato (año, duración, género…) es
+              // único dentro de la línea; el índice se usa sólo como
+              // discriminador secundario por si se repite.
+              <span key={`${m}-${i}`} className="flex items-center gap-1">
                 {i > 0 && <span className="opacity-40">·</span>}
                 {m}
               </span>
@@ -224,8 +227,8 @@ function PeerSection({
     <section>
       <header className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2.5">
-          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10 ring-1 ring-emerald-500/30">
-            <Users className="h-[15px] w-[15px] text-emerald-400" strokeWidth={1.8} />
+          <span className="flex items-center justify-center size-7 rounded-lg bg-emerald-500/10 ring-1 ring-emerald-500/30">
+            <Users className="size-[15px] text-emerald-400" strokeWidth={1.8} />
           </span>
           <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-text-primary">
             {label}
@@ -285,22 +288,22 @@ function PeerResultCard({
             src={poster}
             alt=""
             loading="lazy"
-            className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+            className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
             <span className="text-3xl font-bold text-text-muted">
               {hit.title.charAt(0).toUpperCase()}
             </span>
           </div>
         )}
         <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
-            <Play className="h-4 w-4 text-text-primary fill-current ml-0.5" strokeWidth={0} />
+          <span className="flex items-center justify-center size-10 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
+            <Play className="size-4 text-text-primary fill-current ml-0.5" strokeWidth={0} />
           </span>
         </span>
         <span className="absolute left-1 bottom-1 inline-flex items-center gap-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] font-medium text-white shadow-sm backdrop-blur-sm">
-          <span className="h-1 w-1 rounded-full bg-emerald-400" aria-hidden />
+          <span className="size-1 rounded-full bg-emerald-400" aria-hidden />
           <span className="max-w-[80px] truncate">{hit.peer_name}</span>
         </span>
       </div>
@@ -330,8 +333,8 @@ export function SearchNoResults({ query }: { query: string }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-      <div className="flex items-center justify-center w-14 h-14 rounded-full bg-bg-elevated ring-1 ring-border-subtle mb-4">
-        <SearchIcon className="h-6 w-6 text-text-muted" strokeWidth={1.5} />
+      <div className="flex items-center justify-center size-14 rounded-full bg-bg-elevated ring-1 ring-border-subtle mb-4">
+        <SearchIcon className="size-6 text-text-muted" strokeWidth={1.5} />
       </div>
       <p className="text-[14px] text-text-secondary">
         {t("topbar.noResultsFor", { defaultValue: "Sin resultados para" })}{" "}
@@ -385,7 +388,7 @@ function metaForItem(item: MediaItem): React.ReactNode[] {
   if (item.community_rating != null) {
     out.push(
       <>
-        <Star className="h-[11px] w-[11px] text-warning fill-current" strokeWidth={0} />
+        <Star className="size-[11px] text-warning fill-current" strokeWidth={0} />
         {item.community_rating.toFixed(1)}
       </>,
     );

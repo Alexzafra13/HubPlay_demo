@@ -86,23 +86,27 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose, itemType
     return () => clearTimeout(timer);
   }, [statusMessage]);
 
-  // Handle escape key
-  const handleEscape = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose],
-  );
+  // Patrón "latest onClose vía ref": el listener se monta una vez
+  // por apertura (deps = [isOpen]). Con onClose en deps, cada
+  // re-render del padre re-suscribiría keydown + recalcularía el
+  // overflow del body.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCloseRef.current();
+    };
     document.addEventListener("keydown", handleEscape);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", handleEscape);
       document.body.style.overflow = "";
     };
-  }, [isOpen, handleEscape]);
+  }, [isOpen]);
 
   const handleSelectImage = useCallback(
     (img: AvailableImage) => {
@@ -191,7 +195,7 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose, itemType
             className="p-1 rounded-[--radius-sm] text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors cursor-pointer"
             aria-label={t("common.close")}
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <svg className="size-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
             </svg>
           </button>
@@ -252,7 +256,7 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose, itemType
                   isLoading={uploadImage.isPending}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                   </svg>
                   {uploadImage.isPending ? t("imageManager.uploading") : t("imageManager.upload")}
@@ -301,9 +305,10 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose, itemType
               <p className="text-sm text-text-muted py-4">{t("imageManager.noAvailableImages")}</p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {filteredAvailable.map((img, index) => (
+                {filteredAvailable.map((img) => (
+                  // La URL ya es única — la API garantiza no devolver duplicados.
                   <AvailableImageCard
-                    key={`${img.url}-${index}`}
+                    key={img.url}
                     image={img}
                     isSelecting={selectImage.isPending}
                     aspectRatioClass={getAspectRatioClass(activeTab)}
@@ -367,7 +372,7 @@ const CurrentImageCard: FC<CurrentImageCardProps> = ({
     {/* Primary badge */}
     {image.is_primary && (
       <div className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-accent/90 px-2 py-0.5 text-xs font-medium text-white">
-        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+        <svg className="size-3" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
         </svg>
         {t("imageManager.primary")}
@@ -427,7 +432,23 @@ const AvailableImageCard: FC<AvailableImageCardProps> = ({
   onSelect,
   t,
 }) => (
-  <div className="group relative rounded-[--radius-md] border border-border bg-bg-elevated overflow-hidden cursor-pointer" onClick={onSelect}>
+  // Tarjeta clicable accesible. No usamos <button> nativo porque la
+  // tarjeta contiene a su vez un <Button> en el hover overlay y un
+  // botón dentro de otro botón es HTML inválido. role="button" +
+  // tabIndex={0} + onKeyDown da el mismo soporte de teclado y
+  // anuncio de rol sin anidar.
+  <div
+    role="button"
+    tabIndex={0}
+    onClick={onSelect}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onSelect();
+      }
+    }}
+    className="group relative rounded-[--radius-md] border border-border bg-bg-elevated overflow-hidden cursor-pointer"
+  >
     <img
       src={image.url}
       alt={image.type}
@@ -456,4 +477,3 @@ const AvailableImageCard: FC<AvailableImageCardProps> = ({
 );
 
 export { ImageManager };
-export type { ImageManagerProps };

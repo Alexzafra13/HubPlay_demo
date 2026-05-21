@@ -1107,7 +1107,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// falls back to the raw passthrough proxy, which is
 					// the correct degraded-but-functional behaviour for
 					// HLS-only deployments without ffmpeg.
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.EventBus, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)

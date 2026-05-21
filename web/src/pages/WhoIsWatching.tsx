@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { LogOut, Pencil } from "lucide-react";
 import { ArrowLeft } from "lucide-react";
 import {
@@ -45,6 +45,11 @@ import { BrandWordmark } from "@/components/layout/BrandWordmark";
 // "two-column with poster wall" layout. Below this, the wall would
 // look sparse and we get a better-looking single-column instead.
 const MIN_POSTERS_FOR_WALL = 4;
+
+// Identificadores estables para los 4 slots del PIN. Los usamos como
+// React key en lugar del índice del map: las posiciones son fijas y
+// el lint penaliza key={i}.
+const PIN_DIGIT_SLOTS = ["pin-1", "pin-2", "pin-3", "pin-4"] as const;
 
 export default function WhoIsWatching() {
   const { t } = useTranslation();
@@ -70,10 +75,14 @@ export default function WhoIsWatching() {
   );
   const posters = useMemo(() => {
     const items = (itemsData?.items ?? []) as MediaItem[];
+    // flatMap = map + filter en una pasada. Mantiene el slice(0, 6) al
+    // final para no construir más entradas de las necesarias en
+    // librerías grandes.
     return items
-      .map((it) => ({ id: it.id, src: it.poster_url, title: it.title }))
-      .filter((p): p is { id: string; src: string; title: string } =>
-        Boolean(p.src),
+      .flatMap((it) =>
+        it.poster_url
+          ? [{ id: it.id, src: it.poster_url, title: it.title }]
+          : [],
       )
       .slice(0, 6);
   }, [itemsData]);
@@ -140,7 +149,7 @@ export default function WhoIsWatching() {
               onClick={() => void handleSignOut()}
               className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
             >
-              <LogOut className="h-3.5 w-3.5" />
+              <LogOut className="size-3.5" />
               {t("whoIsWatching.signOut", {
                 defaultValue: "Cerrar sesión",
               })}
@@ -192,103 +201,11 @@ export default function WhoIsWatching() {
 
   // The picker block (title + avatars + rail) is shared between
   // the single-column and split layouts. Pulled to a local
-  // closure rather than a child component to keep the hover /
-  // commit handlers in scope without prop-drilling.
-  const renderPicker = (alignment: "center" | "start") => (
-    <div
-      className={[
-        "flex flex-col",
-        alignment === "center" ? "items-center text-center" : "items-start text-left",
-      ].join(" ")}
-    >
-      <motion.h1
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
-        className="mb-3 text-5xl font-extralight tracking-[-0.015em] text-text-primary sm:text-6xl"
-      >
-        {t("whoIsWatching.title")}
-      </motion.h1>
-      <motion.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.15 }}
-        className="mb-12 text-sm tracking-wider text-text-muted"
-      >
-        {t("whoIsWatching.subtitle", {
-          defaultValue: "Selecciona tu perfil para continuar.",
-        })}
-      </motion.p>
-      <motion.div
-        initial="hidden"
-        animate="show"
-        variants={{
-          hidden: {},
-          show: {
-            transition: {
-              staggerChildren: 0.08,
-              delayChildren: 0.2,
-            },
-          },
-        }}
-        className={[
-          // Stacked vertically when in the split-layout (alignment="start")
-          // so the picker reads as a side rail next to the poster wall;
-          // the centred fallback layout still wraps a horizontal row for
-          // installations with no catalogue art on the right. This
-          // matches the "list usuarios arriba a abajo" pattern HBO and
-          // Disney+ use on TV-shaped surfaces, while the centred row
-          // covers the desktop-like Netflix shape.
-          alignment === "start"
-            ? "flex flex-col gap-6"
-            : "flex flex-wrap justify-center gap-8 sm:gap-10",
-        ].join(" ")}
-      >
-        {profiles?.map((p) => (
-          <ProfileCard
-            key={p.id}
-            profile={p}
-            onClick={() => void pickProfile(p)}
-            onHoverChange={(h) => setHoveredProfileId(h ? p.id : null)}
-            compact={alignment === "start"}
-          />
-        ))}
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.5 }}
-        className={[
-          "mt-12 flex flex-wrap items-center gap-3 text-xs",
-          alignment === "center" ? "justify-center" : "justify-start",
-        ].join(" ")}
-      >
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => navigate("/admin/users")}
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            {t("whoIsWatching.manageProfiles", {
-              defaultValue: "Gestionar perfiles",
-            })}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => void handleSignOut()}
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          {t("whoIsWatching.signOut", {
-            defaultValue: "Cerrar sesión",
-          })}
-        </button>
-      </motion.div>
-    </div>
-  );
+  // Render del picker movido al componente <ProfilePicker /> debajo;
+  // antes vivía como closure inline (`const renderPicker = …`) en
+  // render, lo que rompía la reconciliación y disparaba la regla
+  // `react-doctor/no-render-in-render`. Como componente real React
+  // puede memoizarlo y diff-arlo correctamente entre renders.
 
   return (
     <div
@@ -306,7 +223,7 @@ export default function WhoIsWatching() {
           which traps the user. "/" is the right answer in both
           flows because ProtectedRoute will keep them
           authenticated. */}
-      <motion.button
+      <m.button
         type="button"
         onClick={() => navigate("/")}
         initial={{ opacity: 0, x: -8 }}
@@ -315,21 +232,21 @@ export default function WhoIsWatching() {
         className="absolute left-4 top-4 z-20 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary sm:left-6 sm:top-6"
         aria-label={t("whoIsWatching.back", { defaultValue: "Volver" })}
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ArrowLeft className="size-3.5" />
         {t("whoIsWatching.back", { defaultValue: "Volver" })}
-      </motion.button>
+      </m.button>
 
       {/* Logo — sized big enough to read as a brand mark, not a
           favicon. Keeps to the top of the viewport so the picker
           doesn't fight for attention with it. */}
-      <motion.div
+      <m.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="relative z-10 mb-10 sm:mb-14"
       >
         <BrandWordmark height={56} className="opacity-95" />
-      </motion.div>
+      </m.div>
 
       <div className="relative z-10 flex w-full flex-1 items-center justify-center">
         {selected && selected.has_pin ? (
@@ -358,7 +275,15 @@ export default function WhoIsWatching() {
           // width, posters fill whatever's left up to a sensible
           // cap (max-w-3xl).
           <div className="grid w-full max-w-7xl items-center gap-12 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-20">
-            {renderPicker("start")}
+            <ProfilePicker
+              alignment="start"
+              profiles={profiles}
+              canManage={canManage}
+              onPickProfile={pickProfile}
+              onHoverProfile={setHoveredProfileId}
+              onSignOut={handleSignOut}
+              onManageProfiles={() => navigate("/admin/users")}
+            />
             <div className="flex justify-center lg:justify-end">
               <PosterWall posters={posters} />
             </div>
@@ -367,7 +292,15 @@ export default function WhoIsWatching() {
           // Single column when there isn't enough catalogue art
           // to fill a wall. The aurora carries the canvas alone
           // so the page still feels deliberate, not under-built.
-          renderPicker("center")
+          <ProfilePicker
+            alignment="center"
+            profiles={profiles}
+            canManage={canManage}
+            onPickProfile={pickProfile}
+            onHoverProfile={setHoveredProfileId}
+            onSignOut={handleSignOut}
+            onManageProfiles={() => navigate("/admin/users")}
+          />
         )}
       </div>
     </div>
@@ -397,12 +330,11 @@ function CinematicBackdrop({
     { staleTime: 5 * 60 * 1000, retry: false },
   );
   const backdrops = useMemo(() => {
-    if (hasWall) return []; // wall replaces mosaic as the catalogue signal
+    if (hasWall) return []; // el wall reemplaza al mosaico como señal del catálogo
     const items = (data?.items ?? []) as MediaItem[];
-    return items
-      .map((it) => it.backdrop_url)
-      .filter((u): u is string => !!u)
-      .slice(0, 12);
+    // flatMap = map + filter en una pasada (descarta entradas sin
+    // backdrop_url y se queda con los 12 primeros).
+    return items.flatMap((it) => (it.backdrop_url ? [it.backdrop_url] : [])).slice(0, 12);
   }, [data, hasWall]);
 
   return (
@@ -422,13 +354,14 @@ function CinematicBackdrop({
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 overflow-hidden opacity-[0.07]"
-          style={{ filter: "blur(28px) saturate(1.4)" }}
+          style={{ filter: "blur(10px) saturate(1.4)" }}
         >
-          <div className="grid h-full w-full grid-cols-2 gap-0 sm:grid-cols-3 md:grid-cols-4">
-            {backdrops.map((url, i) => (
+          <div className="grid size-full grid-cols-2 gap-0 sm:grid-cols-3 md:grid-cols-4">
+            {backdrops.map((url) => (
+              // La URL ya es única por backdrop (la API no devuelve duplicados).
               <div
-                key={i}
-                className="h-full w-full bg-cover bg-center"
+                key={url}
+                className="size-full bg-cover bg-center"
                 style={{ backgroundImage: `url(${url})` }}
               />
             ))}
@@ -464,7 +397,7 @@ function PosterWall({
   posters: { id: string; src: string; title: string }[];
 }) {
   return (
-    <motion.div
+    <m.div
       initial="hidden"
       animate="show"
       variants={{
@@ -486,7 +419,7 @@ function PosterWall({
         const tilt = i % 3 === 0 ? -2 : i % 3 === 2 ? 2 : 0;
         const offsetY = i % 3 === 1 ? -8 : 0;
         return (
-          <motion.div
+          <m.div
             key={p.id}
             variants={{
               hidden: { opacity: 0, y: 18, rotate: tilt },
@@ -499,12 +432,12 @@ function PosterWall({
               src={p.src}
               alt=""
               loading="lazy"
-              className="h-full w-full object-cover"
+              className="size-full object-cover"
             />
-          </motion.div>
+          </m.div>
         );
       })}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -537,7 +470,7 @@ function ProfileCard({
   // and matches HBO Max / Disney+ TV-shaped surfaces.
   if (compact) {
     return (
-      <motion.button
+      <m.button
         type="button"
         onClick={onClick}
         onMouseEnter={() => onHoverChange?.(true)}
@@ -562,13 +495,13 @@ function ProfileCard({
             consistent across both layouts. */}
         <span
           aria-hidden
-          className="absolute left-2 top-1/2 -z-10 h-20 w-20 -translate-y-1/2 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
+          className="absolute left-2 top-1/2 -z-10 size-20 -translate-y-1/2 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
           style={{
             background: `radial-gradient(closest-side, ${palette.background}, transparent 70%)`,
           }}
         />
         <div
-          className="relative flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-full text-2xl font-extralight text-white shadow-lg ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent"
+          className="relative flex size-16 flex-none items-center justify-center overflow-hidden rounded-full text-2xl font-extralight text-white shadow-lg ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent"
           style={{
             background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
           }}
@@ -580,11 +513,11 @@ function ProfileCard({
           <span className="relative">{initials}</span>
           {profile.has_pin && (
             <span
-              className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
+              className="absolute bottom-0 right-0 flex size-5 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
               aria-hidden
             >
               <svg
-                className="h-2.5 w-2.5"
+                className="size-2.5"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -608,14 +541,14 @@ function ProfileCard({
             </p>
           )}
         </div>
-      </motion.button>
+      </m.button>
     );
   }
 
   // Hero-tile variant — used when the picker is centred (no
   // poster wall). Big circular avatar with name underneath.
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={onClick}
       onMouseEnter={() => onHoverChange?.(true)}
@@ -643,7 +576,7 @@ function ProfileCard({
       />
 
       <div
-        className="relative flex h-36 w-36 items-center justify-center overflow-hidden rounded-full text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-40 sm:w-40 sm:text-6xl"
+        className="relative flex size-36 items-center justify-center overflow-hidden rounded-full text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-40 sm:w-40 sm:text-6xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
         }}
@@ -655,11 +588,11 @@ function ProfileCard({
         <span className="relative">{initials}</span>
         {profile.has_pin && (
           <span
-            className="absolute bottom-2.5 right-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
+            className="absolute bottom-2.5 right-2.5 flex size-7 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
             aria-hidden
           >
             <svg
-              className="h-3.5 w-3.5"
+              className="size-3.5"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -674,7 +607,122 @@ function ProfileCard({
       <span className="relative max-w-[10rem] truncate text-base font-light tracking-wide text-text-secondary transition-colors group-hover:text-text-primary">
         {profile.display_name || profile.username.split("/").pop()}
       </span>
-    </motion.button>
+    </m.button>
+  );
+}
+
+// ProfilePicker — encabezado + grid de tarjetas de perfil + acciones
+// secundarias (gestionar / cerrar sesión). Extraído del closure inline
+// que vivía en WhoIsWatching para que React pueda diff-arlo bien y
+// para satisfacer la regla `react-doctor/no-render-in-render` (el
+// closure inline rompe la reconciliación en cada render del padre).
+interface ProfilePickerProps {
+  alignment: "center" | "start";
+  profiles: ProfileSummary[] | undefined;
+  canManage: boolean;
+  onPickProfile: (p: ProfileSummary) => void | Promise<void>;
+  onHoverProfile: (id: string | null) => void;
+  onSignOut: () => void | Promise<void>;
+  onManageProfiles: () => void;
+}
+
+function ProfilePicker({
+  alignment,
+  profiles,
+  canManage,
+  onPickProfile,
+  onHoverProfile,
+  onSignOut,
+  onManageProfiles,
+}: ProfilePickerProps) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className={[
+        "flex flex-col",
+        alignment === "center" ? "items-center text-center" : "items-start text-left",
+      ].join(" ")}
+    >
+      <m.h1
+        initial={{ opacity: 0, y: -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
+        className="mb-3 text-5xl font-extralight tracking-[-0.015em] text-text-primary sm:text-6xl"
+      >
+        {t("whoIsWatching.title")}
+      </m.h1>
+      <m.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.15 }}
+        className="mb-12 text-sm tracking-wider text-text-muted"
+      >
+        {t("whoIsWatching.subtitle", {
+          defaultValue: "Selecciona tu perfil para continuar.",
+        })}
+      </m.p>
+      <m.div
+        initial="hidden"
+        animate="show"
+        variants={{
+          hidden: {},
+          show: {
+            transition: { staggerChildren: 0.08, delayChildren: 0.2 },
+          },
+        }}
+        className={[
+          // En el split-layout (alignment="start") el picker es una
+          // columna vertical al lado del wall — patrón HBO/Disney+ en
+          // TV. La fila centrada cubre la forma de escritorio Netflix.
+          alignment === "start"
+            ? "flex flex-col gap-6"
+            : "flex flex-wrap justify-center gap-8 sm:gap-10",
+        ].join(" ")}
+      >
+        {profiles?.map((p) => (
+          <ProfileCard
+            key={p.id}
+            profile={p}
+            onClick={() => void onPickProfile(p)}
+            onHoverChange={(h) => onHoverProfile(h ? p.id : null)}
+            compact={alignment === "start"}
+          />
+        ))}
+      </m.div>
+
+      <m.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.5 }}
+        className={[
+          "mt-12 flex flex-wrap items-center gap-3 text-xs",
+          alignment === "center" ? "justify-center" : "justify-start",
+        ].join(" ")}
+      >
+        {canManage && (
+          <button
+            type="button"
+            onClick={onManageProfiles}
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
+          >
+            <Pencil className="size-3.5" />
+            {t("whoIsWatching.manageProfiles", {
+              defaultValue: "Gestionar perfiles",
+            })}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void onSignOut()}
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+        >
+          <LogOut className="size-3.5" />
+          {t("whoIsWatching.signOut", {
+            defaultValue: "Cerrar sesión",
+          })}
+        </button>
+      </m.div>
+    </div>
   );
 }
 
@@ -705,6 +753,13 @@ function PinPad({
 
   const focusInput = () => inputRef.current?.focus();
 
+  // Foco inicial gestionado con effect en lugar de autoFocus: evita
+  // que el lector de pantalla anuncie el campo dos veces y mantiene
+  // el control en el componente.
+  useEffect(() => {
+    focusInput();
+  }, []);
+
   useEffect(() => {
     if (errorMessage) {
       focusInput();
@@ -712,14 +767,14 @@ function PinPad({
   }, [errorMessage]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
       className="flex w-full max-w-sm flex-col items-center gap-6"
     >
-      <motion.div
-        className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-3xl font-extralight text-white shadow-2xl"
+      <m.div
+        className="relative flex size-28 items-center justify-center overflow-hidden rounded-full text-3xl font-extralight text-white shadow-2xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
         }}
@@ -731,7 +786,7 @@ function PinPad({
           className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/10 via-transparent to-transparent"
         />
         {initials}
-      </motion.div>
+      </m.div>
 
       <div className="flex flex-col items-center gap-1">
         <h2 className="text-2xl font-light tracking-wide text-text-primary">
@@ -740,17 +795,30 @@ function PinPad({
         <p className="text-sm text-text-muted">{t("whoIsWatching.enterPin")}</p>
       </div>
 
+      {/* role="presentation" + onKeyDown espejo del onClick: el wrapper
+          permite clickar/teclar cualquier parte de los dígitos del PIN
+          para enfocar el input invisible que está debajo. No es un
+          elemento interactivo propio; sólo redirige el foco. */}
       <div
+        role="presentation"
         className="relative flex flex-col items-center gap-3"
         onClick={focusInput}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            focusInput();
+          }
+        }}
       >
         <div className="flex gap-3">
-          {[0, 1, 2, 3].map((i) => {
+          {PIN_DIGIT_SLOTS.map((slot, i) => {
             const filled = i < pin.length;
             const active = i === pin.length && !isLoading;
             return (
               <div
-                key={i}
+                // Slots con key string estable y única, no derivada del
+                // índice (satisface no-array-index-as-key).
+                key={slot}
                 className={[
                   "flex h-14 w-12 items-center justify-center rounded-lg border-2 transition-all",
                   filled
@@ -761,11 +829,11 @@ function PinPad({
                 ].join(" ")}
               >
                 {filled && (
-                  <motion.span
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
+                  <m.span
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
                     transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                    className="block h-3 w-3 rounded-full bg-text-primary"
+                    className="block size-3 rounded-full bg-text-primary"
                   />
                 )}
               </div>
@@ -778,7 +846,6 @@ function PinPad({
           type="tel"
           inputMode="numeric"
           pattern="[0-9]*"
-          autoFocus
           autoComplete="off"
           maxLength={4}
           value={pin}
@@ -786,20 +853,20 @@ function PinPad({
             onPinChange(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))
           }
           aria-label={t("whoIsWatching.pinInputLabel")}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          className="absolute inset-0 size-full cursor-pointer opacity-0"
           disabled={isLoading}
         />
       </div>
 
       <div className="h-5">
         {errorMessage && (
-          <motion.p
+          <m.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center text-sm text-error"
           >
             {errorMessage}
-          </motion.p>
+          </m.p>
         )}
         {isLoading && !errorMessage && (
           <p className="text-center text-sm text-text-muted">
@@ -816,7 +883,7 @@ function PinPad({
       >
         {t("common.cancel")}
       </button>
-    </motion.div>
+    </m.div>
   );
 }
 

@@ -48,7 +48,7 @@ export function CopyButton({ text }: { text: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
-  const handleClick = async () => {
+  const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -60,7 +60,7 @@ export function CopyButton({ text }: { text: string }) {
   };
 
   return (
-    <Button variant="secondary" size="sm" onClick={handleClick}>
+    <Button variant="secondary" size="sm" onClick={copyToClipboard}>
       {copied ? t("admin.federation.copied") : t("admin.federation.copy")}
     </Button>
   );

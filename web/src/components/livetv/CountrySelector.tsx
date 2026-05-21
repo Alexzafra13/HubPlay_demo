@@ -68,7 +68,7 @@ export function CountrySelector({ hasLibrary }: CountrySelectorProps) {
     <div className="flex min-h-[60vh] items-center justify-center px-4">
       <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-5 w-20 h-20 rounded-2xl bg-accent/10 flex items-center justify-center">
+          <div className="mx-auto mb-5 size-20 rounded-2xl bg-accent/10 flex items-center justify-center">
             <svg
               width="40"
               height="40"
@@ -82,7 +82,7 @@ export function CountrySelector({ hasLibrary }: CountrySelectorProps) {
               <path d="M7 22h10M12 18v4" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-text-primary">
+          <h2 className="text-2xl font-semibold text-text-primary">
             {hasLibrary ? t("liveTV.noChannelsLoaded") : t("liveTV.setupLiveTV")}
           </h2>
           <p className="mt-2 text-sm text-text-muted max-w-sm mx-auto">

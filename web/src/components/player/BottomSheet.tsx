@@ -24,17 +24,27 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
   // Escape-to-close. Bound at the window so the sheet doesn't need
   // focus to be reachable — the user may have just tapped a button
   // and the focus is on a now-hidden element.
+  //
+  // Patrón "latest onClose vía ref": el listener se monta UNA vez por
+  // apertura (deps = [open]). Si lo añadiéramos a `onClose` como
+  // dep, cada re-render del padre re-suscribiría el listener, lo cual
+  // es trabajo perdido y rompe la captura de teclas durante el
+  // re-subscribe.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onClose]);
+  }, [open]);
 
   // Body-scroll lock while open. The player itself is already
   // fullscreen so the page underneath rarely matters, but on iOS
@@ -62,6 +72,13 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
         // Backdrop tap closes; sheet body taps are stopped below.
         if (e.target === e.currentTarget) onClose();
       }}
+      onKeyDown={(e) => {
+        // Espejo a11y del onClick: Escape sobre el dialog dispara
+        // onClose por teclado. Cumple click-events-have-key-events
+        // sin tocar la UX existente (el modal global también
+        // escucha Escape; doble seguro).
+        if (e.key === "Escape") onClose();
+      }}
     >
       {/* Backdrop — slightly translucent so the player chrome behind
           stays visible but darkens enough to focus attention. */}
@@ -71,8 +88,13 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
           stretch the full width and look like a heavy modal. */}
       <div
         ref={dialogRef}
+        // role="presentation" indica que es contenedor visual; los
+        // handlers sólo evitan que clicks/teclas dentro del sheet
+        // burbujeen al backdrop y lo cierren accidentalmente.
+        role="presentation"
         className="relative w-full max-w-md mx-auto rounded-t-2xl border-t border-x border-border bg-bg-card/95 backdrop-blur-md shadow-2xl text-text-primary max-h-[75vh] flex flex-col animate-[sheet-up_180ms_ease-out]"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {/* Drag handle visual — non-functional today (no swipe-down
             gesture), but it telegraphs "this is a sheet you can
@@ -96,7 +118,7 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
             aria-label={t("playerControls.sheet.close")}
             className="p-2 -mr-2 rounded-[--radius-sm] text-text-muted hover:text-text-primary hover:bg-white/10 transition-colors cursor-pointer"
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
             </svg>
           </button>
@@ -128,7 +150,7 @@ const SheetRow: FC<SheetRowProps> = ({ selected, label, sublabel, onClick, leadi
     type="button"
     onClick={onClick}
     className={[
-      "w-full flex items-center gap-3 px-3 py-3 rounded-[--radius-md] text-left transition-colors cursor-pointer",
+      "w-full flex items-center gap-3 p-3 rounded-[--radius-md] text-left transition-colors cursor-pointer",
       selected
         ? "bg-accent/15 text-accent"
         : "text-text-primary hover:bg-white/5",
@@ -143,7 +165,7 @@ const SheetRow: FC<SheetRowProps> = ({ selected, label, sublabel, onClick, leadi
       )}
     </span>
     {selected && (
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+      <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
         <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     )}

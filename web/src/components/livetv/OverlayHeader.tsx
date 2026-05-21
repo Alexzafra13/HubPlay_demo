@@ -30,12 +30,12 @@ export function OverlayHeader({
 }: OverlayHeaderProps) {
   const { t } = useTranslation();
   return (
-    <header className="flex items-center gap-3 border-b border-tv-line bg-tv-bg-0/90 px-3 py-3 md:px-5">
+    <header className="flex items-center gap-3 border-b border-tv-line bg-tv-bg-0/90 p-3 md:px-5">
       <button
         type="button"
         onClick={onClose}
         aria-label={t("common.close", { defaultValue: "Cerrar" })}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-tv-line text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
+        className="flex size-9 items-center justify-center rounded-full border border-tv-line text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
       >
         <svg
           width="16"
@@ -59,7 +59,7 @@ export function OverlayHeader({
         bg={channel.logo_bg}
         fg={channel.logo_fg}
         name={channel.name}
-        className="h-10 w-10 rounded-tv-sm"
+        className="size-10 rounded-tv-sm"
         textClassName="text-xs font-bold"
       />
 
@@ -74,7 +74,7 @@ export function OverlayHeader({
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+            <span className="size-1.5 animate-pulse rounded-full bg-white" />
             Live
           </span>
           <span className="text-[11px] text-tv-fg-2">
@@ -108,7 +108,7 @@ export function OverlayHeader({
           }
           aria-pressed={isFavorite}
           className={[
-            "flex h-9 w-9 items-center justify-center rounded-full border border-tv-line transition-colors hover:bg-tv-bg-2",
+            "flex size-9 items-center justify-center rounded-full border border-tv-line transition-colors hover:bg-tv-bg-2",
             isFavorite ? "text-tv-live" : "text-tv-fg-1",
           ].join(" ")}
         >
@@ -168,7 +168,7 @@ function PiPButton() {
       type="button"
       onClick={onClick}
       aria-label="Picture in picture"
-      className="flex h-9 w-9 items-center justify-center rounded-full border border-tv-line text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
+      className="flex size-9 items-center justify-center rounded-full border border-tv-line text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
     >
       <svg
         width="16"

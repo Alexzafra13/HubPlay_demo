@@ -89,22 +89,6 @@ export function useDisableChannel(libraryId: string) {
   });
 }
 
-export function useEnableChannel(libraryId: string) {
-  const queryClient = useQueryClient();
-  return useMutation<void, Error, string>({
-    mutationFn: (channelId) => api.enableChannel(channelId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.unhealthyChannels(libraryId),
-      });
-      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.channelHealthSummary(libraryId),
-      });
-    },
-  });
-}
-
 // ─── Channels without EPG ───────────────────────────────────────────────
 //
 // Admin surface that pairs with the "canales sin guía" panel. The list

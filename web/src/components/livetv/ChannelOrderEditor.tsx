@@ -144,13 +144,19 @@ export function ChannelOrderEditor({
   const trimmed = query.trim().toLowerCase();
   const visible = useMemo(() => {
     if (!trimmed) return draft.map((c, i) => ({ channel: c, realIndex: i }));
-    return draft
-      .map((c, i) => ({ channel: c, realIndex: i }))
-      .filter(
-        ({ channel }) =>
+    // Una pasada: filtra y empaqueta el realIndex a la vez. Antes hacía
+    // map + filter (dos recorridos) sobre listas que pueden tener
+    // cientos de canales.
+    return draft.reduce<{ channel: typeof draft[number]; realIndex: number }[]>(
+      (acc, channel, realIndex) => {
+        const matches =
           channel.name.toLowerCase().includes(trimmed) ||
-          (channel.group_name?.toLowerCase().includes(trimmed) ?? false),
-      );
+          (channel.group_name?.toLowerCase().includes(trimmed) ?? false);
+        if (matches) acc.push({ channel, realIndex });
+        return acc;
+      },
+      [],
+    );
   }, [draft, trimmed]);
 
   const handleDragEnd = useCallback(
@@ -232,7 +238,7 @@ export function ChannelOrderEditor({
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[180px]">
           <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-text-muted"
             aria-hidden="true"
           />
           <input
@@ -256,7 +262,7 @@ export function ChannelOrderEditor({
               })}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-muted hover:bg-bg-elevated"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="size-3.5" />
             </button>
           )}
         </div>
@@ -289,11 +295,11 @@ export function ChannelOrderEditor({
           </span>
           <div className="flex flex-wrap items-center gap-1">
             <Button variant="ghost" size="sm" onClick={() => handleBulkHide(true)}>
-              <EyeOff className="h-3.5 w-3.5" />
+              <EyeOff className="size-3.5" />
               {t("livetv.customize.bulkHide", { defaultValue: "Ocultar" })}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => handleBulkHide(false)}>
-              <Eye className="h-3.5 w-3.5" />
+              <Eye className="size-3.5" />
               {t("livetv.customize.bulkShow", { defaultValue: "Mostrar" })}
             </Button>
             <Button variant="ghost" size="sm" onClick={clearSelection}>
@@ -313,7 +319,7 @@ export function ChannelOrderEditor({
           aria-label={t("livetv.customize.selectAll", {
             defaultValue: "Seleccionar todo lo visible",
           })}
-          className="h-3.5 w-3.5 cursor-pointer"
+          className="size-3.5 cursor-pointer"
         />
         <span className="w-4" aria-hidden="true" />
         <span className="w-12 text-right">#</span>
@@ -375,7 +381,7 @@ export function ChannelOrderEditor({
           changes, so the panel stays calm at rest. */}
       <div
         className={[
-          "sticky bottom-0 -mx-3 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg-card/95 px-3 py-3 backdrop-blur transition-opacity",
+          "sticky bottom-0 -mx-3 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg-card/95 p-3 backdrop-blur transition-opacity",
           dirty ? "opacity-100" : "pointer-events-none opacity-0",
         ].join(" ")}
       >
@@ -386,11 +392,11 @@ export function ChannelOrderEditor({
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" onClick={onReset} disabled={resetPending}>
-            <RotateCcw className="h-4 w-4" />
+            <RotateCcw className="size-4" />
             {t(resetLabelKey)}
           </Button>
           <Button variant="primary" onClick={onSave} disabled={!dirty || savePending}>
-            {savePending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
+            {savePending ? <Spinner size="sm" /> : <Save className="size-4" />}
             {t(saveLabelKey)}
           </Button>
         </div>
@@ -468,7 +474,7 @@ function SortableRow({
           defaultValue: "Seleccionar {{name}}",
           name: channel.name,
         })}
-        className="h-3.5 w-3.5 cursor-pointer"
+        className="size-3.5 cursor-pointer"
       />
 
       <button
@@ -481,7 +487,7 @@ function SortableRow({
         })}
         className="cursor-grab touch-none rounded p-1 text-text-muted hover:bg-bg-elevated focus:outline-none focus:ring-1 focus:ring-accent active:cursor-grabbing"
       >
-        <GripVertical className="h-4 w-4" />
+        <GripVertical className="size-4" />
       </button>
 
       {/* Position cell — click to edit. Input commits on Enter / blur,
@@ -558,7 +564,7 @@ function SortableRow({
           })}
           className="rounded p-1.5 text-text-muted hover:bg-bg-elevated disabled:opacity-30"
         >
-          <ArrowUpToLine className="h-4 w-4" />
+          <ArrowUpToLine className="size-4" />
         </button>
         <button
           type="button"
@@ -569,7 +575,7 @@ function SortableRow({
           })}
           className="rounded p-1.5 text-text-muted hover:bg-bg-elevated disabled:opacity-30"
         >
-          <ArrowDownToLine className="h-4 w-4" />
+          <ArrowDownToLine className="size-4" />
         </button>
         <button
           type="button"
@@ -585,7 +591,7 @@ function SortableRow({
             channel.hidden ? "text-danger" : "text-text-muted",
           ].join(" ")}
         >
-          {channel.hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {channel.hidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
         </button>
       </div>
     </li>
@@ -614,7 +620,7 @@ function ChannelRowLogo({
   };
   const inner = (
     <span
-      className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-semibold"
+      className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-semibold"
       style={fallbackStyle}
       aria-hidden={onEdit ? "true" : undefined}
     >
@@ -622,7 +628,7 @@ function ChannelRowLogo({
         <img
           src={channel.logo_url || undefined}
           alt=""
-          className="h-full w-full object-cover"
+          className="size-full object-cover"
           onError={() => setBroken(true)}
           loading="lazy"
         />

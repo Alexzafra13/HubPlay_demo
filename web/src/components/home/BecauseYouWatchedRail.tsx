@@ -41,7 +41,7 @@ export function BecauseYouWatchedRail() {
       >
         {Array.from({ length: 6 }, (_, i) => (
           <div
-            key={i}
+            key={`because-skeleton-${i}`}
             className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0"
           >
             <Skeleton

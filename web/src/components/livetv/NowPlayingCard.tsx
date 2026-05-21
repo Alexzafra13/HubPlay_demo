@@ -38,7 +38,7 @@ export function NowPlayingCard({
           {t("liveTV.nowOnAir", { defaultValue: "Ahora en antena" })}
         </div>
         <div className="mt-2 text-sm text-tv-fg-2">
-          {t("liveTV.noEPG", { defaultValue: "Sin guía disponible" })} — {channel.name}
+          {t("liveTV.noEPG", { defaultValue: "Sin guía disponible" })} · {channel.name}
         </div>
       </div>
     );
@@ -70,14 +70,14 @@ export function NowPlayingCard({
           {formatTime(nowPlaying.start_time)} –{" "}
           {formatTime(nowPlaying.end_time)}
         </span>
-        <span className="h-1 w-1 rounded-full bg-tv-fg-3" aria-hidden="true" />
+        <span className="size-1 rounded-full bg-tv-fg-3" aria-hidden="true" />
         <span>
           {durationMin} {t("liveTV.min", { defaultValue: "min" })}
         </span>
         {nowPlaying.category && (
           <>
             <span
-              className="h-1 w-1 rounded-full bg-tv-fg-3"
+              className="size-1 rounded-full bg-tv-fg-3"
               aria-hidden="true"
             />
             <span>{nowPlaying.category}</span>

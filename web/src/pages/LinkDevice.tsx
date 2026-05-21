@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 import { QrCode } from "lucide-react";
@@ -52,14 +52,17 @@ export default function LinkDevice() {
     !!navigator.mediaDevices?.getUserMedia;
 
   // Keep the input in sync with the URL — if the operator scans a
-  // second QR without leaving the page, the field updates.
-  useEffect(() => {
-    const fromURL = searchParams.get("code");
+  // second QR without leaving the page, the field updates. Render-time
+  // guarded setState: only react when the URL's `code` actually changes,
+  // never on every render.
+  const fromURL = searchParams.get("code");
+  const [lastFromURL, setLastFromURL] = useState(fromURL);
+  if (fromURL !== lastFromURL) {
+    setLastFromURL(fromURL);
     if (fromURL && fromURL !== code && !approve.isPending) {
       setCode(fromURL);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -89,7 +92,7 @@ export default function LinkDevice() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-6 p-6 sm:p-10">
       <header>
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
           {t("link.title")}
         </h1>
         <p className="mt-2 text-sm text-text-muted">{t("link.subtitle")}</p>
@@ -105,7 +108,6 @@ export default function LinkDevice() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="ABCD-EFGH"
-            autoFocus
             spellCheck={false}
             autoComplete="off"
             inputMode="text"
@@ -136,7 +138,7 @@ export default function LinkDevice() {
             disabled={approve.isPending || success}
             className="flex items-center justify-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm font-medium text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <QrCode className="h-4 w-4" aria-hidden />
+            <QrCode className="size-4" aria-hidden />
             {t("link.scanQR", { defaultValue: "Escanear código QR" })}
           </button>
         )}

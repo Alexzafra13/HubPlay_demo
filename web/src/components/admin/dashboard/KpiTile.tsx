@@ -74,7 +74,7 @@ export function KpiTile({
     <div className="flex h-full flex-col gap-2 rounded-[--radius-lg] border border-border bg-bg-card p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-text-muted">
-          <Icon className="h-3.5 w-3.5" aria-hidden />
+          <Icon className="size-3.5" aria-hidden />
           <span className="text-[10px] font-medium uppercase tracking-wider">
             {label}
           </span>

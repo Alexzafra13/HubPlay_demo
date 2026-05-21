@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 // sessionStorage key used to remember a session-wide dismissal of the
@@ -247,36 +247,23 @@ export function HeroTrailer({
   // extension breaking the embed) the watchdog effect below
   // dismisses and the backdrop stays — strictly better than fading
   // the hero into a half-loaded player or a blocked-frame error.
+  // onReveal vive en un ref para no rearmar el timeout cada vez que el
+  // padre re-renderiza con una identidad nueva de la callback.
+  const onRevealRef = useRef(onReveal);
+  useEffect(() => {
+    onRevealRef.current = onReveal;
+  }, [onReveal]);
+
   useEffect(() => {
     if (!loaded || !iframeLoaded || revealed || dismissed || skipped) return;
     const revealTimer = setTimeout(() => {
       setRevealed(true);
-      onReveal?.();
+      onRevealRef.current?.();
     }, 1200);
     return () => clearTimeout(revealTimer);
-  }, [loaded, iframeLoaded, revealed, dismissed, skipped, onReveal]);
+  }, [loaded, iframeLoaded, revealed, dismissed, skipped]);
 
-  // Watchdog: if the iframe doesn't fire onLoad within 6s of mount
-  // we treat it as a hard fail and dismiss. Cross-origin iframes
-  // don't always fire onError on CSP / X-Frame-Options blocks
-  // (browsers vary), so this timer is the reliable signal — onError
-  // is a belt-and-suspenders nice-to-have, not the primary gate.
-  // 6s comfortably exceeds a slow-network embed page fetch (~3s p99
-  // on YouTube nocookie) without making a real failure hang the
-  // hero indefinitely.
-  useEffect(() => {
-    if (!loaded || iframeLoaded || dismissed || skipped) return;
-    const watchdog = setTimeout(() => {
-      handleDismiss();
-    }, 6000);
-    return () => clearTimeout(watchdog);
-    // handleDismiss only touches local state setters and
-    // sessionStorage — it's stable for the life of the component,
-    // so omitting it from deps is intentional.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, iframeLoaded, dismissed, skipped]);
-
-  const handleDismiss = () => {
+  const handleDismiss = useCallback(() => {
     setDismissed(true);
     // Restore the static backdrop in the parent so the page doesn't
     // go blank on the right when the trailer disappears.
@@ -287,7 +274,31 @@ export function HeroTrailer({
       // No storage = no persistence; the dismissal still holds for
       // this mount via the dismissed state.
     }
-  };
+  }, [onDismiss]);
+
+  // Watchdog: if the iframe doesn't fire onLoad within 6s of mount
+  // we treat it as a hard fail and dismiss. Cross-origin iframes
+  // don't always fire onError on CSP / X-Frame-Options blocks
+  // (browsers vary), so this timer is the reliable signal — onError
+  // is a belt-and-suspenders nice-to-have, not the primary gate.
+  // 6s comfortably exceeds a slow-network embed page fetch (~3s p99
+  // on YouTube nocookie) without making a real failure hang the
+  // hero indefinitely.
+  // handleDismiss vía ref por el mismo motivo: el watchdog no debe
+  // re-armarse cuando cambia la identidad de la callback (depende de
+  // onDismiss del padre, que rota cada render).
+  const handleDismissRef = useRef(handleDismiss);
+  useEffect(() => {
+    handleDismissRef.current = handleDismiss;
+  }, [handleDismiss]);
+
+  useEffect(() => {
+    if (!loaded || iframeLoaded || dismissed || skipped) return;
+    const watchdog = setTimeout(() => {
+      handleDismissRef.current();
+    }, 6000);
+    return () => clearTimeout(watchdog);
+  }, [loaded, iframeLoaded, dismissed, skipped]);
 
   const embedUrl = trailerEmbedURL(siteKey, videoKey);
   if (!embedUrl || dismissed || skipped || embeddable === false) {
@@ -348,7 +359,7 @@ export function HeroTrailer({
           aria-label={t("itemDetail.dismissTrailer")}
           className="absolute bottom-4 right-4 z-20 flex h-9 items-center gap-1.5 rounded-full bg-black/60 px-3 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/80 cursor-pointer"
         >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
           {t("itemDetail.dismissTrailer")}

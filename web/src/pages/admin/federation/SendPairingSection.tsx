@@ -64,7 +64,7 @@ export function SendPairingSection() {
           disabled={send.isPending || !baseURL.trim()}
           isLoading={send.isPending}
         >
-          <Send className="-ml-1 mr-1.5 h-4 w-4" />
+          <Send className="-ml-1 mr-1.5 size-4" />
           {t("admin.federation.sendRequest.send", {
             defaultValue: "Enviar petición",
           })}

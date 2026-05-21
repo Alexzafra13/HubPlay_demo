@@ -70,17 +70,20 @@ export default function PeerItemDetail() {
   const library = libraries.data?.find((l) => l.id === libraryId);
 
   // findItem walks every cached items page for this (peer, library)
-  // pair and returns the first match.
+  // pair y devuelve el primer match. Map en lugar de find anidado en
+  // loop — react-doctor/js-index-maps lo prefiere y mantiene O(N+M)
+  // sin saltarse páginas.
   const item = useMemo<FederationRemoteItem | undefined>(() => {
     const cached = queryClient.getQueriesData<FederationRemoteItemsResponse>({
       queryKey: ["me", "peers", peerId, "libraries", libraryId, "items"],
     });
+    const byId = new Map<string, FederationRemoteItem>();
     for (const [, value] of cached) {
       if (!value) continue;
-      const found = value.items.find((it) => it.id === itemId);
-      if (found) return found;
+      for (const it of value.items) byId.set(it.id, it);
     }
-    return items.data?.items.find((it) => it.id === itemId);
+    for (const it of items.data?.items ?? []) byId.set(it.id, it);
+    return byId.get(itemId);
   }, [queryClient, peerId, libraryId, itemId, items.data]);
 
   // ─── Player overlay state ────────────────────────────────────────
@@ -320,7 +323,7 @@ export default function PeerItemDetail() {
           {peer && (
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card/60 px-3 py-1.5 backdrop-blur-sm">
               <span
-                className="h-2 w-2 rounded-full bg-emerald-500"
+                className="size-2 rounded-full bg-emerald-500"
                 aria-hidden
               />
               {t("peers.sharedBy", { name: peer.name })}
@@ -351,7 +354,7 @@ function formatHms(totalSeconds: number): string {
 
 function PlayFromStartIcon() {
   return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+    <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
       <path d="M6 6h2v12H6zM10 12l9-6v12z" />
     </svg>
   );
@@ -360,7 +363,7 @@ function PlayFromStartIcon() {
 function BackIcon() {
   return (
     <svg
-      className="h-4 w-4"
+      className="size-4"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

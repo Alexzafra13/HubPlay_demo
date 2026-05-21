@@ -355,7 +355,7 @@ function StatusDot({ status }: { status: HealthStatus }) {
 
   return (
     <span
-      className={`mt-1 flex h-2.5 w-2.5 shrink-0 rounded-full ring-4 ${config.color} ${config.ring}`}
+      className={`mt-1 flex size-2.5 shrink-0 rounded-full ring-4 ${config.color} ${config.ring}`}
       aria-hidden="true"
     />
   );

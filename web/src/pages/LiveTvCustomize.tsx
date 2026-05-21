@@ -127,8 +127,14 @@ export default function LiveTvCustomize() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    const orderedIDs = draft.map((c) => c.id);
-    const hiddenIDs = draft.filter((c) => c.hidden).map((c) => c.id);
+    // Una sola pasada para ambos arrays: antes hacíamos map + filter
+    // + map (3 recorridos) sobre la misma lista de canales.
+    const orderedIDs: string[] = [];
+    const hiddenIDs: string[] = [];
+    for (const c of draft) {
+      orderedIDs.push(c.id);
+      if (c.hidden) hiddenIDs.push(c.id);
+    }
     await replaceOrder.mutateAsync({
       ordered_channel_ids: orderedIDs,
       hidden_channel_ids: hiddenIDs,
@@ -177,7 +183,7 @@ export default function LiveTvCustomize() {
             to="/live-tv"
             className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-text"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="size-4" />
             {t("livetv.customize.back")}
           </Link>
           <h1 className="mt-2 text-xl font-semibold text-text">

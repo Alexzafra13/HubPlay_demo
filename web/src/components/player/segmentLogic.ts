@@ -10,13 +10,13 @@ import type { EpisodeSegment } from "@/api/types";
 // that future low-confidence fingerprint hits don't pop a button at
 // the wrong moment. Tunable per-deployment without code changes is
 // out of scope — 0.7 is a sensible default everywhere.
-export const MIN_CONFIDENCE = 0.7;
+const MIN_CONFIDENCE = 0.7;
 
 // Tail-trim on the active window so the button doesn't flicker into
 // view in the last half-second of the segment. Without this, the
 // "intro" range that ends at currentTime + 0.4s briefly disappears
 // and reappears as the timer ticks — bad UX.
-export const TAIL_TRIM_SECONDS = 0.5;
+const TAIL_TRIM_SECONDS = 0.5;
 
 // pickActiveSegment returns the segment whose [start, end - tail]
 // window contains the current playback time, after filtering by

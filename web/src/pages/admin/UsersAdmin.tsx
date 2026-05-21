@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { User } from "@/api/types";
 import {
@@ -125,14 +125,17 @@ export default function UsersAdmin() {
   const { data: accessData, isLoading: accessLoading } = useUserLibraryAccess(
     accessTarget?.id,
   );
-  useEffect(() => {
-    // Seed the draft once when the server response lands. If the admin
-    // already edited the draft, leave it alone — re-seeding would
-    // discard their in-progress changes when the query refetches.
+  // Seed the draft once when the server response lands. If the admin
+  // already edited the draft, leave it alone — re-seeding would
+  // discard their in-progress changes when the query refetches.
+  // Render-time guarded setState reacting to accessData transitions.
+  const [lastAccessData, setLastAccessData] = useState(accessData);
+  if (accessData !== lastAccessData) {
+    setLastAccessData(accessData);
     if (accessData && accessDraft === null) {
       setAccessDraft(accessData.library_ids);
     }
-  }, [accessData, accessDraft]);
+  }
 
   function closeAccessModal() {
     setAccessTarget(null);
@@ -376,16 +379,23 @@ export default function UsersAdmin() {
   // the default. We only seed when the modal is open AND the local
   // state is still the initial empty array, so an admin who explicitly
   // un-checks everything before submitting doesn't get auto-re-checked.
-  useEffect(() => {
-    if (!showAddModal) return;
-    if (newGrantLibraryIds.length > 0) return;
-    if (allLibraries.length === 0) return;
-    setNewGrantLibraryIds(allLibraries.map((l) => l.id));
-    // We deliberately omit newGrantLibraryIds from deps: this seed is a
-    // ONE-shot when the modal opens, not a reactive sync, otherwise
-    // un-ticking everything would immediately re-tick everything.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAddModal, allLibraries]);
+  // ONE-shot seed when the modal opens, NOT a reactive sync — once
+  // the admin un-ticks anything, the change must stick instead of
+  // being re-seeded. Render-time guarded setState on the modal-open
+  // transition: only fires when showAddModal flips from false to true
+  // (or when allLibraries arrives after the modal was already open).
+  const seedKey = showAddModal ? `open|${allLibraries.length}` : "closed";
+  const [lastSeedKey, setLastSeedKey] = useState(seedKey);
+  if (seedKey !== lastSeedKey) {
+    setLastSeedKey(seedKey);
+    if (
+      showAddModal &&
+      newGrantLibraryIds.length === 0 &&
+      allLibraries.length > 0
+    ) {
+      setNewGrantLibraryIds(allLibraries.map((l) => l.id));
+    }
+  }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -624,12 +634,12 @@ export default function UsersAdmin() {
                         defaultValue: "Mostrar miembros",
                       })
                 }
-                className="mt-1.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                className="mt-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
               >
                 {opts.expanded ? (
-                  <ChevronDown className="h-3.5 w-3.5" />
+                  <ChevronDown className="size-3.5" />
                 ) : (
-                  <ChevronRight className="h-3.5 w-3.5" />
+                  <ChevronRight className="size-3.5" />
                 )}
               </button>
             )}
@@ -640,12 +650,12 @@ export default function UsersAdmin() {
               />
               {user.has_pin && (
                 <span
-                  className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white shadow ring-1 ring-bg-card"
+                  className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-black/70 text-white shadow ring-1 ring-bg-card"
                   aria-label={t("admin.users.pinSet", {
                     defaultValue: "PIN configurado",
                   })}
                 >
-                  <Lock className="h-2.5 w-2.5" />
+                  <Lock className="size-2.5" />
                 </span>
               )}
             </div>
@@ -701,7 +711,7 @@ export default function UsersAdmin() {
               <dt className="text-text-muted">{t("admin.users.role")}</dt>
               <dd>
                 {isProfile ? (
-                  <span className="text-text-muted">—</span>
+                  <span className="text-text-muted">–</span>
                 ) : (
                   <select
                     value={user.role}
@@ -728,7 +738,7 @@ export default function UsersAdmin() {
               </dt>
               <dd>
                 {user.role === "admin" ? (
-                  <span className="text-text-muted">—</span>
+                  <span className="text-text-muted">–</span>
                 ) : (
                   <select
                     value={ratingDropdownValue(user.max_content_rating)}
@@ -807,7 +817,7 @@ export default function UsersAdmin() {
               </dt>
               <dd>
                 {isProfile || user.is_primary ? (
-                  <span className="text-text-muted">—</span>
+                  <span className="text-text-muted">–</span>
                 ) : (
                   <select
                     value={user.access_expires_at ? -1 : 0}
@@ -899,7 +909,7 @@ export default function UsersAdmin() {
             </thead>
             <tbody className="divide-y divide-border">
               {Array.from({ length: 4 }, (_, i) => (
-                <tr key={i} className="bg-bg-card">
+                <tr key={`users-skeleton-${i}`} className="bg-bg-card">
                   <td className="px-4 py-3"><Skeleton variant="text" width="60%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="75%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="rectangular" width={56} height={20} /></td>
@@ -1021,12 +1031,12 @@ export default function UsersAdmin() {
                                     defaultValue: 'Mostrar miembros',
                                   })
                             }
-                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                            className="inline-flex size-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
                           >
                             {opts.expanded ? (
-                              <ChevronDown className="h-3.5 w-3.5" />
+                              <ChevronDown className="size-3.5" />
                             ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
+                              <ChevronRight className="size-3.5" />
                             )}
                           </button>
                         ) : (
@@ -1045,11 +1055,11 @@ export default function UsersAdmin() {
                         )}
                         {user.has_pin && (
                           <span
-                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"
+                            className="inline-flex size-4 shrink-0 items-center justify-center text-text-muted"
                             aria-label={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
                             title={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
                           >
-                            <Lock className="h-3 w-3" />
+                            <Lock className="size-3" />
                           </span>
                         )}
                         {isSelf && (
@@ -1071,7 +1081,7 @@ export default function UsersAdmin() {
                         {opts.memberCount !== undefined && opts.memberCount > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary shrink-0">
                             <svg
-                              className="h-3 w-3"
+                              className="size-3"
                               viewBox="0 0 24 24"
                               fill="none"
                               stroke="currentColor"
@@ -1244,20 +1254,23 @@ export default function UsersAdmin() {
                           ignored here — the strip stays text-only to
                           keep table rows compact. */}
                       <div className="flex justify-end gap-2 flex-wrap">
-                        {getUserActions(user)
-                          .filter((action) => !action.hidden)
-                          .map((action) => (
-                            <Button
-                              key={action.label}
-                              variant={action.danger ? 'danger' : 'secondary'}
-                              size="sm"
-                              disabled={action.disabled}
-                              onClick={action.onClick}
-                              title={action.hint}
-                            >
-                              {action.label}
-                            </Button>
-                          ))}
+                        {/* flatMap = filter + map en una sola pasada. */}
+                        {getUserActions(user).flatMap((action) =>
+                          action.hidden
+                            ? []
+                            : [
+                                <Button
+                                  key={action.label}
+                                  variant={action.danger ? 'danger' : 'secondary'}
+                                  size="sm"
+                                  disabled={action.disabled}
+                                  onClick={action.onClick}
+                                  title={action.hint}
+                                >
+                                  {action.label}
+                                </Button>,
+                              ],
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1732,7 +1745,6 @@ export default function UsersAdmin() {
               placeholder={t('admin.users.profileNamePlaceholder', { defaultValue: 'Pedro' })}
               value={profileName}
               onChange={(e) => setProfileName(e.target.value)}
-              autoFocus
               required
             />
             {createProfile.error && (
@@ -1781,7 +1793,6 @@ export default function UsersAdmin() {
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={4}
-              autoFocus
               value={pinValue}
               onChange={(e) => setPinValue(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
               placeholder="••••"

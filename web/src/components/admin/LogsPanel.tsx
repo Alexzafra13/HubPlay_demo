@@ -217,9 +217,9 @@ export function LogsPanel() {
             }
           >
             {paused ? (
-              <Play className="h-3.5 w-3.5" />
+              <Play className="size-3.5" />
             ) : (
-              <Pause className="h-3.5 w-3.5" />
+              <Pause className="size-3.5" />
             )}
           </Button>
           <Button
@@ -230,7 +230,7 @@ export function LogsPanel() {
               defaultValue: "Limpiar pantalla",
             })}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="size-3.5" />
           </Button>
           <Button
             size="sm"
@@ -247,9 +247,9 @@ export function LogsPanel() {
             }
           >
             {fullscreen ? (
-              <Minimize2 className="h-3.5 w-3.5" />
+              <Minimize2 className="size-3.5" />
             ) : (
-              <Maximize2 className="h-3.5 w-3.5" />
+              <Maximize2 className="size-3.5" />
             )}
           </Button>
         </div>
@@ -258,7 +258,7 @@ export function LogsPanel() {
       {/* Toolbar: search + level toggles */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-text-muted" />
           <input
             type="text"
             value={search}
@@ -277,7 +277,7 @@ export function LogsPanel() {
               })}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
             >
-              <X className="h-3 w-3" />
+              <X className="size-3" />
             </button>
           )}
         </div>
@@ -316,7 +316,7 @@ export function LogsPanel() {
                 ].join(" ")}
               >
                 {m}
-                {active && <X className="h-2.5 w-2.5" />}
+                {active && <X className="size-2.5" />}
               </button>
             );
           })}
@@ -345,9 +345,11 @@ export function LogsPanel() {
           </p>
         ) : (
           <ul className="flex flex-col divide-y divide-border-subtle/40">
-            {visible.map((e, i) => (
+            {visible.map((e) => (
+              // ts + level + msg da una key compuesta única por entry
+              // sin depender del índice (que cambia al filtrar).
               <LogRow
-                key={`${e.ts}-${i}`}
+                key={`${e.ts}-${e.level}-${e.msg}`}
                 entry={e}
                 onModuleClick={(m) => setModuleFilter(m)}
               />
@@ -406,7 +408,7 @@ function ConnectionPill({
     >
       <span
         className={[
-          "h-1.5 w-1.5 rounded-full",
+          "size-1.5 rounded-full",
           connected ? "bg-success" : "bg-warning",
         ].join(" ")}
       />
@@ -595,16 +597,16 @@ function LogRow({
               className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-primary cursor-pointer"
             >
               {copied ? (
-                <Check className="h-3 w-3 text-success" />
+                <Check className="size-3 text-success" />
               ) : (
-                <Copy className="h-3 w-3" />
+                <Copy className="size-3" />
               )}
             </span>
             {hasDetail &&
               (expanded ? (
-                <ChevronDown className="h-3 w-3 text-text-muted" />
+                <ChevronDown className="size-3 text-text-muted" />
               ) : (
-                <ChevronRight className="h-3 w-3 text-text-muted" />
+                <ChevronRight className="size-3 text-text-muted" />
               ))}
           </span>
         </div>

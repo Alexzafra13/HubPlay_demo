@@ -141,7 +141,7 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
       {/* Warning */}
       <div className="mb-6 flex items-start gap-3 rounded-[--radius-md] bg-warning/10 px-4 py-3">
         <svg
-          className="mt-0.5 h-5 w-5 shrink-0 text-warning"
+          className="mt-0.5 size-5 shrink-0 text-warning"
           viewBox="0 0 20 20"
           fill="currentColor"
         >

@@ -1,5 +1,6 @@
 import { useEffect, Suspense } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router";
+import { LazyMotion, domAnimation } from "framer-motion";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStatus } from "@/api/hooks";
 import { api } from "@/api/client";
@@ -92,6 +93,14 @@ export function App() {
   const needsSetup = setupStatus?.needs_setup ?? false;
 
   return (
+    // LazyMotion + `strict` carga `domAnimation` (~25 KB) UNA sola vez
+    // arriba del árbol y obliga al resto del código a usar `<m.X>` en
+    // lugar de `<motion.X>`. Sin esto los `<m.X>` montan pero las
+    // animaciones nunca corren — el menú del avatar, el dropdown de
+    // búsqueda, las notificaciones, el drawer móvil etc. se quedan en
+    // su estado `initial` (típicamente `opacity: 0`), apareciendo como
+    // si no respondieran al click.
+    <LazyMotion features={domAnimation} strict>
     <ErrorBoundary>
     <DebugOverlay />
     {/* Host global de modales de acciones sobre items (Identify, Edit
@@ -239,5 +248,6 @@ export function App() {
       </Routes>
     </Suspense>
     </ErrorBoundary>
+    </LazyMotion>
   );
 }

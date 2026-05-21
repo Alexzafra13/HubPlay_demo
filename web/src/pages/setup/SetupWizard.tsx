@@ -23,6 +23,9 @@ interface AdminData {
 }
 
 interface LibraryEntry {
+  // ID local para React keys. Lo añade LibrariesStep al crear cada
+  // entrada en el wizard; no se persiste ni viaja al backend.
+  localId: string;
   name: string;
   contentType: string;
   path: string;
@@ -75,7 +78,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
             <div className="flex flex-col items-center gap-1.5">
               <div
                 className={[
-                  "flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-all duration-300",
+                  "flex size-9 items-center justify-center rounded-full text-sm font-semibold transition-all duration-300",
                   isActive
                     ? "bg-accent text-white shadow-md shadow-accent/30 scale-110"
                     : isCompleted
@@ -84,7 +87,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
                 ].join(" ")}
               >
                 {isCompleted ? (
-                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <svg className="size-4" viewBox="0 0 20 20" fill="currentColor">
                     <path
                       fillRule="evenodd"
                       d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"

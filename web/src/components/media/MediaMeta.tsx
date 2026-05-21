@@ -67,4 +67,3 @@ const MediaMeta: FC<MediaMetaProps> = ({ streams }) => {
 };
 
 export { MediaMeta };
-export type { MediaMetaProps };

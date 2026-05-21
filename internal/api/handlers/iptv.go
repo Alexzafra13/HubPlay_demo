@@ -29,6 +29,7 @@ import (
 	"net/http"
 
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 	"hubplay/internal/iptv"
 )
 
@@ -47,6 +48,11 @@ type IPTVHandler struct {
 	libraries LibraryRepository
 	access    LibraryAccessService
 	audit     AuditEmitter
+	// bus es opcional. Cuando está presente, los handlers de
+	// personalización per-user publican eventos `channel.order.updated`
+	// para que /me/events los entregue a los otros dispositivos del
+	// mismo usuario. Nil = no-op (test rigs).
+	bus       EventBusPublisher
 	logger    *slog.Logger
 }
 
@@ -62,7 +68,7 @@ type IPTVHandler struct {
 //     Functional but wasteful (N×404 per grid paint); the cache is
 //     constructed best-effort in main.go and only ends up nil if the
 //     cache directory can't be created.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, logger *slog.Logger) *IPTVHandler {
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, bus EventBusPublisher, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,
@@ -72,8 +78,22 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTV
 		libraries: libraries,
 		access:    access,
 		audit:     audit,
+		bus:       bus,
 		logger:    logger.With("module", "iptv-handler"),
 	}
+}
+
+// publishOrderUpdated fans out a per-user `channel.order.updated`
+// event so other devices of the same user can refetch their Live TV
+// list. nil-bus is a no-op so test rigs without a bus stay simple.
+func (h *IPTVHandler) publishOrderUpdated(userID string) {
+	if h.bus == nil {
+		return
+	}
+	h.bus.Publish(event.Event{
+		Type: event.ChannelOrderUpdated,
+		Data: map[string]any{"user_id": userID},
+	})
 }
 
 func (h *IPTVHandler) auditEmit() AuditEmitter {

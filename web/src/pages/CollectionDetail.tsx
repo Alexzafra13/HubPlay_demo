@@ -34,11 +34,11 @@ function MovieTile({ item }: { item: StudioItem }) {
             alt={item.title}
             loading="lazy"
             decoding="async"
-            className="h-full w-full object-cover"
+            className="size-full object-cover"
             onError={() => setImageFailed(true)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
             <span className="text-4xl font-bold text-text-muted">
               {item.title.charAt(0).toUpperCase()}
             </span>
@@ -86,10 +86,11 @@ export default function CollectionDetail() {
   const totalCount = collection.items.length;
   // Rango de años útil como meta: "1981 – 2008" da idea de la
   // longevidad de la saga de un vistazo. Si la saga sólo tiene una
-  // peli o un único año, mostramos el año sólo.
-  const years = collection.items
-    .map((i) => i.year)
-    .filter((y): y is number => typeof y === "number" && y > 0);
+  // peli o un único año, mostramos el año sólo. flatMap = map + filter
+  // en una sola pasada.
+  const years = collection.items.flatMap((i) =>
+    typeof i.year === "number" && i.year > 0 ? [i.year] : [],
+  );
   const yearRange = years.length > 0
     ? years.length === 1 || Math.min(...years) === Math.max(...years)
       ? String(Math.min(...years))
@@ -155,7 +156,7 @@ export default function CollectionDetail() {
               onClick={() => setImagesOpen(true)}
               className="bg-black/50 text-white backdrop-blur hover:bg-black/70"
             >
-              <ImageIcon className="h-3.5 w-3.5" />
+              <ImageIcon className="size-3.5" />
               {t("collectionImage.menuLabel", {
                 defaultValue: "Cambiar imágenes",
               })}
@@ -171,7 +172,7 @@ export default function CollectionDetail() {
                 alt={collection.name}
                 loading="eager"
                 decoding="async"
-                className="h-full w-full object-cover"
+                className="size-full object-cover"
               />
             ) : (
               <span className="text-5xl font-bold text-text-muted">
@@ -184,7 +185,7 @@ export default function CollectionDetail() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent/90">
               {t("collectionDetail.kind", { defaultValue: "Saga" })}
             </p>
-            <h1 className="text-3xl font-bold leading-tight tracking-tight text-text-primary drop-shadow-md sm:text-5xl">
+            <h1 className="text-3xl font-semibold leading-tight tracking-tight text-text-primary drop-shadow-md sm:text-5xl">
               {collection.name}
             </h1>
             {(totalCount > 0 || yearRange) && (

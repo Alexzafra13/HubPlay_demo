@@ -18,7 +18,7 @@ export default function Settings() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8 sm:px-10">
-      <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+      <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
         {t("settings.title")}
       </h1>
 

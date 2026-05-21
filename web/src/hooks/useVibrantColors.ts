@@ -66,16 +66,18 @@ export function useVibrantColors(imageUrl: string | null | undefined): VibrantPa
     return cache.get(imageUrl) ?? EMPTY;
   });
 
+  // Synchronous palette swap on URL change — render-time guarded so the
+  // previous hero's colours don't bleed into the next one's first paint.
+  // The async decode for uncached URLs still lives in the effect below.
+  const [lastImageUrl, setLastImageUrl] = useState(imageUrl);
+  if (imageUrl !== lastImageUrl) {
+    setLastImageUrl(imageUrl);
+    setPalette(imageUrl ? cache.get(imageUrl) ?? EMPTY : EMPTY);
+  }
+
   useEffect(() => {
-    if (!imageUrl) {
-      setPalette(EMPTY);
-      return;
-    }
-    const cached = cache.get(imageUrl);
-    if (cached) {
-      setPalette(cached);
-      return;
-    }
+    if (!imageUrl) return;
+    if (cache.has(imageUrl)) return;
 
     let cancelled = false;
     void (async () => {

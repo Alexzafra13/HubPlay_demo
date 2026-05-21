@@ -8,6 +8,9 @@ import { FolderBrowser } from "@/components/setup/FolderBrowser";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface LibraryEntry {
+  // ID local sólo para la UI (key estable de React). No se envía al
+  // backend — el wizard sólo manda los campos rellenos al hacer "Crear".
+  localId: string;
   name: string;
   contentType: string;
   path: string;
@@ -26,7 +29,12 @@ const CONTENT_TYPE_KEYS = [
 ] as const;
 
 function createEmptyEntry(): LibraryEntry {
-  return { name: "", contentType: "movies", path: "" };
+  return {
+    localId: crypto.randomUUID(),
+    name: "",
+    contentType: "movies",
+    path: "",
+  };
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -190,7 +198,7 @@ export default function LibrariesStep({
         <div className="flex flex-col gap-4">
           {libraries.map((entry, index) => (
             <div
-              key={index}
+              key={entry.localId}
               className="relative rounded-[--radius-md] border border-border bg-bg-surface p-4"
             >
               {/* Remove button */}
@@ -202,7 +210,7 @@ export default function LibrariesStep({
                   aria-label={t("setup.libraries.removeLibrary", { index: index + 1 })}
                 >
                   <svg
-                    className="h-4 w-4"
+                    className="size-4"
                     viewBox="0 0 20 20"
                     fill="currentColor"
                   >
@@ -276,7 +284,7 @@ export default function LibrariesStep({
                       onClick={() => setBrowseIndex(index)}
                     >
                       <svg
-                        className="h-4 w-4"
+                        className="size-4"
                         viewBox="0 0 20 20"
                         fill="currentColor"
                       >
@@ -297,7 +305,7 @@ export default function LibrariesStep({
           onClick={addEntry}
           className="flex items-center justify-center gap-2 rounded-[--radius-md] border border-dashed border-border py-3 text-sm text-text-secondary hover:border-accent hover:text-accent transition-colors cursor-pointer"
         >
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="size-4" viewBox="0 0 20 20" fill="currentColor">
             <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
           </svg>
           {t("setup.libraries.addAnother")}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Search as SearchIcon,
   X,
@@ -47,10 +47,10 @@ function isFilterRoute(pathname: string): boolean {
 export function SearchBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
+  const { pathname } = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const filterMode = isFilterRoute(location.pathname);
+  const filterMode = isFilterRoute(pathname);
   const urlQuery = searchParams.get("q") ?? "";
   const [open, setOpen] = useState(urlQuery.length > 0);
 
@@ -82,12 +82,16 @@ export function SearchBar() {
 
   // Auto-expand if the URL already has ?q= when the page mounts
   // (filter route deep link, or user reloaded the tab mid-search).
-  useEffect(() => {
+  // Render-time guarded setState — derives `open` from URL state
+  // instead of running an effect on every render.
+  const urlKey = (filterMode ? "f:" : "") + urlQuery;
+  const [lastUrlKey, setLastUrlKey] = useState(urlKey);
+  if (lastUrlKey !== urlKey) {
+    setLastUrlKey(urlKey);
     if (filterMode && urlQuery.length > 0 && !open) {
       setOpen(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterMode, urlQuery]);
+  }
 
   // ⌘K / Ctrl+K opens from anywhere.
   useEffect(() => {
@@ -177,15 +181,15 @@ export function SearchBar() {
   // Page-aware placeholder.
   const placeholder = useMemo(() => {
     if (filterMode) {
-      if (location.pathname.startsWith("/search")) {
+      if (pathname.startsWith("/search")) {
         return t("topbar.searchPlaceholder");
       }
-      if (location.pathname.startsWith("/live-tv")) {
+      if (pathname.startsWith("/live-tv")) {
         return t("liveTV.searchPlaceholder", {
           defaultValue: "Busca canales o programas…",
         });
       }
-      const section = location.pathname.startsWith("/series")
+      const section = pathname.startsWith("/series")
         ? t("nav.series")
         : t("nav.movies");
       return t("topbar.filterPlaceholder", {
@@ -194,7 +198,7 @@ export function SearchBar() {
       });
     }
     return t("topbar.searchPlaceholder");
-  }, [filterMode, location.pathname, t]);
+  }, [filterMode, pathname, t]);
 
   const panelOpen = dropdownActive || suggestionsActive;
 
@@ -207,8 +211,8 @@ export function SearchBar() {
           Estilo expandido: pill (rounded-full) con ring sutil en
           reposo y glow del color accent cuando el input tiene foco,
           para que enseñar el campo no sea una caja gris cualquiera. */}
-      <div ref={wrapRef} className="relative w-9 h-9 flex-shrink-0">
-        <motion.div
+      <div ref={wrapRef} className="relative size-9 flex-shrink-0">
+        <m.div
           layout
           initial={false}
           animate={{ width: open ? 320 : 36 }}
@@ -223,11 +227,11 @@ export function SearchBar() {
           <button
             type="button"
             onClick={() => (open ? inputRef.current?.focus() : openSearch())}
-            className="flex items-center justify-center w-9 h-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
+            className="flex items-center justify-center size-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
             aria-label={t("nav.search")}
             aria-expanded={open}
           >
-            <SearchIcon className="h-[17px] w-[17px]" strokeWidth={1.8} />
+            <SearchIcon className="size-[17px]" strokeWidth={1.8} />
           </button>
 
           {open && (
@@ -247,21 +251,21 @@ export function SearchBar() {
                   }
                 }}
                 placeholder={placeholder}
-                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted/80 px-0 py-0"
+                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted/80 p-0"
                 autoComplete="off"
                 spellCheck={false}
               />
               {dropdownLoading && dropdownActive && (
-                <Loader2 className="h-3.5 w-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
+                <Loader2 className="size-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
               )}
               {query.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="flex items-center justify-center w-6 h-6 rounded-full text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors flex-shrink-0"
+                  className="flex items-center justify-center size-6 rounded-full text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors flex-shrink-0"
                   aria-label={t("common.cancel")}
                 >
-                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                  <X className="size-3.5" strokeWidth={2} />
                 </button>
               ) : (
                 <button
@@ -277,7 +281,7 @@ export function SearchBar() {
               )}
             </form>
           )}
-        </motion.div>
+        </m.div>
       </div>
 
       {/* Full-width drop-down panel anchored to the bottom of the
@@ -290,7 +294,7 @@ export function SearchBar() {
                 enough to focus the eye on the panel without making
                 the rest of the UI look offline. Starts below the
                 topbar so the bar stays clickable. */}
-            <motion.div
+            <m.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -300,7 +304,7 @@ export function SearchBar() {
               aria-hidden
             />
 
-            <motion.div
+            <m.div
               ref={dropdownRef}
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -311,7 +315,7 @@ export function SearchBar() {
               role="region"
               aria-label={t("nav.search")}
             >
-              <div className="max-w-[1400px] mx-auto px-6 py-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
+              <div className="max-w-[1400px] mx-auto p-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
                 {dropdownActive ? (
                   dropdownEmpty ? (
                     <SearchNoResults query={debounced} />
@@ -343,7 +347,7 @@ export function SearchBar() {
                         <kbd className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-base/60 border border-border-subtle">
                           Enter
                         </kbd>
-                        <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        <ArrowRight className="size-3.5" strokeWidth={1.7} />
                       </button>
                     </>
                   )
@@ -356,7 +360,7 @@ export function SearchBar() {
                   />
                 )}
               </div>
-            </motion.div>
+            </m.div>
           </>
         )}
       </AnimatePresence>
@@ -498,7 +502,7 @@ function SuggestionRail({
                   alt={it.title}
                   loading="lazy"
                   decoding="async"
-                  className="absolute inset-0 h-full w-full object-cover"
+                  className="absolute inset-0 size-full object-cover"
                 />
               )}
             </div>

@@ -36,7 +36,7 @@ export default function PeersPage() {
   if (peerList.length === 0) {
     return (
       <div className="p-6 sm:p-10">
-        <h1 className="mb-6 text-2xl font-bold text-text-primary">
+        <h1 className="mb-6 text-2xl font-semibold text-text-primary">
           {t("peers.title")}
         </h1>
         <EmptyState
@@ -58,7 +58,7 @@ export default function PeersPage() {
   return (
     <div className="p-6 sm:p-10">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
           {t("peers.title")}
         </h1>
         <p className="mt-1 text-sm text-text-muted">{t("peers.subtitle")}</p>
@@ -128,7 +128,7 @@ function PeersStrip({
             title={peer.fingerprint}
           >
             <span
-              className="h-2 w-2 rounded-full bg-emerald-500"
+              className="size-2 rounded-full bg-emerald-500"
               aria-hidden
             />
             <span className="font-medium">{peer.name}</span>

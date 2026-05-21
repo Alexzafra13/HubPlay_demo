@@ -47,14 +47,14 @@ export function LanguageMultiSelect({ value, onChange }: Props) {
     const next = new Set(selected);
     if (next.has(code)) next.delete(code);
     else next.add(code);
-    onChange([...next].sort());
+    onChange([...next].toSorted());
   }
 
   function handleAddCustom(e: FormEvent) {
     e.preventDefault();
     const code = custom.trim().toLowerCase();
     if (!/^[a-z]{2,3}$/.test(code)) return;
-    if (!selected.has(code)) onChange([...selected, code].sort());
+    if (!selected.has(code)) onChange([...selected, code].toSorted());
     setCustom("");
   }
 
@@ -85,19 +85,22 @@ export function LanguageMultiSelect({ value, onChange }: Props) {
             </button>
           );
         })}
-        {/* Custom codes already selected but not in the common list */}
-        {[...selected]
-          .filter((code) => !COMMON_LANGUAGES.some((l) => l.code === code))
-          .map((code) => (
-            <button
-              type="button"
-              key={code}
-              onClick={() => toggle(code)}
-              className="px-2.5 py-1 text-xs rounded-full border bg-accent text-white border-accent"
-            >
-              {code} ✕
-            </button>
-          ))}
+        {/* Códigos personalizados ya seleccionados que no están en la
+            lista común. flatMap = filter + map en una sola pasada. */}
+        {[...selected].flatMap((code) =>
+          COMMON_LANGUAGES.some((l) => l.code === code)
+            ? []
+            : [
+                <button
+                  type="button"
+                  key={code}
+                  onClick={() => toggle(code)}
+                  className="px-2.5 py-1 text-xs rounded-full border bg-accent text-white border-accent"
+                >
+                  {code} ✕
+                </button>,
+              ],
+        )}
       </div>
       <form onSubmit={handleAddCustom} className="flex items-center gap-2">
         <input

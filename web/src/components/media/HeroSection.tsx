@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import type { FC, ReactNode } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -20,6 +20,11 @@ import { formatPremiereDate } from "@/utils/heroMeta";
 // URL directly so the browser receives the largest available
 // ingest size and scales DOWN at most.
 const HERO_POSTER_WIDTH = 720;
+
+// Default vacío para `menuItems`. Constante de módulo en lugar de `= []`
+// inline en la prop para que la identidad sea estable entre renders y
+// el `useMemo` de filtrado no se invalide.
+const NO_MENU_ITEMS: HeroMenuItem[] = [];
 
 // ─── Menu item type ─────────────────────────────────────────────────────────
 
@@ -61,7 +66,7 @@ interface HeroSectionProps {
 // "Director" and "director" depending on TMDb's response shape.
 function findDirector(people: Person[] | undefined): string | null {
   if (!people || people.length === 0) return null;
-  const sorted = [...people].sort((a, b) => a.sort_order - b.sort_order);
+  const sorted = people.toSorted((a, b) => a.sort_order - b.sort_order);
   const director = sorted.find((p) => p.role.toLowerCase() === "director");
   return director?.name ?? null;
 }
@@ -92,17 +97,18 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const close = useCallback(() => setOpen(false), []);
-
+  // close se llama solo desde dentro de los listeners, así que en vez
+  // de pasarla como dep (donde el linter pediría una identidad estable
+  // con useCallback) la inlinearemos: `setOpen(false)` directo.
   useEffect(() => {
     if (!open) return;
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        close();
+        setOpen(false);
       }
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("mousedown", onClickOutside);
     document.addEventListener("keydown", onEsc);
@@ -110,7 +116,7 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       document.removeEventListener("mousedown", onClickOutside);
       document.removeEventListener("keydown", onEsc);
     };
-  }, [open, close]);
+  }, [open]);
 
   if (items.length === 0) return null;
 
@@ -119,11 +125,11 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+        className="flex size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
         aria-label={t("common.moreOptions")}
         aria-expanded={open}
       >
-        <svg className="h-5 w-5 text-text-secondary" viewBox="0 0 24 24" fill="currentColor">
+        <svg className="size-5 text-text-secondary" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="1.5" />
           <circle cx="12" cy="12" r="1.5" />
           <circle cx="12" cy="19" r="1.5" />
@@ -135,13 +141,14 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
           role="menu"
           className="absolute bottom-full left-0 z-50 mb-2 min-w-[220px] overflow-hidden rounded-[--radius-lg] border border-border/70 bg-bg-card/95 py-1 shadow-xl shadow-black/50 backdrop-blur-xl"
         >
-          {items.map((item, i) => (
+          {items.map((item) => (
             <button
-              key={i}
+              // El label es único dentro del menú y visible al usuario.
+              key={item.label}
               type="button"
               role="menuitem"
               onClick={() => {
-                close();
+                setOpen(false);
                 item.onClick();
               }}
               className={[
@@ -151,7 +158,7 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
                   : "text-text-primary/90 hover:bg-bg-elevated hover:text-text-primary",
               ].join(" ")}
             >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-secondary">
+              <span className="flex size-4 shrink-0 items-center justify-center text-text-secondary">
                 {item.icon}
               </span>
               {item.label}
@@ -188,7 +195,7 @@ const HeroSection: FC<HeroSectionProps> = ({
   playLabel,
   onToggleFavorite,
   isFavorite = false,
-  menuItems = [],
+  menuItems = NO_MENU_ITEMS,
   people,
 }) => {
   const { t, i18n } = useTranslation();
@@ -205,6 +212,10 @@ const HeroSection: FC<HeroSectionProps> = ({
     item.type === "movie"
       ? formatPremiereDate(item.premiere_date, i18n.language)
       : null;
+  // Episodes show the same localised "12 Mar 2025" full date as movies;
+  // computed outside JSX so `new Date(...)` doesn't risk a hydration
+  // mismatch warning under SSR-style rendering tools.
+  const episodeAirDate = formatPremiereDate(item.premiere_date, i18n.language);
 
   // Episodes and seasons carry limited visuals on their own (episodes
   // get a still, seasons get a poster, neither gets a backdrop). The
@@ -282,7 +293,7 @@ const HeroSection: FC<HeroSectionProps> = ({
             alt=""
             loading="eager"
             className={[
-              "absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
+              "absolute inset-y-0 right-0 size-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
               // Fade out when the trailer reveals (movies only) so
               // the iframe and the static still don't fight for
               // attention. 700ms matches HeroTrailer's own opacity
@@ -383,7 +394,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                   className="max-h-[60px] sm:max-h-[80px] w-auto max-w-full object-contain object-left drop-shadow-lg"
                 />
               ) : (
-                <h1 className="text-3xl font-bold text-text-primary drop-shadow-lg sm:text-4xl">
+                <h1 className="text-3xl font-semibold text-text-primary drop-shadow-lg sm:text-4xl">
                   {episodeCode ? (
                     <>
                       <span className="text-text-secondary">{episodeCode}</span>
@@ -458,14 +469,8 @@ const HeroSection: FC<HeroSectionProps> = ({
                     keep the year-only line because their air
                     "premiere" is per-season and a single date is
                     misleading. */}
-                {isEpisode && item.premiere_date ? (
-                  <span className="font-medium">
-                    {new Date(item.premiere_date).toLocaleDateString(i18n.language, {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </span>
+                {isEpisode && episodeAirDate ? (
+                  <span className="font-medium">{episodeAirDate}</span>
                 ) : movieReleaseDate ? (
                   <span className="font-medium">{movieReleaseDate}</span>
                 ) : item.year != null ? (
@@ -474,7 +479,7 @@ const HeroSection: FC<HeroSectionProps> = ({
 
                 {item.community_rating != null && (
                   <Badge variant="warning">
-                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                    <svg className="size-3" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                     </svg>
                     {formatRating(item.community_rating)}
@@ -505,7 +510,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                     SyntheticEvent here, then build a stream URL with
                     "[object Object]" as the item id. */}
                 <Button size="lg" onClick={() => onPlay?.()}>
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                  <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                   {playLabel ?? t("common.play")}
@@ -515,7 +520,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                   <button
                     type="button"
                     onClick={onToggleFavorite}
-                    className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+                    className="flex size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
                     aria-label={
                       isFavorite
                         ? t("itemDetail.removeFromFavorites")
@@ -523,7 +528,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                     }
                   >
                     <svg
-                      className={`h-5 w-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
+                      className={`size-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
                       viewBox="0 0 24 24"
                       fill={isFavorite ? "currentColor" : "none"}
                       stroke="currentColor"
@@ -549,4 +554,3 @@ const HeroSection: FC<HeroSectionProps> = ({
 };
 
 export { HeroSection };
-export type { HeroSectionProps };

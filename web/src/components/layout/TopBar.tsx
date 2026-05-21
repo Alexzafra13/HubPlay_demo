@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Menu,
   ArrowLeft,
@@ -69,10 +69,10 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
       {/* Hamburger — mobile only. Desktop has no sidebar to toggle. */}
       <button
         onClick={onMobileMenuClick}
-        className="flex md:hidden items-center justify-center w-10 h-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+        className="flex md:hidden items-center justify-center size-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
         aria-label={t("nav.toggleMenu")}
       >
-        <Menu className="h-[19px] w-[19px]" strokeWidth={1.7} />
+        <Menu className="size-[19px]" strokeWidth={1.7} />
       </button>
 
       {/* Universal back arrow — appears on every page that isn't the
@@ -84,10 +84,10 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
       {showBack && (
         <button
           onClick={handleBack}
-          className="flex items-center justify-center w-10 h-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+          className="flex items-center justify-center size-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
           aria-label={t("common.back")}
         >
-          <ArrowLeft className="h-[19px] w-[19px]" strokeWidth={1.8} />
+          <ArrowLeft className="size-[19px]" strokeWidth={1.8} />
         </button>
       )}
 
@@ -177,7 +177,7 @@ function UserAvatarMenu({
     <div ref={ref} className="relative flex-shrink-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative flex items-center justify-center h-9 w-9 rounded-full ring-1 ring-white/15 hover:ring-white/35 transition-all"
+        className="relative flex items-center justify-center size-9 rounded-full ring-1 ring-white/15 hover:ring-white/35 transition-all"
         aria-label={t("topbar.userMenu")}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -187,7 +187,7 @@ function UserAvatarMenu({
 
       <AnimatePresence>
         {open && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
@@ -209,7 +209,7 @@ function UserAvatarMenu({
               className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
               role="menuitem"
             >
-              <SettingsIcon className="h-[15px] w-[15px]" strokeWidth={1.6} />
+              <SettingsIcon className="size-[15px]" strokeWidth={1.6} />
               {t("nav.settings")}
             </NavLink>
             <NavLink
@@ -218,7 +218,7 @@ function UserAvatarMenu({
               className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
               role="menuitem"
             >
-              <Smartphone className="h-[15px] w-[15px]" strokeWidth={1.6} />
+              <Smartphone className="size-[15px]" strokeWidth={1.6} />
               {t("nav.linkDevice")}
             </NavLink>
             {me?.can_upload && (
@@ -228,7 +228,7 @@ function UserAvatarMenu({
                 className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
                 role="menuitem"
               >
-                <Upload className="h-[15px] w-[15px]" strokeWidth={1.6} />
+                <Upload className="size-[15px]" strokeWidth={1.6} />
                 {t("nav.uploads")}
               </NavLink>
             )}
@@ -239,7 +239,7 @@ function UserAvatarMenu({
                 className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
                 role="menuitem"
               >
-                <UserCog className="h-[15px] w-[15px]" strokeWidth={1.6} />
+                <UserCog className="size-[15px]" strokeWidth={1.6} />
                 {t("topbar.switchProfile")}
               </NavLink>
             )}
@@ -250,7 +250,7 @@ function UserAvatarMenu({
                 className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
                 role="menuitem"
               >
-                <ShieldCheck className="h-[15px] w-[15px]" strokeWidth={1.6} />
+                <ShieldCheck className="size-[15px]" strokeWidth={1.6} />
                 {t("common.administration")}
               </NavLink>
             )}
@@ -263,10 +263,10 @@ function UserAvatarMenu({
               className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
               role="menuitem"
             >
-              <LogOut className="h-[15px] w-[15px]" strokeWidth={1.6} />
+              <LogOut className="size-[15px]" strokeWidth={1.6} />
               {t("common.logOut")}
             </button>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

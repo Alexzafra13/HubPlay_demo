@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -29,6 +30,36 @@ type MetadataIdentifier interface {
 	RefreshItemMetadata(ctx context.Context, itemID string) error
 }
 
+// MetadataHandler aísla las rutas admin-only de gestión de metadata:
+// identificación TMDb manual + editor de campos + lock + refresh por
+// item. Cierra parte del olor P del audit 2026-05-14 — el campo
+// `identifier` que vivía en ItemHandler ahora es propio de este sub-
+// handler y se promueve via embedding al facade (buildItemDetail sigue
+// leyendo `h.identifier` sin cambios porque field promotion intra-
+// paquete funciona también para campos no exportados).
+type MetadataHandler struct {
+	identifier MetadataIdentifier
+	audit      AuditEmitter
+	logger     *slog.Logger
+}
+
+func newMetadataHandler(identifier MetadataIdentifier, audit AuditEmitter, logger *slog.Logger) *MetadataHandler {
+	return &MetadataHandler{
+		identifier: identifier,
+		audit:      audit,
+		logger:     logger,
+	}
+}
+
+// auditEmit devuelve el sink real o un noop. Mismo patrón duplicado
+// en AuthHandler / ItemHandler — no es scope de esta PR consolidarlo.
+func (h *MetadataHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
+}
+
 // IdentifyCandidates devuelve la lista de candidatos TMDb para reidentificar
 // un item. El cliente puede afinar la búsqueda pasando `?query=` y `?year=`;
 // sin esos params, el scanner usa el título y año actuales del item como
@@ -36,7 +67,7 @@ type MetadataIdentifier interface {
 //
 // GET /items/{id}/identify/candidates?query=...&year=...
 // Admin-only (montado bajo RequireAdmin).
-func (h *ItemHandler) IdentifyCandidates(w http.ResponseWriter, r *http.Request) {
+func (h *MetadataHandler) IdentifyCandidates(w http.ResponseWriter, r *http.Request) {
 	if h.identifier == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "NO_PROVIDER", "metadata provider not configured")
 		return
@@ -99,7 +130,7 @@ type identifyRequest struct {
 // POST /items/{id}/identify
 // Body: {"provider": "tmdb", "external_id": "550"}
 // Admin-only.
-func (h *ItemHandler) Identify(w http.ResponseWriter, r *http.Request) {
+func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	if h.identifier == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "NO_PROVIDER", "metadata provider not configured")
 		return
@@ -161,7 +192,7 @@ type patchMetadataRequest struct {
 // PATCH /items/{id}/metadata
 // Body: campos opcionales (title, original_title, year, overview, tagline).
 // Admin-only.
-func (h *ItemHandler) UpdateItemMetadata(w http.ResponseWriter, r *http.Request) {
+func (h *MetadataHandler) UpdateItemMetadata(w http.ResponseWriter, r *http.Request) {
 	if h.identifier == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "NO_EDITOR", "metadata editor not configured")
 		return
@@ -199,11 +230,11 @@ func (h *ItemHandler) UpdateItemMetadata(w http.ResponseWriter, r *http.Request)
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"item_id":          item.ID,
-			"title":            item.Title,
-			"original_title":   item.OriginalTitle,
-			"year":             item.Year,
-			"metadata_locked":  true,
+			"item_id":         item.ID,
+			"title":           item.Title,
+			"original_title":  item.OriginalTitle,
+			"year":            item.Year,
+			"metadata_locked": true,
 		},
 	})
 }
@@ -220,7 +251,7 @@ type setMetadataLockRequest struct {
 // PUT /items/{id}/metadata/lock
 // Body: {"locked": true|false}
 // Admin-only.
-func (h *ItemHandler) SetMetadataLock(w http.ResponseWriter, r *http.Request) {
+func (h *MetadataHandler) SetMetadataLock(w http.ResponseWriter, r *http.Request) {
 	if h.identifier == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "NO_EDITOR", "metadata editor not configured")
 		return
@@ -248,7 +279,7 @@ func (h *ItemHandler) SetMetadataLock(w http.ResponseWriter, r *http.Request) {
 //
 // POST /items/{id}/refresh-metadata
 // Admin-only.
-func (h *ItemHandler) RefreshItemMetadata(w http.ResponseWriter, r *http.Request) {
+func (h *MetadataHandler) RefreshItemMetadata(w http.ResponseWriter, r *http.Request) {
 	if h.identifier == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "NO_REFRESH", "metadata refresh not configured")
 		return

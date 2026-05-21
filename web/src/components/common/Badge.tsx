@@ -41,9 +41,9 @@ const Badge: FC<BadgeProps> = ({
         .join(" ")}
     >
       {variant === "live" && (
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-live opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-live" />
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-live opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-live" />
         </span>
       )}
       {children}
@@ -52,4 +52,3 @@ const Badge: FC<BadgeProps> = ({
 };
 
 export { Badge };
-export type { BadgeProps, BadgeVariant };

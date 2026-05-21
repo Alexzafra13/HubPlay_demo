@@ -59,7 +59,7 @@ export function ChannelPlayer({ channel }: ChannelPlayerProps) {
   });
 
   return (
-    <div className="relative h-full w-full bg-black">
+    <div className="relative size-full bg-black">
       {loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
           <Spinner size="lg" />
@@ -100,7 +100,7 @@ export function ChannelPlayer({ channel }: ChannelPlayerProps) {
       <video
         ref={videoRef}
         controls
-        className="h-full w-full object-contain"
+        className="size-full object-contain"
         playsInline
         aria-label={channel.name}
       />

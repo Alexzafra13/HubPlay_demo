@@ -1,4 +1,4 @@
-import { useEffect, useId, useCallback, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FC, ReactNode } from "react";
 import { useModalStack, modalStackSelectors } from "@/store/modalStack";
@@ -101,10 +101,22 @@ const Modal: FC<ModalProps> = ({
     };
   }, [stackCount]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+  // onClose se guarda en un ref para que el listener de keydown no se
+  // re-suscriba cada render del padre (la identidad de onClose rota
+  // habitualmente al venir de un useState/useCallback con deps).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Only the top modal in the stack listens for Escape and Tab. A
+  // background modal that grabbed Escape would close itself instead
+  // of the dialog the user is actually looking at.
+  useEffect(() => {
+    if (!isOpen || !isTop) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       // Focus trap: keep Tab + Shift+Tab cycling inside the dialog so
@@ -135,18 +147,10 @@ const Modal: FC<ModalProps> = ({
           first.focus();
         }
       }
-    },
-    [onClose],
-  );
-
-  // Only the top modal in the stack listens for Escape and Tab. A
-  // background modal that grabbed Escape would close itself instead
-  // of the dialog the user is actually looking at.
-  useEffect(() => {
-    if (!isOpen || !isTop) return;
+    };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, isTop, handleKeyDown]);
+  }, [isOpen, isTop]);
 
   // On open: remember the element that had focus, then move focus into
   // the dialog. On close: restore focus to the trigger so the keyboard
@@ -207,7 +211,7 @@ const Modal: FC<ModalProps> = ({
               aria-label="Close"
             >
               <svg
-                className="h-5 w-5"
+                className="size-5"
                 viewBox="0 0 20 20"
                 fill="currentColor"
               >
@@ -226,4 +230,3 @@ const Modal: FC<ModalProps> = ({
 };
 
 export { Modal };
-export type { ModalProps, ModalSize };

@@ -15,7 +15,7 @@
 
 import { create } from "zustand";
 
-export type ItemAction = "identify" | "edit-metadata" | "images";
+type ItemAction = "identify" | "edit-metadata" | "images";
 
 interface ItemActionsState {
   // Acción activa + id + tipo del item al que aplica. null cuando no

@@ -14,7 +14,7 @@
 // Mobile behaviour: on screens < sm the sheet expands to fullscreen
 // (no half-overlay weirdness, no thumb-reachability problems).
 
-import { useEffect, useId, useCallback, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FC, ReactNode } from "react";
 import { useModalStack, modalStackSelectors } from "@/store/modalStack";
@@ -106,10 +106,19 @@ const Sheet: FC<SheetProps> = ({
     };
   }, [stackCount]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+  // onClose via ref — el listener se monta una vez por (isOpen, isTop)
+  // y no se re-suscribe cuando el padre cambia la identidad de la
+  // callback. Igual que Modal.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen || !isTop) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -133,15 +142,10 @@ const Sheet: FC<SheetProps> = ({
         e.preventDefault();
         first.focus();
       }
-    },
-    [onClose],
-  );
-
-  useEffect(() => {
-    if (!isOpen || !isTop) return;
+    };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, isTop, handleKeyDown]);
+  }, [isOpen, isTop]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -199,7 +203,7 @@ const Sheet: FC<SheetProps> = ({
               aria-label="Close"
             >
               <svg
-                className="h-4 w-4"
+                className="size-4"
                 viewBox="0 0 20 20"
                 fill="none"
                 stroke="currentColor"
@@ -243,4 +247,3 @@ const Sheet: FC<SheetProps> = ({
 };
 
 export { Sheet };
-export type { SheetProps, SheetSize };

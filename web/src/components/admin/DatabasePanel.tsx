@@ -211,7 +211,7 @@ export function DatabasePanel() {
     <section className="flex flex-col gap-4">
       <header className="flex items-start gap-3">
         <span className="rounded-[--radius-md] bg-accent/15 p-2 text-accent">
-          <Database className="h-5 w-5" />
+          <Database className="size-5" />
         </span>
         <div className="flex-1">
           <h3 className="text-base font-semibold text-text">
@@ -307,7 +307,7 @@ export function DatabasePanel() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" onClick={handleRestart} disabled={restart.isPending}>
-          <RefreshCcw className="h-4 w-4" />
+          <RefreshCcw className="size-4" />
           {t("admin.database.restartOnly")}
         </Button>
         <button
@@ -316,7 +316,7 @@ export function DatabasePanel() {
           className="ml-auto inline-flex items-center gap-1 text-sm text-text-muted hover:text-text"
           aria-expanded={customOpen}
         >
-          {customOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          {customOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
           {t("admin.database.customDSN")}
         </button>
       </div>
@@ -417,7 +417,7 @@ export function DatabasePanel() {
       {liveDriver === "sqlite" && (
         <div className="rounded-[--radius-md] border border-warning/30 bg-warning/5 p-4">
           <header className="mb-3 flex items-start gap-2">
-            <ShieldAlert className="mt-0.5 h-5 w-5 text-warning" />
+            <ShieldAlert className="mt-0.5 size-5 text-warning" />
             <div className="flex-1">
               <h4 className="text-sm font-semibold text-text">
                 {t("admin.database.migrateTitle")}

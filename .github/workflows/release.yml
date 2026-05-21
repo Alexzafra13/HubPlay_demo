@@ -254,7 +254,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download windows-amd64 archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: hubplay-*-windows-amd64
           path: artifacts
@@ -331,13 +331,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
       - name: Create stable GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/*.tar.gz
@@ -428,7 +428,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -442,7 +442,7 @@ jobs:
           gh release delete nightly --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
 
       - name: Publish nightly pre-release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: nightly
           name: "Nightly (último build de main)"

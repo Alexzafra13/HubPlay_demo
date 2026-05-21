@@ -35,17 +35,16 @@ export default function PeerLibraryItemsPage() {
 
   // Adapt the peer's item rows to the canonical MediaItem shape so
   // PosterCard renders them like any local title. Memoised on the
-  // raw items pointer + peerId so paging doesn't recompute O(n) per
+  // items query data pointer so paging doesn't recompute O(n) per
   // render.
-  const remoteItems: FederationRemoteItem[] = items.data?.items ?? [];
   const total = items.data?.total ?? 0;
   const fromCache = items.data?.from_cache ?? false;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const mediaItems = useMemo<MediaItem[]>(
-    () => remoteItems.map(federationItemToMediaItem),
-    [remoteItems],
-  );
+  const mediaItems = useMemo<MediaItem[]>(() => {
+    const remoteItems: FederationRemoteItem[] = items.data?.items ?? [];
+    return remoteItems.map(federationItemToMediaItem);
+  }, [items.data]);
 
   const hrefFor = (item: MediaItem) =>
     `/peers/${peerId}/libraries/${libraryId}/items/${item.id}`;
@@ -56,7 +55,7 @@ export default function PeerLibraryItemsPage() {
           className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur-sm"
           title={t("peers.sharedBy", { name: peer.name })}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+          <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
           <span className="max-w-[120px] truncate">{peer.name}</span>
         </span>
       )
@@ -84,7 +83,7 @@ export default function PeerLibraryItemsPage() {
       <header className="mt-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+            <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
               {library?.name ?? t("peers.unknownLibrary")}
             </h1>
             {library?.content_type && (
@@ -97,7 +96,7 @@ export default function PeerLibraryItemsPage() {
             <p className="mt-1 text-sm text-text-muted">
               <span className="inline-flex items-center gap-1.5">
                 <span
-                  className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                  className="size-1.5 rounded-full bg-emerald-500"
                   aria-hidden
                 />
                 {t("peers.sharedBy", { name: peer.name })}

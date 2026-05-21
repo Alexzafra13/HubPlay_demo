@@ -57,7 +57,7 @@ export function ScheduledJobsPanel({ libraryId }: { libraryId: string }) {
           })}
         </p>
       </header>
-      <ul className="space-y-2" role="list">
+      <ul className="space-y-2">
         {jobs.map((job) => (
           <ScheduledJobRow key={job.kind} libraryId={libraryId} job={job} />
         ))}
@@ -144,7 +144,7 @@ function ScheduledJobRow({
                 enabled: e.target.checked,
               })
             }
-            className="h-4 w-4 rounded border-border text-accent focus:ring-accent"
+            className="size-4 rounded border-border text-accent focus:ring-accent"
             aria-label={t("admin.schedule.toggle", {
               defaultValue: "Activar {{kind}}",
               kind: kindLabel,
