@@ -23,7 +23,7 @@ en este doc (no se edita el audit original).
 | 5 | ✅ cerrada | Refactor estructural `iptv/` | CC (fase 1 + 2) | Fase 1 sesión tarde-noche (PR #390); fase 2 sesión post-cierre (PR #392) |
 | 6 | 🔄 en curso | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, G parcial, **H mountXxx ✅** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G parcial pendiente PR en `claude/review-project-9YJxG` (`8b746fc`); H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC) — Dependencies-as-interfaces queda para iteración aparte |
 | 7 | 🔄 en curso | Cosmética + schema | D, X, ~~W~~, BB, ~~UUU-mig~~ | W cerrada sesión post-cierre (PR #393, scanner.go 1491 → 332 LoC); D/X/BB pendientes |
-| 8 | ⏳ pendiente | Polish de calidad de código | F14-X (queda F14-2-a único alto pendiente), F15-X, F16-X | — |
+| 8 | 🔄 en curso | Polish de calidad de código | ~~F14-2-a~~ ✅, F14-X, F15-X, F16-X | F14-2-a cerrado sesión 2026-05-21 noche tardía II — `BuildFFmpegArgs` 13 params → `TranscodeRequest` struct |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
 | — | ✅ cerrada | Sweep de perf oportunista | UUU-mig, Q | Sesión M.5 — fuera del orden 0-9, ataque dirigido a las dos palancas de perf más claras del audit |
 
