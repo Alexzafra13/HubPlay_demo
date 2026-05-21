@@ -6,14 +6,59 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-20, cierre de la noche)
+## 🔭 Estado actual (2026-05-21, cierre)
 
 - Branch principal: `main`, working tree limpio.
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
 - Tests: `go test -race ./...` verde en CI; frontend **616/616** vitest verdes; `tsc -b` limpio; production build limpio (~25 s con React Compiler + LazyMotion activados).
-- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck`, `react-compiler-healthcheck` (hard), `knip` (info-only), `react-doctor` (visibility-only con comentarios inline en PRs).
-- **Score React Doctor: 75/100 ("Great" — umbral cruzado)**. 13 reglas únicas eliminadas, 166 issues totales (de 645 iniciales).
+- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard desde 2026-05-21)**, `react-doctor` (visibility-only con comentarios inline en PRs).
+- **Score React Doctor: 75/100 ("Great")**. 16 reglas únicas eliminadas (13 + 3 mecánicas hoy: `no-array-index-as-key`, `no-long-transition-duration`, `rendering-hydration-mismatch-time`). 6 issues estructurales pendientes — todos en `VideoPlayer.tsx` (sesión dedicada).
+- **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types** tras #375 + #377 (cleanup −1131 líneas en 59 ficheros). Hard gate en CI.
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🧹 Sesión 2026-05-21 — Cleanup knip a 0 + React Doctor quick wins + hard gate
+
+Sesión corta y limpia. Tres PRs encadenadas para cerrar la deuda de dead code que arrastraba desde la integración inicial de knip (PR #355) y atacar los 3 issues mecánicos de React Doctor que aparecieron tras el cleanup.
+
+### PRs cerradas
+
+| PR | Tema | Diff |
+|---|---|---|
+| [#375](https://github.com/Alexzafra13/HubPlay_demo/pull/375) | 5 unused files + 2 unused deps (`@radix-ui/react-dialog`, `@radix-ui/react-tooltip`) | −739 |
+| [#377](https://github.com/Alexzafra13/HubPlay_demo/pull/377) | 7 hooks + 9 huérfanos + 30+ exports/types: `export` → interno o borrado entero | −327 |
+| [#378](https://github.com/Alexzafra13/HubPlay_demo/pull/378) | 3 mecánicos React Doctor: skeleton keys, animation 1.8s→900ms, `new Date()` JSX → helper | +19/−12 |
+| Este branch | `pnpm knip` elevado a hard gate en CI + memoria actualizada | — |
+
+### Cleanup knip: lo que se aprendió
+
+- **`import("./types").Foo` se cuela sin que knip lo detecte.** Patrón usado en `client.ts` y `media.ts` para algunos types — knip los marca como unused aunque sí se usen. Solución: sustituir por imports normales al top. Detectados 2 (PeerStreamSessionResponse, StudioDetail) y migrados.
+- **Hooks "anti-pair" hibernando.** `useEnableChannel` existía como complemento de `useDisableChannel` que sí está conectado a UI; el enable nunca se conectó. Mismo patrón: `useSetChannelVisibility` admin sin UI. Si vuelven a hacer falta cuando se implemente la feature, son 5 líneas — borrarlos hoy fue safe.
+- **El barrel `*/index.ts` no añade valor si todos los consumers importan archivos directos.** Casos: `components/layout/index.ts` y `pages/admin/index.ts` (5 líneas cada uno, 0 importadores). Borrados enteros.
+- **`*Props` types nunca se importan**, aunque el component se importa miles de veces. Limpieza: quitar `export` keyword del type, mantener como tipo interno usado por el `function Component(props: Props)`. Cero impacto en consumers.
+
+### Falsos positivos React Doctor — documentados, NO se tocan
+
+Convención del repo: cuando una regla react-doctor entra en conflicto con un patrón oficial de React 19 o con `react-hooks/refs`, se prefiere el patrón oficial y se suprime el aviso con justificación inline.
+
+| Regla | Archivo | Por qué se deja |
+|---|---|---|
+| `rerender-state-only-in-handlers` + `no-derived-useState` | MediaGrid.tsx:43, UserAvatar.tsx:64 | Patrón "[Adjusting state when a prop changes](https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)" (React 19 oficial). El `useState` de tracking se mueve a render-time guarded `setState`. Usar `useRef` aquí dispara `react-hooks/refs` (no asignar `ref.current` en render). Es el único patrón que satisface las dos reglas estrictas de react-hooks. |
+| `no-derived-useState` | ExternalSubsModal.tsx:39 | El state es **edición local del usuario** tras inicializar desde prop. Derivar en render reiniciaría su selección de idiomas cada vez que el padre se re-renderice. |
+
+### Issues React Doctor estructurales pendientes — todos en `VideoPlayer.tsx`
+
+VideoPlayer es 1003 líneas, 12 `useState`, un `useEffect` con 9 `setState` en cadena, y un `useEffect` que resetea state cuando un prop cambia (debería ser `key` prop). Las reglas implicadas:
+
+- `no-giant-component` (1003 LoC)
+- `prefer-useReducer` (12 useState)
+- `no-cascading-set-state` (línea 509 — 9 setState en un effect)
+- `no-derived-state-effect` (línea 628 — reset por prop change)
+
+Para atacar de forma sensata hay que **split de VideoPlayer en subcomponentes** y consolidar el state en `useReducer`. Es refactor estructural, no auto-fix mecánico. Requiere backend corriendo en preview para verificar playback / seek / quality switching tras el split — sesión dedicada.
+
+Mismas reglas también disparan en `HeroSection.tsx` (192 LoC) y `SeriesHero.tsx` (61 LoC) pero más manejables.
 
 ---
 
@@ -281,11 +326,8 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 
 ## 🎯 Cola priorizada para la próxima sesión
 
-### Cierre de la sesión 2026-05-20 (tarde)
-- Mergear [#354](https://github.com/Alexzafra13/HubPlay_demo/pull/354) y [#355](https://github.com/Alexzafra13/HubPlay_demo/pull/355) cuando el CI termine. Tras ello, revisar #247, #289, #352 (dependabot que esperaban rebase tras los fixes de flake) y cerrar #330 si dependabot lo marca como redundante (su react-hooks 7.1.1 ya está en main vía #354).
-
-### Limpieza incremental de dead code
-- El job knip (PR #355) reporta 5 unused files + 2 unused deps + 38 unused exports + 115 unused types. Cuando llegue a 0, elevar `pnpm knip` a hard gate en CI (quitar `--no-exit-code`). Empezar por los **5 unused files** que son los más obvios: `scripts/extract-i18n-defaults.mjs`, `src/components/layout/index.ts`, `src/components/layout/SetupRoute.tsx`, `src/hooks/useLocalStorage.ts`, `src/pages/admin/index.ts`.
+### Cerrar React Doctor: split de VideoPlayer
+- VideoPlayer.tsx (1003 LoC, 12 useState, useEffect con 9 setState) tiene 4-5 reglas react-doctor pendientes que sólo se resuelven dividiendo el componente. Spec en la sesión de hoy (arriba). **Requiere preview con backend corriendo** para verificar playback / seek / quality switching / next-up tras el split. Plan tentativo: extraer `<PlaybackControls />`, `<TrickPlayBar />`, `<NextUpOverlay />`; consolidar state con `useReducer` agrupado por dominio (playback, network, ui). HeroSection y SeriesHero comparten reglas pero son más manejables — atacar después.
 
 ### Medianos (vale la pena cuando arranque la siguiente sesión)
 

@@ -1178,4 +1178,21 @@ Una segunda tanda de patrones que vinieron al cruzar el umbral del 75 con PR #36
 
 React Doctor pide reemplazar `useState` que nunca se lee en JSX por `useRef`. Pero el patrón canónico para "Adjusting state when a prop changes" (recomendado por React docs + `react-hooks/set-state-in-effect`) usa `useState` tracking. Cambiar a `useRef` con `ref.current = value` durante render viola `react-hooks/refs`.
 
-**Decisión**: ignorar la regla `rerender-state-only-in-handlers` para este patrón. La consistencia con react-hooks importa más que el score numérico de react-doctor.
+**Decisión**: ignorar la regla `rerender-state-only-in-handlers` para este patrón. **También se ignora `no-derived-useState` en los mismos sitios** porque la única alternativa sería volver al patrón useEffect+setState que `react-hooks/set-state-in-effect` prohíbe. La consistencia con react-hooks importa más que el score numérico de react-doctor. Casos vivos: `MediaGrid.tsx:43` (prevItems), `UserAvatar.tsx:64` (prevSrc), y `ExternalSubsModal.tsx:39` (langs — caso diferente: state es edición local, derivar reiniciaría la selección).
+
+### knip hard gate (2026-05-21): 0 unused
+
+Tras #375 + #377 el repo llegó a 0 unused files / deps / exports / types. CI ahora bloquea PRs que reintroduzcan dead code (job `knip` en `ci.yml`, sin `--no-exit-code`).
+
+**Gotcha**: knip NO detecta el patrón `import("./types").Foo` en el tipo de retorno o anotación. Usar siempre imports normales al top del archivo:
+
+```ts
+// ❌ knip lo marca unused incluso si se usa
+async getStudio(slug: string): Promise<import("./types").StudioDetail> { … }
+
+// ✅ knip lo detecta correctamente
+import type { StudioDetail } from "./types";
+async getStudio(slug: string): Promise<StudioDetail> { … }
+```
+
+**Convención**: types `*Props` / `*Variant` / `*Size` que sólo se usan dentro del archivo del componente NO se exportan. Mantenerlos como `interface FooProps {…}` sin `export`. El componente público importa fine — el type interno no.

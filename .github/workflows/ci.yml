@@ -68,11 +68,10 @@ jobs:
   knip:
     name: Dead code (knip)
     runs-on: ubuntu-latest
-    # Continúa aunque falle — knip puede tener falsos positivos con
-    # imports indirectos / barrel files. Sirve como visibilidad para
-    # limpieza incremental, no como gate. Si en el futuro el repo
-    # llega a 0 unused, elevar a hard requirement.
-    continue-on-error: true
+    # Hard gate desde la sesión 2026-05-21: tras #375 + #377 el repo
+    # llegó a 0 unused files / deps / exports / types. Si un PR vuelve
+    # a introducir dead code, el CI lo bloquea. Para suprimir un falso
+    # positivo concreto, edita web/knip.config.ts.
     steps:
       - uses: actions/checkout@v4
 
@@ -92,11 +91,7 @@ jobs:
 
       - name: Run knip
         working-directory: web
-        # --no-exit-code: el job es visibility-only, no rompe nunca.
-        # GitHub marca la PR como UNSTABLE si un check sale en rojo
-        # aunque tenga continue-on-error, así que prevenimos el rojo en
-        # origen. Cuando el repo llegue a 0 unused, quitamos el flag.
-        run: pnpm knip --no-exit-code
+        run: pnpm knip
 
   react-doctor:
     name: React Doctor (score)
