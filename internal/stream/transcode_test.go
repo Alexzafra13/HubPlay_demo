@@ -15,7 +15,14 @@ func newTestTranscoder(t *testing.T) *stream.Transcoder {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return stream.NewTranscoder(dir, "ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
+	return stream.NewTranscoder(stream.TranscoderConfig{
+		BaseDir:          dir,
+		FFmpegPath:       "ffmpeg",
+		TranscodeTimeout: 4 * time.Hour,
+		HWAccel:          stream.HWAccelNone,
+		Encoder:          "libx264",
+		Logger:           logger,
+	})
 }
 
 // baseRequest devuelve un `TranscodeRequest` con los defaults que la
@@ -40,7 +47,13 @@ func baseRequest(profile stream.Profile) stream.TranscodeRequest {
 func TestNewTranscoder_DefaultFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tc := stream.NewTranscoder(dir, "", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
+	tc := stream.NewTranscoder(stream.TranscoderConfig{
+		BaseDir:          dir,
+		TranscodeTimeout: 4 * time.Hour,
+		HWAccel:          stream.HWAccelNone,
+		Encoder:          "libx264",
+		Logger:           logger,
+	})
 	if tc == nil {
 		t.Fatal("expected non-nil transcoder")
 	}
@@ -80,7 +93,14 @@ func TestTranscoder_StopAll_Empty(t *testing.T) {
 func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
+	tc := stream.NewTranscoder(stream.TranscoderConfig{
+		BaseDir:          dir,
+		FFmpegPath:       "/nonexistent/ffmpeg",
+		TranscodeTimeout: 4 * time.Hour,
+		HWAccel:          stream.HWAccelNone,
+		Encoder:          "libx264",
+		Logger:           logger,
+	})
 
 	_, err := tc.Start("sess-1", "item-1", stream.TranscodeRequest{
 		Input:            "/some/video.mkv",
