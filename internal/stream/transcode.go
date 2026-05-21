@@ -116,7 +116,21 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, t.libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex, burnSub)
+	args := BuildFFmpegArgs(TranscodeRequest{
+		Input:              inputPath,
+		OutputDir:          outputDir,
+		Profile:            profile,
+		StartTime:          startTime,
+		HWAccel:            t.hwAccel,
+		Encoder:            t.encoder,
+		Libx264Preset:      t.libx264Preset,
+		CopyVideo:          copyVideo,
+		CopyAudio:          copyAudio,
+		ToneMap:            toneMap,
+		StartSegmentNumber: startSegmentNumber,
+		AudioStreamIndex:   audioStreamIndex,
+		BurnSub:            burnSub,
+	})
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -181,7 +195,21 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, t.libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex, burnSub)
+	args := BuildFFmpegArgs(TranscodeRequest{
+		Input:              inputPath,
+		OutputDir:          outputDir,
+		Profile:            profile,
+		StartTime:          startTime,
+		HWAccel:            t.hwAccel,
+		Encoder:            t.encoder,
+		Libx264Preset:      t.libx264Preset,
+		CopyVideo:          copyVideo,
+		CopyAudio:          copyAudio,
+		ToneMap:            toneMap,
+		StartSegmentNumber: startSegmentNumber,
+		AudioStreamIndex:   audioStreamIndex,
+		BurnSub:            burnSub,
+	})
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -287,76 +315,107 @@ func (s *Session) SegmentPath(index int) string {
 	return filepath.Join(s.OutputDir, fmt.Sprintf("segment%05d.ts", index))
 }
 
+// TranscodeRequest agrupa los parámetros de `BuildFFmpegArgs` en un
+// único valor pasable. Cierra el olor F14-2-a del audit 2026-05-14
+// (función de 192 LoC con 13 parámetros posicionales): mover a struct
+// permite añadir/renombrar campos sin tocar los 18+ callers en tests,
+// y deja los call-sites legibles ("CopyVideo: true" vs un `true` en
+// la octava posición). Documentación de cada campo en los comentarios
+// inline; los detalles del comportamiento ffmpeg viven en
+// `BuildFFmpegArgs` justo debajo.
+type TranscodeRequest struct {
+	// Input es la ruta absoluta al fichero fuente. Se prefija con
+	// `file:` en el args para que ffmpeg lo trate como filename
+	// aunque empiece por `-`.
+	Input string
+	// OutputDir es el directorio donde aterrizan `stream.m3u8` +
+	// `segmentNNNNN.ts`.
+	OutputDir string
+	// Profile contiene resolution, video/audio bitrate y framerate
+	// del preset elegido (720p, 480p, etc.).
+	Profile Profile
+	// StartTime es el offset en segundos para `-ss`. 0 = desde el
+	// principio (no se emite el flag).
+	StartTime float64
+	// HWAccel selecciona el acelerador de decode + frame transfer.
+	// HWAccelNone para path software; los HW paths añaden flags
+	// `-hwaccel ...` antes de `-i`.
+	HWAccel HWAccelType
+	// Encoder es el output encoder ("libx264", "h264_nvenc", ...).
+	// Empty fallback a "libx264".
+	Encoder string
+	// Libx264Preset es el `-preset` de libx264. Ignorado para los
+	// HW encoders (cada uno tiene su propio namespace de preset).
+	// Empty fallback a "veryfast".
+	Libx264Preset string
+	// CopyVideo / CopyAudio piden stream-copy del track
+	// correspondiente. Usado por DirectStream cuando el codec
+	// source ya es compatible con el cliente y sólo el container
+	// o el track hermano necesitan trabajo. El profile "original"
+	// fuerza ambos a true por compatibilidad histórica.
+	CopyVideo bool
+	CopyAudio bool
+	// ToneMap (sólo relevante con CopyVideo=false) prepende un
+	// chain zscale → tonemap(hable) → zscale al video filter,
+	// convirtiendo HDR PQ/HLG a BT.709 SDR antes del scale + pad.
+	// Skipped en stream-copy paths (no hay decoded frame que
+	// filtrar). La decisión ya routea HDR-para-SDR-client al
+	// branch de full-transcode.
+	ToneMap bool
+	// StartSegmentNumber es el valor de `-start_number` HLS. Una
+	// sesión de first-play pasa 0; una seek-restart pasa el index
+	// del segmento que corresponde al nuevo StartTime para que
+	// los `.ts` producidos coincidan con la sintetizada VOD
+	// manifest ya servida al cliente.
+	StartSegmentNumber int
+	// AudioStreamIndex < 0 → ffmpeg auto-pick (default audio
+	// track del fichero). >= 0 → emite explícito
+	// `-map 0:v:0 -map 0:a:<index>` para que la elección de dub
+	// del usuario seleccione una pista concreta. Es el index
+	// per-type que usa ffmpeg, NO el absolute stream id.
+	AudioStreamIndex int
+	// BurnSub (opcional, nil = sin burn-in) controla burn-in de
+	// subtítulos para codecs PGS/DVDSUB/ASS que el browser no
+	// puede renderer nativamente. Setearlo fuerza CopyVideo=false
+	// (overlay necesita decoded frames) y cambia el filter
+	// strategy:
+	//   - bitmap codecs (PGS, DVDSUB, ...) → -filter_complex
+	//     con overlay
+	//   - styled text (ASS / SSA)           → -vf con subtitles=
+	//     prepended
+	// El subtítulo es permanente para los segmentos resultantes,
+	// así que el caller DEBE incluir la elección en su session
+	// key (sessionKey() ya lo hace para audio; idem extensión
+	// para subs).
+	BurnSub *BurnSubtitleSpec
+}
+
 // BuildFFmpegArgs constructs FFmpeg arguments for HLS transcoding.
 //
-// `hwAccel` selects the input-side acceleration (decode + frame
-// transfer) and `encoder` selects the output encoder. Pass
-// `HWAccelNone, "libx264"` for the software path. The hardware paths
-// don't change the video filter chain — frames are downloaded to
-// system memory after decode, scaled in software, then uploaded by
-// the encoder. That's slower than a fully-on-device pipeline (vaapi
-// scale_vaapi etc.) but works without rewriting the filter graph and
-// matches what Plex/Jellyfin do for "general purpose" HW transcoding.
-//
-// `copyVideo` / `copyAudio` request stream-copy on the corresponding
-// track — used by the DirectStream path when the source codec is
-// already client-compatible and only the container or the sibling
-// track needs ffmpeg work. The historical `profile.Name == "original"`
-// shortcut still implies both copy=true (kept for the rare callers
-// that pre-date the flags).
-//
-// `startSegmentNumber` is the value passed to ffmpeg's `-start_number`
-// HLS option. A first-play session passes 0; a seek-restart passes
-// the segment index corresponding to the new `startTime` so the
-// produced .ts files keep monotonically increasing names that line
-// up with the synthesized VOD manifest the client already holds.
-// audioStreamIndex < 0 → let ffmpeg auto-pick (default audio track per
-// the source file's metadata). audioStreamIndex >= 0 → emit explicit
-// -map 0:v:0 -map 0:a:<index> so the user's preferred-audio choice
-// (or the in-player switcher) selects a specific dub. The index is
-// the per-type stream index ffmpeg uses, NOT the absolute stream id —
-// the client resolves DB MediaStream rows (filtered to type='audio')
-// to a 0-based index before calling.
-//
-// `toneMap` (only meaningful when copyVideo=false) prepends a
-// zscale → tonemap(hable) → zscale chain to the video filter graph,
-// converting an HDR PQ / HLG source to BT.709 SDR before the regular
-// scale + pad. Skipped on stream-copy paths because there is no
-// decoded frame to filter — the decision code already routes HDR
-// sources for SDR clients to the full-transcode branch.
-//
-// `libx264Preset` is the -preset value passed to ffmpeg when encoding
-// with libx264. It controls the CPU/quality trade-off: ultrafast
-// burns the least CPU at the worst quality, medium / slow burn more
-// for noticeably better output. Ignored when `encoder != "libx264"`
-// (HW encoders use their own preset namespace). Empty string falls
-// back to "veryfast" — the historical default — so test callers that
-// don't care about the preset keep working unchanged.
-//
-// `burnSub` (optional, nil = no burn-in) drives subtitle burn-in for
-// PGS / DVDSUB / ASS streams that no browser can render natively.
-// Setting it forces copyVideo=false (overlay needs decoded frames)
-// and switches the video filter strategy:
-//   - bitmap codecs (PGS, DVDSUB, ...) → -filter_complex with overlay
-//   - styled text (ASS / SSA)           → -vf with subtitles= prepended
-//
-// The chosen subtitle is permanent for the resulting segments, so
-// the caller MUST include the subtitle choice in its session key
-// (sessionKey() already does for audio; the analogous extension is
-// in this PR). Plex / Jellyfin handle this identically.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder, libx264Preset string, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) []string {
+// La conversión a struct (`TranscodeRequest`) cerró el olor F14-2-a
+// del audit 2026-05-14. El cuerpo no cambia: el switch HW/encoder/
+// copy/tonemap/subburn sigue ahí, sólo cambia la firma. Ver la
+// documentación de cada campo en el doc-comment de `TranscodeRequest`
+// arriba; los detalles que sobreviven aquí abajo son los que dependen
+// de cómo varios campos interactúan (ej. legacy "original" profile).
+func BuildFFmpegArgs(req TranscodeRequest) []string {
+	encoder := req.Encoder
 	if encoder == "" {
 		encoder = "libx264"
 	}
+	libx264Preset := req.Libx264Preset
 	if libx264Preset == "" {
 		libx264Preset = "veryfast"
 	}
-	manifestPath := filepath.Join(outputDir, "stream.m3u8")
-	segmentPattern := filepath.Join(outputDir, "segment%05d.ts")
+	manifestPath := filepath.Join(req.OutputDir, "stream.m3u8")
+	segmentPattern := filepath.Join(req.OutputDir, "segment%05d.ts")
+
+	copyVideo := req.CopyVideo
+	copyAudio := req.CopyAudio
 
 	// Legacy shortcut: callers passing the "original" profile expect
 	// both streams copied without thinking about the flags.
-	if profile.Name == "original" {
+	if req.Profile.Name == "original" {
 		copyVideo = true
 		copyAudio = true
 	}
@@ -365,11 +424,11 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// decoded frame to composite onto when we're just remuxing.
 	// Force the flag here so callers that flipped both knobs by
 	// mistake get the safe behaviour.
-	if burnSub != nil {
+	if req.BurnSub != nil {
 		copyVideo = false
 	}
-	useFilterComplex := burnSub != nil && IsImageSubtitleCodec(burnSub.Codec)
-	useSubtitlesFilter := burnSub != nil && IsStyledTextSubtitleCodec(burnSub.Codec)
+	useFilterComplex := req.BurnSub != nil && IsImageSubtitleCodec(req.BurnSub.Codec)
+	useSubtitlesFilter := req.BurnSub != nil && IsStyledTextSubtitleCodec(req.BurnSub.Codec)
 
 	args := []string{
 		"-hide_banner",
@@ -382,12 +441,12 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// runs (copyVideo=true) we also skip them — there is no decode
 	// happening, so an accel context just adds setup cost for nothing.
 	if !copyVideo {
-		args = append(args, HWAccelInputArgs(hwAccel)...)
+		args = append(args, HWAccelInputArgs(req.HWAccel)...)
 	}
 
 	// Seek if needed
-	if startTime > 0 {
-		args = append(args, "-ss", strconv.FormatFloat(startTime, 'f', 3, 64))
+	if req.StartTime > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(req.StartTime, 'f', 3, 64))
 	}
 
 	// Prefix the input with `file:` so ffmpeg parses it as a local
@@ -398,7 +457,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// absolute paths so this normally can't happen, but the cost of
 	// the prefix is one extra word in the args list and the upside is
 	// that we never have to think about it again.
-	args = append(args, "-i", "file:"+input)
+	args = append(args, "-i", "file:"+req.Input)
 
 	// Audio + video stream selection.
 	//
@@ -414,18 +473,18 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// the default stream picker for ALL streams) — we use 0:a:0? with
 	// the trailing `?` so a video-only source doesn't fail the start.
 	if useFilterComplex {
-		if audioStreamIndex >= 0 {
-			args = append(args, "-map", fmt.Sprintf("0:a:%d", audioStreamIndex))
+		if req.AudioStreamIndex >= 0 {
+			args = append(args, "-map", fmt.Sprintf("0:a:%d", req.AudioStreamIndex))
 		} else {
 			// Default audio, optional. The `?` makes the map non-fatal
 			// when the input has no audio track at all (rare but
 			// legitimate — silent video).
 			args = append(args, "-map", "0:a:0?")
 		}
-	} else if audioStreamIndex >= 0 {
+	} else if req.AudioStreamIndex >= 0 {
 		args = append(args,
 			"-map", "0:v:0",
-			"-map", fmt.Sprintf("0:a:%d", audioStreamIndex),
+			"-map", fmt.Sprintf("0:a:%d", req.AudioStreamIndex),
 		)
 	}
 
@@ -468,12 +527,12 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 			)
 		}
 		args = append(args,
-			"-b:v", profile.VideoBitrate,
-			"-maxrate", profile.VideoBitrate,
-			"-bufsize", profile.VideoBitrate,
+			"-b:v", req.Profile.VideoBitrate,
+			"-maxrate", req.Profile.VideoBitrate,
+			"-bufsize", req.Profile.VideoBitrate,
 		)
 
-		vfChain := buildVideoFilterChain(profile, toneMap)
+		vfChain := buildVideoFilterChain(req.Profile, req.ToneMap)
 
 		switch {
 		case useFilterComplex:
@@ -487,7 +546,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 			// sessionKey including BurnSubtitleIndex).
 			filterComplex := fmt.Sprintf(
 				"[0:v]%s[scaled];[scaled][0:s:%d]overlay[burned]",
-				vfChain, burnSub.Index,
+				vfChain, req.BurnSub.Index,
 			)
 			args = append(args,
 				"-filter_complex", filterComplex,
@@ -500,15 +559,15 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 			// so it operates on the full-resolution source frames
 			// before scale/pad — text stays crisper through the
 			// downscale than rendering at output resolution would.
-			subPath := ffmpegInputPathEscape(burnSub.InputPath)
+			subPath := ffmpegInputPathEscape(req.BurnSub.InputPath)
 			chain := fmt.Sprintf("subtitles=filename='%s':si=%d,%s",
-				subPath, burnSub.Index, vfChain)
+				subPath, req.BurnSub.Index, vfChain)
 			args = append(args, "-vf", chain)
 		default:
 			args = append(args, "-vf", vfChain)
 		}
 
-		args = append(args, "-r", strconv.Itoa(profile.MaxFrameRate))
+		args = append(args, "-r", strconv.Itoa(req.Profile.MaxFrameRate))
 	}
 
 	// Audio
@@ -517,7 +576,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	} else {
 		args = append(args,
 			"-c:a", "aac",
-			"-b:a", profile.AudioBitrate,
+			"-b:a", req.Profile.AudioBitrate,
 			"-ac", "2",
 		)
 	}
@@ -531,7 +590,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		"-hls_list_size", "0",
 		"-hls_segment_filename", segmentPattern,
 		"-hls_flags", "independent_segments",
-		"-start_number", strconv.Itoa(startSegmentNumber),
+		"-start_number", strconv.Itoa(req.StartSegmentNumber),
 		manifestPath,
 	)
 

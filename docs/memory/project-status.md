@@ -6,11 +6,12 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21 noche — Iter6 cerrada con H router-split)
+## 🔭 Estado actual (2026-05-21 noche tardía — Iter6 cerrada + F14-2-a (último alto) cerrado)
 
-- Branch de trabajo actual: `claude/project-review-1Zrtv`. Olor H del audit cerrado en esta sesión: `internal/api/router.go` 1549 → 465 LoC (−70 %) mediante 7 ficheros `mount_*.go` per-feature. Sin cambio de comportamiento; 271 registros de ruta preservados verbatim; tests `-race` verde.
-- Branch previa `claude/review-project-9YJxG` sigue pendiente de PR (commit `8b746fc` — G parcial lifecycle refactor).
-- Branch principal: `main`, V+JJ+LL ya mergeados via **PR #395** (commit `61396a3`).
+- Branch actual: `claude/f14-2-a-transcode-request`. **F14-2-a cerrado**: `stream.BuildFFmpegArgs` 13 params posicionales → `TranscodeRequest` struct. Era el último olor *alto* (severidad alta) restante de los 6 originales del audit 2026-05-14.
+- Branch previa `claude/project-review-1Zrtv` ya con PR abierta (**PR #397**): olor H cerrado, `router.go` 1549 → 465 LoC (−70 %) en 7 ficheros `mount_*.go` per-feature.
+- Branch previa `claude/review-project-9YJxG` mergeada via **PR #396** (commit `894db91`): olor G parcial (lifecycle refactor).
+- Branch principal `main` arrastra: V+JJ+LL (PR #395), G parcial (PR #396).
 - Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
 - Tests: `go test -race ./...` verde end-to-end con todo Iter 6 V+JJ+LL+G aplicado; frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
@@ -20,6 +21,46 @@
 - **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
 - **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🎯 Sesión 2026-05-21 (noche tardía II) — F14-2-a: `BuildFFmpegArgs` → `TranscodeRequest`
+
+Sesión corta y mecánica. Cierra el **último olor *alto* de severidad** de los 6 originales del audit 2026-05-14 (F14-2-a, function-level quality). Branch `claude/f14-2-a-transcode-request` desde `origin/main` post-PR-#396.
+
+### Cambio
+
+`stream.BuildFFmpegArgs(input, outputDir, profile, startTime, hwAccel, encoder, libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex, burnSub)` (13 params posicionales, 192 LoC body) → `stream.BuildFFmpegArgs(req TranscodeRequest) []string` (1 param).
+
+**`TranscodeRequest`** struct con los 13 campos del audit: `Input`, `OutputDir`, `Profile`, `StartTime`, `HWAccel`, `Encoder`, `Libx264Preset`, `CopyVideo`, `CopyAudio`, `ToneMap`, `StartSegmentNumber`, `AudioStreamIndex`, `BurnSub`. Cada campo documentado inline; el doc-comment de la función ahora puede ser corto (los detalles per-campo viven en el struct).
+
+### Call sites actualizados
+
+| Tipo | Antes | Después |
+|---|---:|---:|
+| Producción (`Transcoder.Start`, `Transcoder.RestartAt`) | 2 calls posicionales | 2 calls con struct literal |
+| Tests (`BuildFFmpegArgs_*` en `transcode_test.go`) | 18 calls posicionales | 18 calls vía `baseRequest(...)` helper + overrides |
+
+`baseRequest(profile)` ya estaba previsto en el spec — devuelve un `TranscodeRequest` con los defaults usados por la mayoría de tests (input/output canónicos, HWAccelNone, libx264, sin seek, sin burn-in, AudioStreamIndex -1) y cada test override sólo lo que le importa. Reduce noise visual y deja claro qué difiere entre un test y otro.
+
+### Qué NO entra en esta sesión
+
+El audit menciona "Patrón replicado tres veces" — `Transcoder.Start` y `Transcoder.RestartAt` tienen las mismas 11 params posicionales que `BuildFFmpegArgs` (subset). Esos dos NO se refactorizan en esta PR — sólo tienen 1 caller cada uno (`manager.go`), el ROI es mínimo, y el olor F14-2-a estaba específicamente dirigido a `BuildFFmpegArgs`. Si se quiere cerrar al 100 % la "replicación tres veces" se puede hacer en una iteración futura reusando el mismo `TranscodeRequest` (sería un Caller-Supplied subset del 13-field struct).
+
+### Aprendizajes
+
+- **Helper de defaults vs. struct literal por site**: la opción ganadora para 18+ sites es helper `baseRequest(...)` + mutación de campos relevantes. Struct literal completo en cada test inflaría el fichero en ~200 LoC y haría difícil ver qué difiere entre un test y otro. El helper hace explícito "esto es default" vs "esto es lo que estamos midiendo".
+
+- **AudioStreamIndex = -1 NO es zero value**. El zero value (`0`) significa "pin a audio stream 0" en BuildFFmpegArgs; el sentinel "auto-pick" es `-1`. Hay que set explicit -1 en el helper de defaults, o el comportamiento cambia silenciosamente. Caso clásico de "los zero values no siempre son el default deseado".
+
+- **Audit's exact spec ≠ scope mínimo**. El audit lista `BuildFFmpegArgs` con su 13-field struct específico, pero también menciona Start/RestartAt como pattern repetido. Aplicar el audit "exactamente" significa cerrar F14-2-a sin tocar Start/RestartAt — limpia el blast radius de la PR. Cerrar "al 100 %" es otra sesión.
+
+### Métricas
+
+- **2 ficheros tocados** (`transcode.go`, `transcode_test.go`).
+- **transcode.go 580 → 638 LoC** (+58 por el struct + sus doc-comments inline; `BuildFFmpegArgs` body sin cambio).
+- **transcode_test.go 106 LoC añadidos / 115 borrados** (los 18 call sites se compactan al usar el helper).
+- **6 → 0 olores altos restantes del audit 2026-05-14**. Cierra Iteración 8 al menos en su pieza visible.
 
 ---
 
@@ -728,8 +769,8 @@ Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.m
 - **BB** — comentarios en inglés masivos en `internal/library/` y otros → traducir al español (convención del repo). Mecánico pero grande.
 
 **Iteración 8 — polish**:
-- **F14-2-a** — único olor alto restante de los 6 originales del audit. Function-level quality.
-- F14-X, F15-X, F16-X (varios) — calidad de código residual.
+- ~~F14-2-a~~ ✅ `BuildFFmpegArgs` 13 params → `TranscodeRequest` struct (sesión 2026-05-21 noche tardía II, branch `claude/f14-2-a-transcode-request`). **0 olores altos pendientes del audit original.**
+- F14-X, F15-X, F16-X (varios) — calidad de código residual. F14-2-b (Start/RestartAt comparten el pattern de 11 params, pendiente) es el más cercano en scope.
 
 **Iteración 9 — verificación empírica**:
 - `go test -race` + `goleak` + `govulncheck` post-merge.
