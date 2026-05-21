@@ -124,4 +124,3 @@ const MediaGrid: FC<MediaGridProps> = ({
 };
 
 export { MediaGrid };
-export type { MediaGridProps };

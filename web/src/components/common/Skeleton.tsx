@@ -38,4 +38,3 @@ const Skeleton: FC<SkeletonProps> = ({
 };
 
 export { Skeleton };
-export type { SkeletonProps, SkeletonVariant };

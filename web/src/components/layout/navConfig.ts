@@ -19,7 +19,7 @@ export type NavGroup = {
   links: NavLink[];
 };
 
-export type NavLink = {
+type NavLink = {
   /** i18n key for the link's visible label. */
   labelKey: string;
   /** Absolute path or full search-string-bearing path. */

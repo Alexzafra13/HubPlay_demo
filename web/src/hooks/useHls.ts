@@ -3,19 +3,19 @@ import type { RefObject } from "react";
 import Hls from "hls.js";
 import { destroyHlsInstance } from "./hlsLifecycle";
 
-export interface AudioTrack {
+interface AudioTrack {
   id: number;
   name: string;
   lang: string;
 }
 
-export interface SubtitleTrack {
+interface SubtitleTrack {
   id: number;
   name: string;
   lang: string;
 }
 
-export interface QualityLevel {
+interface QualityLevel {
   id: number;        // index into hls.levels
   height: number;    // 1080, 720, ...
   bitrate: number;   // bits/sec

@@ -108,14 +108,6 @@ export function SubtitleIcon() {
   );
 }
 
-export function QualityIcon() {
-  return (
-    <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9.46 14.5l-3.04-3.04 1.41-1.41 1.63 1.62 4.13-4.12 1.41 1.41-5.54 5.54z" />
-    </svg>
-  );
-}
-
 // Settings / gear. Opens the unified Ajustes sheet (playback speed
 // + quality, with method tint on the latter). Same size-4 footprint
 // as the rest of the bottom-bar icons.

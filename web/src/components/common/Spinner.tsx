@@ -40,4 +40,3 @@ const Spinner: FC<SpinnerProps> = ({ size = "md", className = "" }) => {
 };
 
 export { Spinner };
-export type { SpinnerProps, SpinnerSize };

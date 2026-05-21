@@ -39,4 +39,3 @@ const ProgressBar: FC<ProgressBarProps> = ({
 };
 
 export { ProgressBar };
-export type { ProgressBarProps, ProgressBarSize };

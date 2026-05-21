@@ -108,7 +108,7 @@ export function useMyUploads(limit = 50, enabled = true) {
 // ─── SSE stream ──────────────────────────────────────────────────────
 
 /** El payload tipado de cada evento upload.* emitido por el server. */
-export interface UploadEventData {
+interface UploadEventData {
   id: string;
   user_id?: string;
   phase?: UploadPhase;

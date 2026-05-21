@@ -120,17 +120,6 @@ export function useCreatePersonalIPTVLibrary() {
   });
 }
 
-// Admin permission flags (migración 055). El hook de lectura cae al
-// listado /users (que ya trae los flags por fila) — sólo refresca
-// vía /users/{id}/permissions cuando hay un PUT que invalida.
-export function useUserPermissions(userId: string, enabled = true) {
-  return useQuery<UserPermissions>({
-    queryKey: queryKeys.userPermissions(userId),
-    queryFn: () => api.getUserPermissions(userId),
-    enabled: enabled && !!userId,
-  });
-}
-
 export function useSetUserPermissions() {
   const queryClient = useQueryClient();
   return useMutation<

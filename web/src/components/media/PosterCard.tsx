@@ -229,4 +229,3 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
 PosterCard.displayName = "PosterCard";
 
 export { PosterCard };
-export type { PosterCardProps };

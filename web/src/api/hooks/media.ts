@@ -23,6 +23,7 @@ import type {
   Library,
   MediaItem,
   PaginatedResponse,
+  StudioDetail,
   PersonDetail,
   UpdateLibraryRequest,
 } from "../types";
@@ -285,26 +286,15 @@ export function usePerson(
   });
 }
 
-// Studios browse + detail. The detail page (/studios/{slug}) is one
-// of the click-through targets from the studio mark on a movie /
-// series detail page; cache 5 min so revisits inside a session feel
-// instant without going stale on a fresh scan.
-export function useStudios(
-  options?: Partial<UseQueryOptions<{ studios: import("@/api/types").StudioListEntry[] }>>,
-) {
-  return useQuery<{ studios: import("@/api/types").StudioListEntry[] }>({
-    queryKey: queryKeys.studios,
-    queryFn: () => api.getStudios(),
-    staleTime: 5 * 60_000,
-    ...options,
-  });
-}
-
+// Studio detail. The detail page (/studios/{slug}) is one of the
+// click-through targets from the studio mark on a movie / series
+// detail page; cache 5 min so revisits inside a session feel instant
+// without going stale on a fresh scan.
 export function useStudio(
   slug: string,
-  options?: Partial<UseQueryOptions<import("@/api/types").StudioDetail>>,
+  options?: Partial<UseQueryOptions<StudioDetail>>,
 ) {
-  return useQuery<import("@/api/types").StudioDetail>({
+  return useQuery<StudioDetail>({
     queryKey: queryKeys.studio(slug),
     queryFn: () => api.getStudio(slug),
     enabled: !!slug,
@@ -390,14 +380,6 @@ export function useNextUp(options?: Partial<UseQueryOptions<MediaItem[]>>) {
   return useQuery<MediaItem[]>({
     queryKey: queryKeys.nextUp,
     queryFn: () => api.getNextUp(),
-    ...options,
-  });
-}
-
-export function useFavorites(options?: Partial<UseQueryOptions<MediaItem[]>>) {
-  return useQuery<MediaItem[]>({
-    queryKey: queryKeys.favorites,
-    queryFn: () => api.getFavorites(),
     ...options,
   });
 }

@@ -3,7 +3,7 @@ import type { User } from "@/api/types";
 import { avatarColorForUser } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
 
-export type UserAvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
+type UserAvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 
 export interface UserAvatarProps {
   user:

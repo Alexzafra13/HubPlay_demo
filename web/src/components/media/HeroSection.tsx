@@ -556,4 +556,3 @@ const HeroSection: FC<HeroSectionProps> = ({
 };
 
 export { HeroSection };
-export type { HeroSectionProps };

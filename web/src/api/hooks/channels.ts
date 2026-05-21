@@ -120,32 +120,6 @@ export function useResetLibraryChannelOrder() {
   });
 }
 
-export function useSetLibraryChannelVisibility() {
-  const qc = useQueryClient();
-  return useMutation<
-    void,
-    Error,
-    { libraryId: string; channelId: string; hidden: boolean }
-  >({
-    mutationFn: ({ libraryId, channelId, hidden }) =>
-      api.setLibraryChannelVisibility(libraryId, channelId, hidden),
-    onSuccess: (_, { libraryId }) => {
-      qc.invalidateQueries({ queryKey: ["channels", libraryId, "admin-order"] });
-      qc.invalidateQueries({ queryKey: ["channels"] });
-    },
-  });
-}
-
-export function useSetChannelVisibility() {
-  const qc = useQueryClient();
-  return useMutation<void, Error, { channelId: string; hidden: boolean }>({
-    mutationFn: ({ channelId, hidden }) => api.setChannelVisibility(channelId, hidden),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["channels"] });
-    },
-  });
-}
-
 // ─── Channel favorites ────────────────────────────────────────────────
 
 export function useChannelFavoriteIDs(

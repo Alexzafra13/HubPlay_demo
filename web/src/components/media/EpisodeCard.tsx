@@ -108,4 +108,3 @@ const EpisodeCard: FC<EpisodeCardProps> = ({ item, progress, onClick }) => {
 };
 
 export { EpisodeCard };
-export type { EpisodeCardProps };

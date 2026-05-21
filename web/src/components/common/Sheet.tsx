@@ -247,4 +247,3 @@ const Sheet: FC<SheetProps> = ({
 };
 
 export { Sheet };
-export type { SheetProps, SheetSize };

@@ -477,4 +477,3 @@ const AvailableImageCard: FC<AvailableImageCardProps> = ({
 );
 
 export { ImageManager };
-export type { ImageManagerProps };

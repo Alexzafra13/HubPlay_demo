@@ -1101,4 +1101,3 @@ const PlayerControls: FC<PlayerControlsProps> = ({
 };
 
 export { PlayerControls };
-export type { PlayerControlsProps, AudioTrack, SubtitleTrack };

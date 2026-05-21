@@ -274,4 +274,3 @@ const FolderBrowser: FC<FolderBrowserProps> = ({
 };
 
 export { FolderBrowser, FolderBrowserContent };
-export type { FolderBrowserProps, FolderBrowserContentProps };

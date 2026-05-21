@@ -163,4 +163,3 @@ const EpisodeRow: FC<EpisodeRowProps> = ({ item, onPlay }) => {
 };
 
 export { EpisodeRow };
-export type { EpisodeRowProps };
