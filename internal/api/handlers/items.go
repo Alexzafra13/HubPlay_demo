@@ -39,24 +39,23 @@ type ItemHandler struct {
 	// metadata provider's recommendations endpoint (TMDb today). nil
 	// disables the feature — the endpoint returns 503 in that case.
 	providers ProviderManager
-	// identifier powers the admin-only "Identify" rematch flow. Wraps
-	// the scanner (which already knows how to apply a TMDb metadata
-	// result end-to-end including images). nil disables the endpoints
-	// with a 503 — the rest of the handler keeps working.
-	identifier MetadataIdentifier
 	// Sub-handlers extraídos para cerrar el olor P del audit
 	// 2026-05-14 (ItemHandler god-handler, 1186 LoC, 13 deps, 4
 	// responsabilidades). Embedding por puntero → los métodos se
 	// promueven y los call sites externos (router, tests) siguen
 	// llamando `itemHandler.Method(...)` sin cambios.
 	//
-	// Fase 1: TrickplayHandler. Fase 2: Search + Recommendations.
-	// Pendiente: Detail (Get/Children/attach×8/buildItemDetail) +
-	// Metadata (Identify*/UpdateItemMetadata/SetMetadataLock/Refresh).
+	// Fases cerradas: Trickplay (1), Search + Recommendations (2),
+	// Metadata (3). Pendiente: Detail
+	// (Get/Children/attach×8/buildItemDetail) en una phase 4.
+	//
+	// Field promotion intra-paquete: `h.identifier` en buildItemDetail
+	// resuelve a `h.MetadataHandler.identifier` (no exportado, pero
+	// promovido porque estamos en el mismo paquete `handlers`).
 	*TrickplayHandler
 	*SearchHandler
 	*RecommendationsHandler
-	audit  AuditEmitter
+	*MetadataHandler
 	logger *slog.Logger
 }
 
@@ -67,23 +66,15 @@ func NewItemHandler(lib LibraryService, images ImageRepository, metadata Metadat
 		chapters: chapters, segments: segments, externalIDs: externalIDs, people: people,
 		collections: collections,
 		providers:   providers,
-		identifier:  identifier,
 		// Sub-handlers con sus deps específicas. Cada constructor toma
 		// el subconjunto que su responsabilidad realmente usa, no las
 		// 13 que tomaba el ItemHandler monolítico.
 		TrickplayHandler:       newTrickplayHandler(lib, trickplayDir, logger),
 		SearchHandler:          newSearchHandler(lib, images, userData, users, logger),
 		RecommendationsHandler: newRecommendationsHandler(lib, externalIDs, providers, logger),
-		audit:                  audit,
+		MetadataHandler:        newMetadataHandler(identifier, audit, logger),
 		logger:                 logger,
 	}
-}
-
-func (h *ItemHandler) auditEmit() AuditEmitter {
-	if h.audit != nil {
-		return h.audit
-	}
-	return noopAudit{}
 }
 
 // callerCapRating mirrors the LibraryHandler helper. nil-safe: when
