@@ -960,7 +960,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
           <div
             className="h-full w-1/4 bg-white/70"
-            style={{ animation: "loading-slide 1.8s ease-in-out infinite" }}
+            style={{ animation: "loading-slide 900ms ease-in-out infinite" }}
           />
         </div>
 

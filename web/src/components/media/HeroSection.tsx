@@ -212,6 +212,10 @@ const HeroSection: FC<HeroSectionProps> = ({
     item.type === "movie"
       ? formatPremiereDate(item.premiere_date, i18n.language)
       : null;
+  // Episodes show the same localised "12 Mar 2025" full date as movies;
+  // computed outside JSX so `new Date(...)` doesn't risk a hydration
+  // mismatch warning under SSR-style rendering tools.
+  const episodeAirDate = formatPremiereDate(item.premiere_date, i18n.language);
 
   // Episodes and seasons carry limited visuals on their own (episodes
   // get a still, seasons get a poster, neither gets a backdrop). The
@@ -465,14 +469,8 @@ const HeroSection: FC<HeroSectionProps> = ({
                     keep the year-only line because their air
                     "premiere" is per-season and a single date is
                     misleading. */}
-                {isEpisode && item.premiere_date ? (
-                  <span className="font-medium">
-                    {new Date(item.premiere_date).toLocaleDateString(i18n.language, {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </span>
+                {isEpisode && episodeAirDate ? (
+                  <span className="font-medium">{episodeAirDate}</span>
                 ) : movieReleaseDate ? (
                   <span className="font-medium">{movieReleaseDate}</span>
                 ) : item.year != null ? (

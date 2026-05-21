@@ -24,7 +24,16 @@ interface MediaGridProps {
   cornerBadgeFor?: (item: MediaItem) => ReactNode;
 }
 
-const SKELETON_COUNT = 8;
+const SKELETON_KEYS = [
+  "grid-sk-a",
+  "grid-sk-b",
+  "grid-sk-c",
+  "grid-sk-d",
+  "grid-sk-e",
+  "grid-sk-f",
+  "grid-sk-g",
+  "grid-sk-h",
+];
 const BATCH_SIZE = 40;
 
 const MediaGrid: FC<MediaGridProps> = ({
@@ -71,8 +80,8 @@ const MediaGrid: FC<MediaGridProps> = ({
   if (loading) {
     return (
       <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-        {Array.from({ length: SKELETON_COUNT }, (_, i) => (
-          <div key={`grid-skeleton-${i}`} className="flex flex-col gap-2">
+        {SKELETON_KEYS.map((k) => (
+          <div key={k} className="flex flex-col gap-2">
             <Skeleton
               variant="rectangular"
               className="aspect-[2/3] w-full rounded-[--radius-lg]"
