@@ -7,7 +7,7 @@
 //   cd web && pnpm gen:installer-assets
 
 import sharp from "sharp";
-import toIco from "to-ico";
+import pngToIco from "png-to-ico";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -32,9 +32,16 @@ async function svgPng(size) {
 }
 
 async function genIco() {
+  // png-to-ico acepta un array de Buffers PNG (firma compatible con la
+  // que usaba `to-ico`). Swap motivado por seguridad: `to-ico` arrastra
+  // un chain de deps deprecated (jimp 0.2.28 → resize-img → request →
+  // form-data/qs/tough-cookie/minimist) que reportaban 5 alertas
+  // Dependabot, una de severidad crítica (form-data unsafe random).
+  // `png-to-ico` tiene 3 deps directas (pngjs, minimist@^1.2.8 ya
+  // parcheado, @types/node) — chain limpia.
   const sizes = [16, 32, 48, 64, 128, 256];
   const pngs = await Promise.all(sizes.map(svgPng));
-  const ico = await toIco(pngs);
+  const ico = await pngToIco(pngs);
   await writeFile(OUT_ICO, ico);
   console.log(`✓ ${OUT_ICO} (${sizes.join(",")})`);
 }
