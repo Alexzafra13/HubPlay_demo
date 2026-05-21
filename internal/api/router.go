@@ -100,7 +100,39 @@ type Dependencies struct {
 	// BuildDate es la fecha de compilación (RFC3339). Vacío en dev.
 	BuildDate      string
 	WebAssets      fs.FS
+	// Config es el live `*config.Config`. **Sólo** lo consumen los dos
+	// handlers que mutan el fichero on-the-fly: setup wizard
+	// (`SetupHandler.Config`) y panel admin DB (`AdminDBHandler`); ambos
+	// llaman a `config.Save` tras editar campos del struct, así que
+	// necesitan la referencia viva. El resto del router NO lee
+	// `Config.X.Y` directo — se cablea por los campos primitivos
+	// inmediatamente abajo (`DataDir`, `ServerBaseURL`, etc.). Cierra el
+	// olor V del audit 2026-05-14 ("router lee deps.Config.* directo").
 	Config         *config.Config
+	// Valores primitivos derivados de Config, materializados una vez en
+	// composition root (`main.go`). Si `Config != nil` y un primitivo
+	// está a zero, `NewRouter` los rellena desde Config como
+	// retro-compat (tests minimalistas que sólo pasan `Config: cfg`).
+	MetricsEnabled bool
+	MetricsPath    string
+	AuthConfig     config.AuthConfig
+	// DataDir es el directorio padre de la DB. Source of truth para
+	// imageDir + fedImageDir + trickplayDir, que se derivan colgando
+	// "images" / "images/trickplay" debajo.
+	DataDir        string
+	DatabasePath   string
+	DatabaseDriver string
+	ServerAddr     string
+	ServerBaseURL  string
+	ServerPort     int
+	MDNSEnabled    bool
+	MDNSHostname   string
+	HWAccelDefault config.HWAccelConfig
+	// AllowedOrigins es la lista estática CORS desde el YAML. Sólo se
+	// usa cuando `CorsRegistry == nil` (tests minimalistas o flag de
+	// compatibilidad); en producción el middleware dynamic lo consulta
+	// con statics+dynamics combinados.
+	AllowedOrigins []string
 	Logger         *slog.Logger
 	Metrics        *observability.Metrics
 	// LogBuffer is the in-memory ring the admin "Logs" surface
@@ -166,6 +198,14 @@ type Dependencies struct {
 }
 
 func NewRouter(deps Dependencies) http.Handler {
+	// Retro-compat con tests minimalistas que sólo pasan `Config: cfg`
+	// — si los campos primitivos no llegan rellenados, los derivamos
+	// aquí desde Config. main.go los pasa siempre explícitos (path
+	// idiomático). Una vez derivados, ningún sitio downstream lee
+	// `deps.Config.X.Y` excepto los dos handlers que mutan el fichero
+	// (setup wizard + admin DB). Cierra olor V del audit 2026-05-14.
+	deps.fillFromConfig()
+
 	r := chi.NewRouter()
 
 	// Wire the observability hook into the handlers package so every rendered
@@ -216,7 +256,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Use(CorsMiddleware(deps.CorsRegistry, corsMethods, corsAllowedHeaders, corsExposedHeaders, true, 300))
 	} else {
 		r.Use(cors.Handler(cors.Options{
-			AllowedOrigins:   allowedOrigins(deps.Config),
+			AllowedOrigins:   deps.AllowedOrigins,
 			AllowedMethods:   corsMethods,
 			AllowedHeaders:   corsAllowedHeaders,
 			ExposedHeaders:   corsExposedHeaders,
@@ -229,8 +269,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	// Prometheus /metrics endpoint. Mounted outside /api/v1 because metrics
 	// scrapers expect a top-level path; kept unauthenticated by convention,
 	// operators are expected to protect it at the reverse proxy if desired.
-	if deps.Metrics != nil && deps.Config != nil && deps.Config.Observability.MetricsEnabled {
-		path := deps.Config.Observability.MetricsPath
+	if deps.Metrics != nil && deps.MetricsEnabled {
+		path := deps.MetricsPath
 		if path == "" {
 			path = "/metrics"
 		}
@@ -238,7 +278,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.Config.Auth, deps.Audit, deps.Logger)
+	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.AuthConfig, deps.Audit, deps.Logger)
 	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Audit, deps.Logger)
 
 	// Avoid wrapping a nil concrete pointer in a non-nil interface.
@@ -246,7 +286,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.StreamManager != nil {
 		streamSvc = deps.StreamManager
 	}
-	healthHandler := handlers.NewHealthHandler(deps.DB, streamSvc, deps.Version, deps.Config.Database.Path)
+	healthHandler := handlers.NewHealthHandler(deps.DB, streamSvc, deps.Version, deps.DatabasePath)
 
 	// Image handler is constructed early so the federation peer
 	// surface (under /api/v1/peer/*, mounted BEFORE the user-auth
@@ -259,8 +299,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		fedImgSrv   *handlers.ImageHandler
 		fedImageDir string
 	)
-	if deps.DB != nil && deps.Config != nil && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
-		fedImageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
+	if deps.DB != nil && deps.DataDir != "" && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
+		fedImageDir = filepath.Join(deps.DataDir, "images")
 		fedImgSrv = handlers.NewImageHandler(
 			deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
 			library.NewImageRefresher(
@@ -305,7 +345,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		var deviceHandler *handlers.DeviceAuthHandler
 		if deps.DeviceCode != nil {
 			deviceHandler = handlers.NewDeviceAuthHandler(
-				deps.DeviceCode, nil, deps.Config.Auth, deps.EventBus, deps.SSELimiter, deps.Logger)
+				deps.DeviceCode, nil, deps.AuthConfig, deps.EventBus, deps.SSELimiter, deps.Logger)
 			r.Post("/auth/device/start", deviceHandler.Start)
 			r.Post("/auth/device/poll", deviceHandler.Poll)
 			if deviceHandler.HasEventBus() {
@@ -764,23 +804,20 @@ func NewRouter(deps Dependencies) http.Handler {
 				if deps.Libraries != nil {
 					sysLibs = deps.Libraries
 				}
-				dbPath := ""
+				dbPath := deps.DatabasePath
 				imageDir := ""
-				bindAddress := ""
-				baseURL := ""
+				if deps.DataDir != "" {
+					imageDir = filepath.Join(deps.DataDir, "images")
+				}
+				bindAddress := deps.ServerAddr
+				baseURL := deps.ServerBaseURL
 				mdnsURL := ""
-				if deps.Config != nil {
-					dbPath = deps.Config.Database.Path
-					imageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
-					bindAddress = deps.Config.Server.Addr()
-					baseURL = deps.Config.Server.BaseURL
-					if deps.Config.MDNS.Enabled {
-						host := deps.Config.MDNS.Hostname
-						if host == "" {
-							host = "hubplay"
-						}
-						mdnsURL = fmt.Sprintf("http://%s.local:%d", host, deps.Config.Server.Port)
+				if deps.MDNSEnabled {
+					host := deps.MDNSHostname
+					if host == "" {
+						host = "hubplay"
 					}
+					mdnsURL = fmt.Sprintf("http://%s.local:%d", host, deps.ServerPort)
 				}
 				// Host info sampler — optional. nil providers degrade to
 				// an empty host section so the test rig + minimal startup
@@ -889,7 +926,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						settingsHandler := handlers.NewSettingsHandler(handlers.SettingsHandlerConfig{
 							Settings:          deps.Settings,
 							BaseURLDefault:    baseURL,
-							HWAccelDefault:    deps.Config.Streaming.HWAccel,
+							HWAccelDefault:    deps.HWAccelDefault,
 							HWAccelDetected:   detectedHWAccel,
 							StreamingDefaults: streamingDefaults,
 							Logger:            deps.Logger,
@@ -917,7 +954,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						}
 						if deps.DB != nil {
 							backupHandler := handlers.NewAdminBackupHandler(
-								deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Audit, deps.Logger,
+								deps.DatabaseDriver, deps.DB, deps.DatabasePath, deps.Audit, deps.Logger,
 							)
 							r.Get("/backup", backupHandler.Download)
 							r.Post("/backup/restore", backupHandler.Upload)
@@ -1032,7 +1069,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				streamHandler := handlers.NewStreamHandler(
 					deps.StreamManager, deps.Items, deps.MediaStreams,
 					deps.ExternalIDs, deps.Providers,
-					deps.Settings, deps.Config.Server.BaseURL, deps.Logger,
+					deps.Settings, deps.ServerBaseURL, deps.Logger,
 				)
 
 				r.Route("/stream/{itemId}", func(r chi.Router) {
@@ -1060,7 +1097,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// reusing the image-storage root keeps the on-disk
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
-				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
+				trickplayDir := filepath.Join(deps.DataDir, "images", "trickplay")
 				// scanner ↔ MetadataIdentifier: deps.Scanner es *scanner.Scanner;
 				// el handler sólo necesita la pequeña interfaz MetadataIdentifier.
 				// Pasarlo como nil cuando no esté wired hace que los endpoints
@@ -1441,6 +1478,58 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	return r
+}
+
+// fillFromConfig rellena los campos primitivos de Dependencies desde el
+// `*config.Config` cuando vienen a zero — pensado para tests que sólo
+// pasan `Config: cfg`. main.go los pasa siempre explícitos. Si `Config`
+// es nil, deja todo como está (los tests que ni siquiera pasan Config
+// ya no tocan ninguna ruta config-dependiente). Cierra olor V del
+// audit 2026-05-14.
+func (deps *Dependencies) fillFromConfig() {
+	cfg := deps.Config
+	if cfg == nil {
+		return
+	}
+	if !deps.MetricsEnabled {
+		deps.MetricsEnabled = cfg.Observability.MetricsEnabled
+	}
+	if deps.MetricsPath == "" {
+		deps.MetricsPath = cfg.Observability.MetricsPath
+	}
+	if deps.AuthConfig == (config.AuthConfig{}) {
+		deps.AuthConfig = cfg.Auth
+	}
+	if deps.DatabasePath == "" {
+		deps.DatabasePath = cfg.Database.Path
+	}
+	if deps.DataDir == "" && cfg.Database.Path != "" {
+		deps.DataDir = filepath.Dir(cfg.Database.Path)
+	}
+	if deps.DatabaseDriver == "" {
+		deps.DatabaseDriver = cfg.Database.Driver
+	}
+	if deps.ServerAddr == "" {
+		deps.ServerAddr = cfg.Server.Addr()
+	}
+	if deps.ServerBaseURL == "" {
+		deps.ServerBaseURL = cfg.Server.BaseURL
+	}
+	if deps.ServerPort == 0 {
+		deps.ServerPort = cfg.Server.Port
+	}
+	if !deps.MDNSEnabled {
+		deps.MDNSEnabled = cfg.MDNS.Enabled
+	}
+	if deps.MDNSHostname == "" {
+		deps.MDNSHostname = cfg.MDNS.Hostname
+	}
+	if deps.HWAccelDefault == (config.HWAccelConfig{}) {
+		deps.HWAccelDefault = cfg.Streaming.HWAccel
+	}
+	if deps.AllowedOrigins == nil {
+		deps.AllowedOrigins = allowedOrigins(cfg)
+	}
 }
 
 // allowedOrigins builds the CORS origin list from config.

@@ -331,19 +331,26 @@ func run(configPath string) error {
 	if v, err := repos.Settings.Get(ctx, "streaming.transcode_preset"); err == nil && v != "" {
 		streamingCfg.TranscodePreset = v
 	}
-	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, streamingCfg, logger)
-	streamManager.SetMetrics(observability.NewStreamSink(metrics))
-	streamManager.SetEventBus(eventBus)
-	// Runtime hook for the playback.force_direct_play admin toggle.
-	// Read on every StartSession so the admin can flip it without a
-	// restart. Boolean parse mirrors the validator in
-	// settings.validateSettingValue (canonical "true"/"false" strings).
-	streamManager.SetForceDirectPlayLookup(func(ctx context.Context) bool {
-		v, err := repos.Settings.GetOr(ctx, "playback.force_direct_play", "false")
-		if err != nil {
-			return false
-		}
-		return v == "true"
+	// Wiring atómico (Deps) sustituye a los 3 setters post-construcción
+	// del flujo pre-refactor (olor JJ del audit 2026-05-14).
+	streamManager := stream.NewManager(stream.Deps{
+		Items:    repos.Items,
+		Streams:  repos.MediaStreams,
+		Config:   streamingCfg,
+		Logger:   logger,
+		Metrics:  observability.NewStreamSink(metrics),
+		EventBus: eventBus,
+		// Runtime hook for the playback.force_direct_play admin
+		// toggle. Read on every StartSession so el admin puede
+		// flipearlo sin restart. Boolean parse mirrors el validator
+		// en settings.validateSettingValue (canónico "true"/"false").
+		ForceDirectPlayLookup: func(ctx context.Context) bool {
+			v, err := repos.Settings.GetOr(ctx, "playback.force_direct_play", "false")
+			if err != nil {
+				return false
+			}
+			return v == "true"
+		},
 	})
 
 	// ═══ Phase 4c: IPTV ═══
@@ -681,6 +688,23 @@ func run(configPath string) error {
 		BuildDate:     buildDate,
 		WebAssets:     webFS,
 		Config:        cfg,
+		// Primitivos derivados de cfg pasados explícitos al router.
+		// Cierra olor V del audit 2026-05-14 — router.go ya no lee
+		// `deps.Config.X.Y` (salvo los dos handlers que mutan el
+		// fichero: setup wizard + admin DB panel).
+		MetricsEnabled: cfg.Observability.MetricsEnabled,
+		MetricsPath:    cfg.Observability.MetricsPath,
+		AuthConfig:     cfg.Auth,
+		DataDir:        filepath.Dir(cfg.Database.Path),
+		DatabasePath:   cfg.Database.Path,
+		DatabaseDriver: cfg.Database.Driver,
+		ServerAddr:     cfg.Server.Addr(),
+		ServerBaseURL:  cfg.Server.BaseURL,
+		ServerPort:     cfg.Server.Port,
+		MDNSEnabled:    cfg.MDNS.Enabled,
+		MDNSHostname:   cfg.MDNS.Hostname,
+		HWAccelDefault: cfg.Streaming.HWAccel,
+		AllowedOrigins: api.AllowedOrigins(cfg),
 		Logger:        logger,
 		Metrics:       metrics,
 		LogBuffer:     logBuffer,

@@ -25,9 +25,16 @@ type Session struct {
 }
 
 // Transcoder manages FFmpeg transcoding sessions.
+//
+// Owner del proceso ffmpeg (cmd, cancel, done) — distinto de
+// `Manager.sessions` que owns la sesión lógica del usuario. Ver
+// docstring de `Manager` para el porqué de mantener los dos mapas
+// (olor LL del audit 2026-05-14 — cerrado parcialmente por
+// documentación; refactor completo a "Transcoder stateless" deferred
+// como sesión propia).
 type Transcoder struct {
 	mu               sync.Mutex
-	sessions         map[string]*Session // keyed by session ID
+	sessions         map[string]*Session // keyed by session ID — proceso ffmpeg, no la sesión lógica del usuario
 	baseDir          string              // base directory for transcoded segments
 	ffmpeg           string              // path to ffmpeg binary
 	transcodeTimeout time.Duration       // max duration per transcode process

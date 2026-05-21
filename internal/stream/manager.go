@@ -39,7 +39,29 @@ func (noopSink) TranscodeBusy()          {}
 func (noopSink) TranscodeFailed()        {}
 func (noopSink) SetActiveSessions(n int) {}
 
-// Manager orchestrates streaming sessions (direct play, remux, and transcode).
+// Manager orchestrates streaming sessions (direct play, remux, and
+// transcode).
+//
+// Responsabilidad respecto a `Transcoder` (cierra parcialmente el olor
+// LL del audit 2026-05-14, "doble session tracking"):
+//
+//   - **Manager.sessions** mapa keyed por `sessionKey(userID, itemID,
+//     profile, audioIdx, subIdx)` — clave compuesta de la sesión
+//     LÓGICA del usuario. El valor es `*ManagedSession`, que envuelve
+//     un `*Session` raw y añade contexto de usuario, decisión de
+//     playback, mutex de restart por-sesión y trickle de
+//     LastAccessed. Es la API pública: handlers cliente entran aquí.
+//
+//   - **Transcoder.sessions** mapa keyed por `sessionID` bare — clave
+//     del proceso ffmpeg físico. El valor es `*Session` con cmd,
+//     cancel, done — control del proceso. Es interno al paquete.
+//
+// Los dos mapas apuntan al MISMO `*Session` por debajo (ManagedSession
+// embed un puntero a Session) — no hay duplicación de estado, sólo dos
+// vistas con propósitos distintos. La auditoría sugirió hacer el
+// Transcoder stateless (tracking solo en Manager) pero eso implica
+// migrar cmd/cancel/done a ManagedSession + reescribir Start +
+// RestartSessionAt + StopSession, deferred como sesión propia.
 type Manager struct {
 	mu         sync.Mutex
 	sessions   map[string]*ManagedSession
@@ -151,13 +173,39 @@ var ErrRestartRateLimited = errors.New("stream: restart rate limit exceeded")
 // fresh StartSession instead of looping on a dead key.
 var ErrSessionNotFound = errors.New("stream: session not found")
 
+// Deps agrupa las dependencias de `NewManager`. Los 4 primeros campos
+// son obligatorios (Items, Streams, Config, Logger); los 3 restantes
+// (Metrics, EventBus, ForceDirectPlayLookup) son opcionales y reemplazan
+// a los antiguos setters `SetMetrics` / `SetEventBus` /
+// `SetForceDirectPlayLookup` que el composition root encadenaba. Los
+// setters siguen existiendo para tests (swap de stub a runtime, ver
+// `manager_test.go::TestManager_SetMetrics_*`) pero la wiring de
+// producción usa Deps — un único call site, sin Builder Pattern
+// accidental. Cierra olor JJ del audit 2026-05-14.
+type Deps struct {
+	Items   *db.ItemRepository
+	Streams *db.MediaStreamRepository
+	Config  config.StreamingConfig
+	Logger  *slog.Logger
+
+	// Metrics — sink de observability. Nil deja el noopSink por defecto.
+	Metrics MetricsSink
+	// EventBus — publish de eventos de ciclo de vida del transcoder
+	// (TranscodeStarted / TranscodeCompleted). Nil deshabilita.
+	EventBus *event.Bus
+	// ForceDirectPlayLookup — hook a app_settings para el toggle
+	// admin `playback.force_direct_play`. El closure se llama en
+	// cada `StartSession`, así que el flag es mutable runtime sin
+	// reiniciar. Nil deja la decisión 100% en el algoritmo estándar.
+	ForceDirectPlayLookup func(context.Context) bool
+}
+
 // NewManager creates a streaming manager.
-func NewManager(
-	items *db.ItemRepository,
-	streams *db.MediaStreamRepository,
-	cfg config.StreamingConfig,
-	logger *slog.Logger,
-) *Manager {
+func NewManager(deps Deps) *Manager {
+	items := deps.Items
+	streams := deps.Streams
+	cfg := deps.Config
+	logger := deps.Logger
 	// Single source of truth for the cache directory — preflight checks
 	// use the same helper so "the cache dir" means the same thing in both
 	// places.
@@ -209,6 +257,21 @@ func NewManager(
 		metrics:    noopSink{},
 		hwAccel:    hwResult,
 	}
+
+	// Wiring atómico de los hooks opcionales — sustituye a los 3
+	// setters post-construcción que main.go encadenaba (olor JJ del
+	// audit). Los setters siguen existiendo para tests; producción
+	// pasa todo en Deps y NewManager devuelve un Manager listo para
+	// servir sin call sites adicionales.
+	if deps.Metrics != nil {
+		m.metrics = deps.Metrics
+		// Mirror del contrato documentado en SetMetrics: el sink ve
+		// el gauge inicial (0 al arrancar) en vez de tener que esperar
+		// al primer StartSession para emitir un valor.
+		m.metrics.SetActiveSessions(0)
+	}
+	m.bus = deps.EventBus
+	m.forceDirectPlayLookup = deps.ForceDirectPlayLookup
 
 	go m.cleanupLoop()
 	return m
