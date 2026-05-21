@@ -78,15 +78,37 @@ func normaliseLanguageFilter(codes []string) string {
 	return strings.Join(out, ",")
 }
 
+// Service es el facade que ensambla los sub-services tras el cierre
+// del olor Z del audit 2026-05-14 (god-service de 27 métodos en 6
+// responsabilidades). El struct mantiene los fields core que CRUD +
+// scan + lifecycle usan; ACL e item queries se delegan vía embedding
+// a sus sub-services dedicados.
+//
+// Sub-services embedded (method promotion intra-paquete los expone
+// como si fueran métodos del Service, así handlers e interfaces
+// LibraryService consumer-side no cambian):
+//
+//	AccessControl  → ListForUser, UserHasAccess, GrantAccess,
+//	                 RevokeAccess, ListAccessByUser, ReplaceAccess
+//	ItemQueries    → ListItems, ListGenres, GetItem, GetItemChildren,
+//	                 GetItemChildCounts, GetItemStreams,
+//	                 GetItemImages, LatestItems, LatestSeriesByActivity,
+//	                 ItemCount
+//
+// Métodos que se mantienen en el facade directamente (core CRUD +
+// scan + lifecycle):
+//
+//	Create, CreatePersonalIPTV, GetByID, List, Update, Delete,
+//	Scan, ScanSync, IsScanning, ScanAll, Shutdown
 type Service struct {
-	libraries  *db.LibraryRepository
-	items      *db.ItemRepository
-	streams    *db.MediaStreamRepository
-	images     *db.ImageRepository
-	channels   *db.ChannelRepository
-	itemValues *db.ItemValueRepository
-	scanner    *scanner.Scanner
-	logger     *slog.Logger
+	*AccessControl
+	*ItemQueries
+
+	libraries *db.LibraryRepository
+	items     *db.ItemRepository
+	channels  *db.ChannelRepository
+	scanner   *scanner.Scanner
+	logger    *slog.Logger
 
 	// Track active scans to prevent concurrent scans of the same library
 	mu       sync.Mutex
@@ -112,19 +134,20 @@ func NewService(
 	scnr *scanner.Scanner,
 	logger *slog.Logger,
 ) *Service {
+	libLogger := logger.With("module", "library")
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Service{
-		libraries:  libraries,
-		items:      items,
-		streams:    streams,
-		images:     images,
-		channels:   channels,
-		itemValues: itemValues,
-		scanner:    scnr,
-		logger:     logger.With("module", "library"),
-		scanning:   make(map[string]bool),
-		bgCtx:      bgCtx,
-		bgCancel:   bgCancel,
+		AccessControl: newAccessControl(libraries, libLogger),
+		ItemQueries:   newItemQueries(items, streams, images, itemValues, libraries, channels, libLogger),
+
+		libraries: libraries,
+		items:     items,
+		channels:  channels,
+		scanner:   scnr,
+		logger:    libLogger,
+		scanning:  make(map[string]bool),
+		bgCtx:     bgCtx,
+		bgCancel:  bgCancel,
 	}
 }
 
@@ -269,59 +292,11 @@ func (s *Service) List(ctx context.Context) ([]*librarymodel.Library, error) {
 	return s.libraries.List(ctx)
 }
 
-func (s *Service) ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error) {
-	return s.libraries.ListForUser(ctx, userID)
-}
-
-// UserHasAccess reports whether the user is allowed to access a library.
-// Delegates to the repository — see its doc comment for the ACL rule.
-func (s *Service) UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error) {
-	return s.libraries.UserHasAccess(ctx, userID, libraryID)
-}
-
-// GrantAccess adds a library_access row for (userID, libraryID). userID
-// MUST be a top-level user (ADR-014); profile resolution is the caller's
-// job. Idempotent: re-granting an existing row is a no-op.
-func (s *Service) GrantAccess(ctx context.Context, userID, libraryID string) error {
-	if err := s.libraries.GrantAccess(ctx, userID, libraryID); err != nil {
-		return err
-	}
-	s.logger.Info("library access granted", "user_id", userID, "library_id", libraryID)
-	return nil
-}
-
-// RevokeAccess removes the grant for (userID, libraryID). userID MUST be
-// a top-level user. Profiles under that user lose access in the same
-// operation through the COALESCE predicate.
-func (s *Service) RevokeAccess(ctx context.Context, userID, libraryID string) error {
-	if err := s.libraries.RevokeAccess(ctx, userID, libraryID); err != nil {
-		return err
-	}
-	s.logger.Info("library access revoked", "user_id", userID, "library_id", libraryID)
-	return nil
-}
-
-// ListAccessByUser returns the library_ids the user has explicit grants
-// for. Admin-only surface: powers the per-user matrix in the admin UI.
-// Caller must pass a top-level user id; a profile id returns the empty
-// slice because grants always target the parent.
-func (s *Service) ListAccessByUser(ctx context.Context, userID string) ([]string, error) {
-	return s.libraries.ListAccessByUser(ctx, userID)
-}
-
-// ReplaceAccess overwrites the user's grant set with libraryIDs in one
-// transactional diff: missing grants get inserted, extras get revoked.
-// The handler is responsible for resolving the user to its top-level id
-// AND for validating that every libraryID actually exists; ReplaceAccess
-// only deduplicates the input. Returns nil on success even when the
-// caller passed an empty list (clears every grant).
-func (s *Service) ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error {
-	if err := s.libraries.ReplaceAccess(ctx, userID, libraryIDs); err != nil {
-		return err
-	}
-	s.logger.Info("library access replaced", "user_id", userID, "count", len(libraryIDs))
-	return nil
-}
+// (Operaciones ACL — ListForUser, UserHasAccess, GrantAccess,
+// RevokeAccess, ListAccessByUser, ReplaceAccess — viven en
+// access_control.go. El embedding de *AccessControl en Service
+// las promueve para que callers externos las llamen via `s.Method(...)`
+// sin cambios.)
 
 type UpdateRequest struct {
 	Name        string   `json:"name"`
@@ -463,81 +438,11 @@ func (s *Service) IsScanning(id string) bool {
 	return s.scanning[id]
 }
 
-// Items delegates to the item repository with filters.
-func (s *Service) ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
-	if filter.Limit <= 0 {
-		filter.Limit = 20
-	}
-	if filter.Limit > 100 {
-		filter.Limit = 100
-	}
-	return s.items.List(ctx, filter)
-}
-
-// ListGenres delegates to the normalized tag store. Optional itemType
-// scopes the vocabulary so /movies and /series only see relevant chips.
-func (s *Service) ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error) {
-	if s.itemValues == nil {
-		return nil, nil
-	}
-	return s.itemValues.ListGenres(ctx, itemType)
-}
-
-func (s *Service) GetItem(ctx context.Context, id string) (*librarymodel.Item, error) {
-	return s.items.GetByID(ctx, id)
-}
-
-func (s *Service) GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error) {
-	return s.items.GetChildren(ctx, id)
-}
-
-// GetItemChildCounts is a thin pass-through to the items repo. Lives
-// on the service layer purely so the handler depends on the
-// LibraryService interface (testable via the existing mock) instead
-// of reaching into *db.ItemRepository directly.
-func (s *Service) GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error) {
-	return s.items.ChildCountsByParents(ctx, parentIDs)
-}
-
-func (s *Service) GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error) {
-	return s.streams.ListByItem(ctx, itemID)
-}
-
-func (s *Service) GetItemImages(ctx context.Context, itemID string) ([]*librarymodel.Image, error) {
-	return s.images.ListByItem(ctx, itemID)
-}
-
-// LatestItems returns the most recently added items in a library
-// (or globally when libraryID == ""). When `capRating` is non-empty
-// the result set is filtered to ratings at-or-below the cap; pass
-// "" to disable the filter (unrestricted profile / admin context).
-func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*librarymodel.Item, error) {
-	allowed := AllowedRatingsAtMost(capRating)
-	return s.items.LatestItems(ctx, libraryID, itemType, limit, allowed...)
-}
-
-// LatestSeriesByActivity wraps the dedicated shows-library rail query.
-// Returned to the API handler so the wire can surface the per-series
-// activity stamp + new-episode count without an extra round-trip.
-func (s *Service) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error) {
-	return s.items.LatestSeriesByActivity(ctx, libraryID, limit)
-}
-
-func (s *Service) ItemCount(ctx context.Context, libraryID string) (int, error) {
-	// livetv libraries don't populate the `items` table — their catalog
-	// lives in `channels`. Dispatch so the admin UI shows a meaningful
-	// count for every library type without having to branch in the
-	// handler.
-	lib, err := s.libraries.GetByID(ctx, libraryID)
-	if err == nil && lib != nil && lib.ContentType == "livetv" && s.channels != nil {
-		chs, err := s.channels.ListByLibrary(ctx, libraryID, false)
-		if err != nil {
-			return 0, fmt.Errorf("count channels: %w", err)
-		}
-		return len(chs), nil
-	}
-	return s.items.CountByLibrary(ctx, libraryID)
-}
+// (Queries de items — ListItems, ListGenres, GetItem, GetItemChildren,
+// GetItemChildCounts, GetItemStreams, GetItemImages, LatestItems,
+// LatestSeriesByActivity, ItemCount — viven en item_queries.go.
+// El embedding de *ItemQueries en Service las promueve para
+// callers externos.)
 
 // ScanAll triggers an async scan for all libraries with auto scan mode.
 func (s *Service) ScanAll(ctx context.Context) {
