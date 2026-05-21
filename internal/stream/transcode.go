@@ -54,36 +54,64 @@ type Transcoder struct {
 	logger        *slog.Logger
 }
 
-// NewTranscoder constructs a transcoder. Pass `HWAccelNone` and an
-// empty `encoder` to force software encoding (libx264); pass the
-// values from `DetectHWAccel` to use the platform's accelerator.
+// TranscoderConfig agrupa los parámetros de `NewTranscoder`. Cierra
+// el olor F14-2-b del audit 2026-05-14 (constructor de 7 params
+// posicionales) y deja el call-site idiomático tanto en producción
+// (`stream.NewManager`) como en los helpers de test.
 //
-// `libx264Preset` is the -preset string ffmpeg should receive on the
-// software encode path. Pass "" to accept the historical "veryfast"
-// default; callers wired through `stream.NewManager` get a
-// hardware-aware value via AutoTuneStreaming. Ignored on HW encoders.
-func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, hwAccel HWAccelType, encoder, libx264Preset string, logger *slog.Logger) *Transcoder {
+// Campos opcionales con defaults aplicados dentro de `NewTranscoder`:
+//   - FFmpegPath: "" → "ffmpeg" (resolución por PATH).
+//   - TranscodeTimeout: <=0 → 4h.
+//   - Encoder: "" → "libx264".
+//   - Libx264Preset: "" → "veryfast" (mismo default histórico).
+//
+// HWAccel="" significa software-encode; los HW paths se settean con
+// el resultado de `DetectHWAccel`.
+type TranscoderConfig struct {
+	BaseDir          string
+	FFmpegPath       string
+	TranscodeTimeout time.Duration
+	HWAccel          HWAccelType
+	Encoder          string
+	Libx264Preset    string
+	Logger           *slog.Logger
+}
+
+// NewTranscoder constructs a transcoder. Pass `HWAccelNone` y un
+// `cfg.Encoder` vacío para forzar software encoding (libx264); pasa
+// los valores de `DetectHWAccel` para usar el accelerator de la
+// plataforma.
+//
+// `cfg.Libx264Preset` es el `-preset` que ffmpeg recibirá en el
+// software encode path. Pasa "" para aceptar el "veryfast" histórico;
+// los callers cableados vía `stream.NewManager` reciben un valor
+// hardware-aware vía AutoTuneStreaming. Ignorado en HW encoders.
+func NewTranscoder(cfg TranscoderConfig) *Transcoder {
+	ffmpegPath := cfg.FFmpegPath
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
+	transcodeTimeout := cfg.TranscodeTimeout
 	if transcodeTimeout <= 0 {
 		transcodeTimeout = 4 * time.Hour
 	}
+	encoder := cfg.Encoder
 	if encoder == "" {
 		encoder = "libx264"
 	}
+	libx264Preset := cfg.Libx264Preset
 	if libx264Preset == "" {
 		libx264Preset = "veryfast"
 	}
 	return &Transcoder{
 		sessions:         make(map[string]*Session),
-		baseDir:          baseDir,
+		baseDir:          cfg.BaseDir,
 		ffmpeg:           ffmpegPath,
 		transcodeTimeout: transcodeTimeout,
-		hwAccel:          hwAccel,
+		hwAccel:          cfg.HWAccel,
 		encoder:          encoder,
 		libx264Preset:    libx264Preset,
-		logger:           logger.With("module", "transcoder"),
+		logger:           cfg.Logger.With("module", "transcoder"),
 	}
 }
 

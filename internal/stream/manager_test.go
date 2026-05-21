@@ -281,11 +281,18 @@ func newTestManager(t *testing.T) *Manager {
 	const sentinelFFmpeg = "__hubplay_nonexistent_ffmpeg__"
 
 	return &Manager{
-		sessions:   make(map[string]*ManagedSession),
+		sessions: make(map[string]*ManagedSession),
 		// HWAccelNone + libx264 — software path, matches what the
 		// existing tests assumed before HW accel detection was wired.
-		transcoder: NewTranscoder(t.TempDir(), sentinelFFmpeg, 4*time.Hour, HWAccelNone, "libx264", "", logger),
-		cfg:        cfg,
+		transcoder: NewTranscoder(TranscoderConfig{
+			BaseDir:          t.TempDir(),
+			FFmpegPath:       sentinelFFmpeg,
+			TranscodeTimeout: 4 * time.Hour,
+			HWAccel:          HWAccelNone,
+			Encoder:          "libx264",
+			Logger:           logger,
+		}),
+		cfg: cfg,
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),
 		metrics:    noopSink{},

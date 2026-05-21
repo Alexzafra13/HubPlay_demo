@@ -247,8 +247,15 @@ func NewManager(deps Deps) *Manager {
 	cfg = tuned
 
 	m := &Manager{
-		sessions:   make(map[string]*ManagedSession),
-		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, hwAccel, encoder, cfg.TranscodePreset, logger),
+		sessions: make(map[string]*ManagedSession),
+		transcoder: NewTranscoder(TranscoderConfig{
+			BaseDir:          cacheDir,
+			TranscodeTimeout: cfg.TranscodeTimeout,
+			HWAccel:          hwAccel,
+			Encoder:          encoder,
+			Libx264Preset:    cfg.TranscodePreset,
+			Logger:           logger,
+		}),
 		items:      items,
 		streams:    streams,
 		cfg:        cfg,
