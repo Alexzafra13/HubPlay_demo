@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/library"
-	"hubplay/internal/provider"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -46,15 +44,18 @@ type ItemHandler struct {
 	// result end-to-end including images). nil disables the endpoints
 	// with a 503 — the rest of the handler keeps working.
 	identifier MetadataIdentifier
-	// trickplay aísla la generación y serving de sprite-sheets en su
-	// propio handler (estado mutex + WaitGroup + dir). Embedding por
-	// puntero: TrickplayManifest, TrickplaySprite, WaitTrickplayInflight
-	// se promueven y los call sites externos (router, tests) siguen
-	// llamando `itemHandler.TrickplayManifest` sin cambios. Cierra
-	// parcialmente el olor P del audit 2026-05-14 — el resto del
-	// split (Detail / Recommendations / Search / Metadata) queda para
-	// PRs siguientes encima de este.
+	// Sub-handlers extraídos para cerrar el olor P del audit
+	// 2026-05-14 (ItemHandler god-handler, 1186 LoC, 13 deps, 4
+	// responsabilidades). Embedding por puntero → los métodos se
+	// promueven y los call sites externos (router, tests) siguen
+	// llamando `itemHandler.Method(...)` sin cambios.
+	//
+	// Fase 1: TrickplayHandler. Fase 2: Search + Recommendations.
+	// Pendiente: Detail (Get/Children/attach×8/buildItemDetail) +
+	// Metadata (Identify*/UpdateItemMetadata/SetMetadataLock/Refresh).
 	*TrickplayHandler
+	*SearchHandler
+	*RecommendationsHandler
 	audit  AuditEmitter
 	logger *slog.Logger
 }
@@ -67,14 +68,14 @@ func NewItemHandler(lib LibraryService, images ImageRepository, metadata Metadat
 		collections: collections,
 		providers:   providers,
 		identifier:  identifier,
-		// El TrickplayHandler se construye internamente con sus deps
-		// específicas (lib + logger + trickplayDir). El struct lleva su
-		// propio sync.Map de locks y WaitGroup de goroutines — viven
-		// dentro del sub-handler así no contaminan el shape de
-		// ItemHandler.
-		TrickplayHandler: newTrickplayHandler(lib, trickplayDir, logger),
-		audit:            audit,
-		logger:           logger,
+		// Sub-handlers con sus deps específicas. Cada constructor toma
+		// el subconjunto que su responsabilidad realmente usa, no las
+		// 13 que tomaba el ItemHandler monolítico.
+		TrickplayHandler:       newTrickplayHandler(lib, trickplayDir, logger),
+		SearchHandler:          newSearchHandler(lib, images, userData, users, logger),
+		RecommendationsHandler: newRecommendationsHandler(lib, externalIDs, providers, logger),
+		audit:                  audit,
+		logger:                 logger,
 	}
 }
 
@@ -525,105 +526,9 @@ func (h *ItemHandler) attachSeriesContextFromSeries(ctx context.Context, resp ma
 	}
 }
 
-// Recommendations returns "more like this" suggestions for an item,
-// powered by the metadata provider's recommendations endpoint
-// (TMDb's `/movie/{id}/recommendations` or `/tv/{id}/recommendations`).
-// Each candidate is cross-referenced against the local library so the
-// frontend can mark "in library" suggestions with a deep link to the
-// stored item, while genuinely new suggestions surface as external
-// posters.
-//
-// Empty list is a valid response (item has no TMDb match, or TMDb
-// returned no recommendations). 503 when no provider is configured
-// — the frontend hides the rail in either case.
-func (h *ItemHandler) Recommendations(w http.ResponseWriter, r *http.Request) {
-	if h.providers == nil {
-		respondError(w, r, http.StatusServiceUnavailable, "RECOMMENDATIONS_DISABLED",
-			"no metadata provider is configured")
-		return
-	}
-	id := chi.URLParam(r, "id")
-	item, err := h.lib.GetItem(r.Context(), id)
-	if err != nil {
-		handleServiceError(w, r, err)
-		return
-	}
-	if item == nil {
-		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
-		return
-	}
-
-	// Pull the per-item external id map and read the tmdb slot —
-	// same shape as attachExternalIDs already uses on the detail
-	// response.
-	extIDs, err := h.externalIDs.ListByItem(r.Context(), id)
-	if err != nil || len(extIDs) == 0 {
-		// No external ids = nothing to query TMDb with. Empty rail
-		// rather than a 4xx; the user just doesn't see the section.
-		respondJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{"items": []any{}},
-		})
-		return
-	}
-	var tmdbExt string
-	for _, e := range extIDs {
-		if e.Provider == "tmdb" {
-			tmdbExt = e.ExternalID
-			break
-		}
-	}
-	if tmdbExt == "" {
-		respondJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{"items": []any{}},
-		})
-		return
-	}
-
-	itemType := provider.ItemMovie
-	if item.Type == "series" {
-		itemType = provider.ItemSeries
-	}
-
-	recs, err := h.providers.FetchRecommendations(r.Context(), tmdbExt, itemType, 12)
-	if err != nil {
-		h.logger.Warn("fetch recommendations", "item_id", id, "error", err)
-		// Recommendations are decorative — 502 here would hide the
-		// whole detail page. Empty rail is the right failure mode.
-		respondJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]any{"items": []any{}},
-		})
-		return
-	}
-
-	// Cross-reference each candidate against the library to mark
-	// which ones the user already has. The reverse-lookup index on
-	// (provider, external_id) keeps each call O(log n).
-	out := make([]map[string]any, 0, len(recs))
-	for _, rec := range recs {
-		entry := map[string]any{
-			"tmdb_id":    rec.ExternalID,
-			"title":      rec.Title,
-			"year":       rec.Year,
-			"overview":   rec.Overview,
-			"poster_url": rec.PosterURL,
-		}
-		if rec.Rating != nil {
-			entry["rating"] = *rec.Rating
-		}
-		localID, lookupErr := h.externalIDs.GetItemIDByExternalID(r.Context(), "tmdb", rec.ExternalID)
-		if lookupErr == nil && localID != "" {
-			entry["local_id"] = localID
-			entry["in_library"] = true
-		} else {
-			entry["in_library"] = false
-		}
-		out = append(out, entry)
-	}
-
-	respondJSON(w, http.StatusOK, map[string]any{
-		"data": map[string]any{"items": out},
-	})
-}
+// (Recommendations vive en item_recommendations_handler.go. El
+// embedding del *RecommendationsHandler en ItemHandler promueve el
+// método para que router y tests sigan funcionando sin cambios.)
 
 // (Trickplay vive en item_trickplay_handler.go. El embedding del
 // *TrickplayHandler en ItemHandler promueve TrickplayManifest,
@@ -727,98 +632,8 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
-func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	query := q.Get("q")
-	if query == "" {
-		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "query parameter 'q' is required")
-		return
-	}
-
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
-	libraryID := q.Get("library_id")
-	itemType := q.Get("type")
-	// MediaBrowse search joins the same filter surface as its grid:
-	// when the user has genre/year/rating active, hitting `/items/search`
-	// must respect them too — otherwise typing in the topbar silently
-	// undoes the selection. Global SearchBar passes none of these.
-	genre := q.Get("genre")
-	yearFrom, _ := strconv.Atoi(q.Get("year_from"))
-	yearTo, _ := strconv.Atoi(q.Get("year_to"))
-	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
-
-	// Per-profile content cap — same gate Latest / Browse already
-	// honour. A profile with `max_content_rating = "PG-13"` typing
-	// "fight club" in the global search must NOT see the R result;
-	// the previous implementation skipped this filter and let the
-	// search bar bypass kid mode entirely.
-	cap := h.callerCapRating(r.Context())
-
-	items, total, err := h.lib.ListItems(r.Context(), librarymodel.ItemFilter{
-		LibraryID:             libraryID,
-		Type:                  itemType,
-		Query:                 query,
-		Genre:                 genre,
-		YearFrom:              yearFrom,
-		YearTo:                yearTo,
-		MinRating:             minRating,
-		Limit:                 limit,
-		Offset:                offset,
-		AllowedContentRatings: library.AllowedRatingsAtMost(cap),
-	})
-	if err != nil {
-		handleServiceError(w, r, err)
-		return
-	}
-
-	data := make([]map[string]any, len(items))
-	for i, item := range items {
-		data[i] = itemSummaryResponse(item)
-	}
-
-	// Enrich with poster URLs
-	if h.images != nil && len(items) > 0 {
-		itemIDs := make([]string, len(items))
-		for i, item := range items {
-			itemIDs[i] = item.ID
-		}
-		if imageURLs, err := h.images.GetPrimaryURLs(r.Context(), itemIDs); err == nil {
-			for i, item := range items {
-				if urls, ok := imageURLs[item.ID]; ok {
-					if poster, ok := urls["primary"]; ok {
-						data[i]["poster_url"] = poster.Path
-						attachPosterPlaceholder(data[i], poster)
-					}
-				}
-			}
-		}
-	}
-
-	// Per-user state for the search results (watched/in-progress badges).
-	if h.userData != nil && len(items) > 0 {
-		if claims := auth.GetClaims(r.Context()); claims != nil {
-			itemIDs := make([]string, len(items))
-			for i, item := range items {
-				itemIDs[i] = item.ID
-			}
-			if userDataByID, err := h.userData.GetBatch(r.Context(), claims.UserID, itemIDs); err != nil {
-				h.logger.Warn("get user data batch", "error", err)
-			} else if len(userDataByID) > 0 {
-				for i, item := range items {
-					if ud, ok := userDataByID[item.ID]; ok {
-						data[i]["user_data"] = userDataResponse(ud, item.DurationTicks)
-					}
-				}
-			}
-		}
-	}
-
-	respondJSON(w, http.StatusOK, map[string]any{
-		"data":  data,
-		"total": total,
-	})
-}
+// (Search vive en item_search_handler.go — el método se promueve
+// vía embedding del *SearchHandler en ItemHandler.)
 
 func itemDetailResponse(item *librarymodel.Item) map[string]any {
 	resp := map[string]any{
