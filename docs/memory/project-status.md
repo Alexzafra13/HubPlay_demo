@@ -6,17 +6,101 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21, cierre tarde-noche)
+## 🔭 Estado actual (2026-05-21, post-cierre — CC fase 2 + scanner W)
 
-- Branch principal: `main`, working tree limpio. PRs abiertas pendiente review: **#388, #389, #390** (todas de la sesión de tarde — refactors estructurales del audit con CI verde).
+- Branch principal: `main`, working tree limpio. PR única abierta: **#376** (web-deps group, 17 updates, CI mayoritariamente verde — Test Backend/Postgres/Build pendientes en el momento del cierre).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: `go test -race ./...` verde en CI; frontend **646/646** vitest verdes (+30 hoy); `tsc -b` limpio; production build limpio (~25 s con React Compiler + LazyMotion activados).
+- Tests: `go test -race ./...` verde en CI (#392 + #393 confirmaron full matrix verde — Linux/macOS amd64+arm64, Postgres incluido); frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
 - **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard)**, `react-doctor` (visibility-only con comentarios inline en PRs).
 - **Score React Doctor: ≥75/100 ("Great")** post-VideoPlayer-split (PR #381 mergeada). El offender principal de las reglas estructurales (`no-cascading-set-state`) eliminado; `no-giant-component` reducido de 1003 a 663 lines; `prefer-useReducer` de 12 useState a 5.
 - **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types**. Hard gate en CI.
-- **Audit 2026-05-14 — Iteración 4 cerrada al 100 %**: olores **QQ** (auth.Service), **P** (ItemHandler), **Z** (library.Service) split via embedding facade. Olor **CC** (iptv.Service) en fase 1 — falta ChannelOrderOps (646 LoC) en una sesión siguiente.
-- **Dependabot alerts**: 8 → 2 (1 critical eliminada). PR #385 reemplazó `to-ico` por `png-to-ico` cerrando 5 vulns; queda picomatch (dependabot abierto) + file-type (transitive de node-vibrant — esperar upstream).
+- **Audit 2026-05-14 — olor CC cerrado al 100 %** (PR #392 — CC fase 2 ChannelOrderOps), **olor W cerrado** (PR #393 — scanner.go split 1491 → 332 LoC). De los **6 olores altos** del audit (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
+- **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🔧 Sesión 2026-05-21 (post-cierre) — CC fase 2 + scanner W + dependabots
+
+Sesión corta de extensión sobre la "tarde-noche" ya cerrada (#391). Cuatro PRs mergeadas: dos cierres estructurales del audit (CC fase 2 + W) y dos dependabot quick-wins. Quinta abierta esperando CI (#376 web-deps group).
+
+### PRs mergeadas
+
+| PR | Tema | Diff |
+|---|---|---|
+| [#392](https://github.com/Alexzafra13/HubPlay_demo/pull/392) | **Olor CC fase 2** — `ChannelOrderOps` extraído de `iptv.Service` | 6 ficheros (`service_channel_order.go` 646 LoC → `channel_order_ops.go` + 5 fields fuera del facade) |
+| [#393](https://github.com/Alexzafra13/HubPlay_demo/pull/393) | **Olor W** — split `scanner.go` en 6 ficheros temáticos | scanner.go 1491 → 332 LoC (−78 %); +5 ficheros nuevos por carril funcional |
+| [#289](https://github.com/Alexzafra13/HubPlay_demo/pull/289) | picomatch 4.0.3 → 4.0.4 (Dependabot alert #18) | lockfile-only |
+| [#247](https://github.com/Alexzafra13/HubPlay_demo/pull/247) | docker/setup-buildx-action 3 → 4 | workflow only |
+
+### CC fase 2 (PR #392) — cierra olor CC al 100 %
+
+`iptv.Service` god-service (45 métodos, 11 sub-features — el más grande del repo) ahora descompuesto en facade + 4 sub-services:
+
+| Sub-service | Métodos | Origen |
+|---|---:|---|
+| `FavoritesOps` | 5 | CC fase 1 (#390) |
+| `WatchHistoryOps` | 2 | CC fase 1 (#390) |
+| `HealthOps` | 5 | CC fase 1 (#390) |
+| **`ChannelOrderOps`** | **16** | **CC fase 2 (esta sesión)** |
+
+`ChannelOrderOps` agrupa **3 sub-features tightly-coupled por compartir overlay-at-read-time**:
+1. Overlay por-usuario (6 métodos) — `user_channel_order` repo.
+2. Overlay admin de library (5 métodos) — `library_channel_order` repo.
+3. Overrides de logo + iptv-org refresh (5 métodos) — `channel_logo_overrides` + post-construction `iptvOrgLogos` lookup.
+
+Helpers puros (`applyLogoOverlay`, `applyAdminOverlay`, `applyOrderOverlay`), constantes exportadas (`LocalLogoSentinel`) y tipo `IPTVOrgRefreshSummary` movidos junto a sus usuarios. `channels` repo compartido por puntero con Service core (todos los overlays parten de `channels.ListByLibrary`).
+
+Mismo pattern embedding facade que CC fase 1 + QQ + P + Z. La method promotion preserva la API pública — `Service.SetIPTVOrgLogos(...)`, `Service.GetChannelsForUser(...)` etc. siguen accesibles externos sin que el facade los declare. **0 tests modificados** — los callers usan `svc.Method(...)` y la promotion preserva el surface.
+
+**Detalle técnico nuevo** (no aplicado antes en CC fase 1 porque sus sub-services no necesitaban llamar a Service): `Service.GetChannels` no es accesible desde un método con receiver `*ChannelOrderOps` (embedding va hacia afuera, no hacia adentro). Solución: helper privado `listChannels(...)` dentro del sub-service que duplica las 3 líneas de la lógica de `GetChannels` (dispatch a `ListHealthyByLibrary` o `ListByLibrary`). Mismo patrón que `WatchHistoryOps` usa con `channels.GetByID`.
+
+### Olor W (PR #393) — split scanner.go (1491 LoC) en 6 ficheros
+
+`scanner.go` había crecido desde los 1270 LoC del audit original hasta 1491. Split textual puro por carril funcional — el código sigue montado contra el mismo `*Scanner`, sólo dispersado.
+
+| Fichero | LoC | Responsabilidad |
+|---|---:|---|
+| `scanner.go` | 332 | Top-level: struct + `New` + `ScanLibrary` + `walkPath` + `iterateLibraryItems` + helpers de naming |
+| `scan_walk.go` | 285 | Procesamiento por fichero: `processFile` + `createItem` + `updateItem` + `probeResultTo*` + `fingerprint` |
+| `enrich.go` | 343 | Enrichment movies/series: `RefreshMetadata` + `enrichIfMissing` + `enrichMetadata` + `applyMetadata` |
+| `enrich_season_episode.go` | 242 | Enrichment hojas: `enrichSeason` + `enrichEpisode` + `fetchAndStore*` |
+| `identify.go` | 273 | Flujo humano: `SearchCandidates` + `IdentifyAndApply` + `UpdateItemMetadata` + `RefreshItemMetadata` + lock |
+| `media_ingest.go` | 149 | Ingest externo: `fetchAndStoreImages` + `syncPeople` |
+
+Total post-split: 1624 LoC (+133 por doc headers de cada fichero explicando responsabilidad). **0 cambios de comportamiento** — métodos públicos preservados verbatim, tests pasan sin tocar.
+
+### Cómo se mergeó #376 (lección operativa)
+
+Al rebasear #376 (web-deps group, 17 updates) contra el nuevo main tras mergear #289, hubo conflicto en `pnpm-lock.yaml`. Solución: `@dependabot recreate` como comentario en la PR — dependabot regenera el lockfile desde main fresh. Sigue siendo lo correcto cuando dos PRs npm tocan el lockfile en paralelo, aunque el `dependabot.yml` ya limite a 1 PR npm concurrente (cambio de sesión 2026-05-20 tarde).
+
+### Audit 2026-05-14 — olores altos restantes
+
+De los 6 olores altos originales del audit:
+
+| Olor | Estado | Sesión cerradora |
+|---|---|---|
+| A+M | ✅ cerrado | Iter 3 (M.6/7/8) |
+| B+J | ✅ cerrado | Iter 2 (M.2) |
+| **CC** | ✅ **cerrado** (esta sesión, PR #392) | CC fase 1 + 2 |
+| P | ✅ cerrado | Iter 4 (#386 + #388) |
+| **W** | ✅ **cerrado** (esta sesión, PR #393) | Iter 7 |
+| F14-2-a | ⏳ pendiente | Iter 8 |
+
+**5 de 6 olores altos cerrados.** Sólo queda F14-2-a (function-level quality) de los altos.
+
+### Aprendizajes
+
+- **Embedding facade va hacia afuera, no hacia adentro**: cuando un método de sub-service necesita llamar a otro método del Service core (e.g. `GetChannels`), hay que duplicar la lógica como helper privado del sub-service. No es viable hacer back-reference porque rompe el grafo. En CC fase 2 esto fue 3 líneas — el coste es nominal y el aislamiento del sub-service permanece intacto.
+- **El split textual de un god-FILE (W) es más mecánico que el de un god-SERVICE (CC, P, Z, QQ)**: no requiere extracción de fields ni embedding facade, sólo cortar bloques por responsabilidad y verificar imports. El audit los flagga distinto por algo: el "alto" estructural es por tamaño del fichero en bytes, no por complejidad arquitectónica.
+- **`@dependabot recreate` es el camino para colisiones de lockfile**: más limpio que rebasear a mano o hacer recover via merge. Si la PR original tenía 17 deps, la recreación también las tendrá (dependabot re-resuelve contra main).
+
+### Métricas globales
+
+- **4 PRs mergeadas en esta sesión** (2 cierres del audit + 2 dependabots) + 1 abierta esperando CI.
+- **2 olores del audit cerrados** (CC al 100 %, W).
+- **6 → 1 olores altos pendientes** (queda F14-2-a).
+- **Dependabot alerts 2 → 1** (cerrada alert #18 picomatch). Queda file-type (transitive de node-vibrant, sin solución upstream).
 
 ---
 
@@ -423,24 +507,26 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 
 Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md) + [intervention-2026-05-14.md](intervention-2026-05-14.md).
 
-**Iteración 4 — cerrada al 100 %** en sesión 2026-05-21 tarde:
-- ~~QQ~~ ✅ auth.Service split (PR #384, mergeada)
-- ~~P~~ ✅ ItemHandler split (PRs #386 mergeada + #388 abierta)
-- ~~Z~~ ✅ library.Service split (PR #389 abierta)
+**Iteración 4 — cerrada al 100 %** (sesión 2026-05-21 tarde):
+- ~~QQ~~ ✅ auth.Service split (PR #384)
+- ~~P~~ ✅ ItemHandler split (PRs #386 + #388)
+- ~~Z~~ ✅ library.Service split (PR #389)
 
-**Iteración 5 — en curso**:
-- **CC fase 2** — `ChannelOrderOps` extraído de `service_channel_order.go` (646 LoC, 16 métodos, 5 repos + `iptvOrgLogos` post-construction setter). Mismo patrón embedding que CC fase 1 (PR #390). ~1-2 horas.
+**Iteración 5 — cerrada al 100 %**:
+- ~~CC fase 1~~ ✅ Favorites + WatchHistory + Health (PR #390, sesión tarde-noche)
+- ~~CC fase 2~~ ✅ ChannelOrderOps (PR #392, esta sesión)
 
 **Iteración 6 — composition root**:
-- G, H, V, LL, JJ — limpiar `cmd/hubplay/main.go` + `router.go` (acceso a `deps.Config.*` directo, fanout de dependencias, etc.). Q ya se cerró en sweep M.5.
+- G, H, V, LL, JJ — limpiar `cmd/hubplay/main.go` + `router.go` (acceso a `deps.Config.*` directo, fanout de dependencias, etc.). Q ya se cerró en sweep M.5. **Próxima cola natural.**
 
-**Iteración 7 — cosmética + schema**:
-- **W** — `scanner.go` 1270 LoC en un fichero, split por responsabilidad.
+**Iteración 7 — cosmética + schema** (parcialmente cerrada):
+- ~~W~~ ✅ `scanner.go` split en 6 ficheros (PR #393, esta sesión).
 - **X** — frontera `library/` vs `scanner/` artificial (promover scanner a sub-paquete).
 - **D** — cosmética (no leído el detalle).
 - **BB** — comentarios en inglés masivos en `internal/library/` y otros → traducir al español (convención del repo). Mecánico pero grande.
 
 **Iteración 8 — polish**:
+- **F14-2-a** — único olor alto restante de los 6 originales del audit. Function-level quality.
 - F14-X, F15-X, F16-X (varios) — calidad de código residual.
 
 **Iteración 9 — verificación empírica**:
@@ -456,9 +542,7 @@ Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.m
 
 ### Dependabot abierto
 
-- **#376** — web-deps group (17 updates), todo verde — 1 click pendiente.
-- **#289** — picomatch 4.0.3→4.0.4 (cierra alert #18 cuando se mergee). Necesita rebase tras los recientes merges.
-- **#247** — docker/setup-buildx-action 3→4. Necesita rebase.
+- **#376** — web-deps group (17 minor/patch updates). CI mayoritariamente verde al cierre de esta sesión; Test Backend/Postgres/Build pendientes. Recreado tras colisión de lockfile con #289 (vía `@dependabot recreate`). 1-click cuando termine CI.
 
 ### Grandes (requieren ventana dedicada)
 
