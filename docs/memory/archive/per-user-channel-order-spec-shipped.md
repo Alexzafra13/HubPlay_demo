@@ -1,4 +1,26 @@
-# Per-user channel order + hide — pending feature
+# Per-user channel order + hide — SHIPPED
+
+> Status: **DONE** (verificado 2026-05-21). Implementación end-to-end
+> en main: migraciones `042_user_channel_order.sql` (sqlite + postgres)
+> y `043_library_channel_order.sql` para el counterpart admin, repos
+> en `internal/db/{user,library}_channel_order_repository.go`,
+> servicio en `internal/iptv/service_channel_order.go`, handlers en
+> `internal/api/handlers/iptv_personalisation.go` (rutas
+> `/me/iptv/channels/order` PUT/DELETE y
+> `/me/iptv/channels/{channelId}/visibility` PUT), SSE
+> `publishOrderUpdated` para sync entre dispositivos, página user-side
+> en `web/src/pages/LiveTvCustomize.tsx` (237 LoC + 232 LoC test) y
+> panel admin `web/src/components/admin/AdminChannelOrderPanel.tsx`.
+>
+> El doc original (spec inicial) queda abajo como referencia
+> arqueológica — la implementación final difiere en algunos detalles
+> (rutas bajo `/me/iptv/*` en lugar de `/me/channels/*`, ReplaceAll en
+> un transaction en lugar de bulk reorder, dos tablas overlay
+> componibles user+admin en lugar de una sola).
+
+---
+
+# Per-user channel order + hide — pending feature (spec original)
 
 > Status: **NOT IMPLEMENTED**. Specced 2026-05-13 during the Live TV
 > polish sessions; left for a dedicated future session because it

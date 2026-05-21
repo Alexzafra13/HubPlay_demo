@@ -331,9 +331,9 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 
 ### Medianos (vale la pena cuando arranque la siguiente sesión)
 
-1. **Tests frontend de páginas grandes**. Coverage Vitest cubre admin panels + componentes comunes; faltan **Home**, **LiveTV**, **Search**, **Movies**, **Series**. Son las páginas con más LOC del repo y las más visibles para el usuario.
+1. ~~**Tests frontend de páginas grandes**~~. ✅ **HECHO** sesión 2026-05-21 — PR [#382](https://github.com/Alexzafra13/HubPlay_demo/pull/382). Home / LiveTV / Search / Movies / Series con tests propios (+30 vitest, 90 test files total).
 2. **Refactor estructural pendiente** del audit 2026-05-14 ([audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md) + [intervention-2026-05-14.md](intervention-2026-05-14.md)). Iteraciones 4-7 abiertas: split de god-handlers/services (P, Z, QQ), refactor estructural de `iptv/` (CC), composition root (G, H, V, Q, LL, JJ), schema + cosmética (D, X, W, BB, UUU-mig).
-3. **Per-user channel order + hide en Live TV**. Spec en [per-user-channel-order-pending.md](per-user-channel-order-pending.md). Migración + servicio + API + UI. ~1 sesión.
+3. ~~**Per-user channel order + hide en Live TV**~~. ✅ **SHIPPED** — verificado en main 2026-05-21. Migraciones `042_user_channel_order.sql` + `043_library_channel_order.sql`, handlers en `iptv_personalisation.go`, página user-side `LiveTvCustomize.tsx`, panel admin `AdminChannelOrderPanel.tsx`, SSE `publishOrderUpdated` para sync entre dispositivos. Spec arqueológico en [archive/per-user-channel-order-spec-shipped.md](archive/per-user-channel-order-spec-shipped.md).
 
 ### Grandes (requieren ventana dedicada)
 
@@ -349,7 +349,6 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 - **[audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md)** — review vivo por fases. Iteraciones 4-7 pendientes (ver intervention).
 - **[intervention-2026-05-14.md](intervention-2026-05-14.md)** — tracker de iteración del review 2026-05-14. Marca olores cerrados por commit.
 - **[perf-benchmarks-2026-05-17.md](perf-benchmarks-2026-05-17.md)** — baseline benchmarks dual-backend (SQLite + Postgres) para repos del hot-path.
-- **[per-user-channel-order-pending.md](per-user-channel-order-pending.md)** — spec de feature pendiente Live TV.
 
 ## 🗄️ Archivo (`docs/memory/archive/`)
 
