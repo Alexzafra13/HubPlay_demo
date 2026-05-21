@@ -43,7 +43,12 @@ func newStreamTestApp(t *testing.T) *streamTestApp {
 
 	authSvc := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, slog.Default())
 	userSvc := user.NewService(repos.Users, slog.Default(), "")
-	streamMgr := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, slog.Default())
+	streamMgr := stream.NewManager(stream.Deps{
+		Items:   repos.Items,
+		Streams: repos.MediaStreams,
+		Config:  cfg.Streaming,
+		Logger:  slog.Default(),
+	})
 	t.Cleanup(streamMgr.Shutdown)
 
 	router := api.NewRouter(api.Dependencies{
