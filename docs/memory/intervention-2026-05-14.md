@@ -21,7 +21,7 @@ en este doc (no se edita el audit original).
 | 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
 | 4 | ✅ cerrada | Split de god-handlers/services | P, Z, QQ | Sesión 2026-05-21 tarde (PRs #384, #386+#388, #389) |
 | 5 | ✅ cerrada | Refactor estructural `iptv/` | CC (fase 1 + 2) | Fase 1 sesión tarde-noche (PR #390); fase 2 sesión post-cierre (PR #392) |
-| 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | Q ya cerrada en sweep M.5; resto en cola |
+| 6 | 🔄 en curso | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, G parcial, **H pendiente** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G parcial pendiente PR en `claude/review-project-9YJxG` (`8b746fc`); H queda para sesión propia |
 | 7 | 🔄 en curso | Cosmética + schema | D, X, ~~W~~, BB, ~~UUU-mig~~ | W cerrada sesión post-cierre (PR #393, scanner.go 1491 → 332 LoC); D/X/BB pendientes |
 | 8 | ⏳ pendiente | Polish de calidad de código | F14-X (queda F14-2-a único alto pendiente), F15-X, F16-X | — |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
@@ -731,3 +731,71 @@ queda hoy son los repos cross-feature (`HomeRepository`,
 feature que no migraron sus repos al sub-paquete `storage/`
 (todos los que cerraron el olor A con sub-paquete model/). Movimiento
 de los repos a sus feature dirs es Iter. 6/7 del plan original.
+
+---
+
+## Iteración 6 — Composition root (en curso)
+
+Branch: `claude/review-project-9YJxG` (pusheada, sin PR todavía).
+
+### Cierres en sesión 2026-05-21 noche
+
+**✅ V — `router.go` lee `deps.Config.*` directo** (PR #395, `61396a3`)
+
+13 campos primitivos nuevos en `Dependencies` (MetricsEnabled,
+MetricsPath, AuthConfig, DataDir, DatabasePath, DatabaseDriver,
+ServerAddr, ServerBaseURL, ServerPort, MDNSEnabled, MDNSHostname,
+HWAccelDefault, AllowedOrigins). Las 17 lecturas dispersas de
+`deps.Config.X.Y` en router.go → 0; `Config` queda solo para los 2
+handlers que mutan el fichero (setup wizard + AdminDBHandler).
+Helper `fillFromConfig()` al top de NewRouter rellena primitivos
+a-zero desde Config para retro-compat con los 2 integration tests
+que sólo pasan `Config: cfg`.
+
+**✅ JJ — 3 setters post-construcción en `stream.Manager`** (PR #395, `61396a3`)
+
+`stream.NewManager(items, streams, cfg, logger) + 3 setters` →
+`stream.NewManager(Deps{Items, Streams, Config, Logger, Metrics,
+EventBus, ForceDirectPlayLookup})` con wiring atómico. Setters
+siguen para tests (TestManager_SetMetrics_*) y runtime-swap
+documentado.
+
+**✅ LL — Manager + Transcoder doble session tracking** (PR #395, `61396a3`)
+
+Cerrado por documentación. Las dos maps tienen propósitos distintos
+(Manager.sessions keyed por sessionKey lógico user-facing,
+Transcoder.sessions keyed por sessionID bare = proceso ffmpeg).
+Apuntan al mismo `*Session` por debajo. Docstrings struct-level
+hacen explícita la separación. Refactor "Transcoder stateless" del
+audit deferido como sesión propia.
+
+**⚠️ G parcial — `runtime` god-struct + main.run** (commit `8b746fc`, pendiente PR)
+
+Nuevo `cmd/hubplay/lifecycle.go` (93 LoC) con struct `lifecycle` que
+agrupa componentes en dos slices según fase de teardown:
+- `workers` (bg jobs independientes de HTTP): add-order forward.
+- `services` (HTTP-coupled): LIFO (reverse-of-add).
+Entre fases va `server.Shutdown(ctx)`. main.run wirea cada
+componente y lo registra con `lc.AddWorker/AddService(name, fn)`
+junto al wiring. `runtime` (16 campos) eliminado; `waitForShutdown`
+de 98 LoC → ~70 LoC.
+
+**No cerrado en este commit**: feature modules
+(`library.New(ctx, deps) *Module`, `iptv.New(ctx, deps) *Module`).
+Esos cerrarían el olor G al 100%, pero cada uno toca seams
+inter-paquete (scanner shared library/iptv, libraryService passed
+a iptv proxy via interface). Diferido como sesiones futuras.
+
+### Pendiente
+
+**⏳ H — `Dependencies` (57 campos, 22 `*db.X` concretos)** + `router.go` (1460 LoC, callback `r.Route("/api/v1", ...)` monolítico de ~1100 LoC). Dos paths posibles según el audit:
+1. **mountXxx helpers** (más simple) — split del callback en `mountAdmin`, `mountIPTV`, `mountFederation`, `mountItems`, etc.
+2. **Interfaces en Dependencies** — los 22 `*db.X` concretos → interfaces. Los handlers ya consumen interfaces locales; el contrato queda doblemente expresado.
+
+router.go es el fichero de **mayor blast-radius del repo** (todo el tráfico HTTP). Sesión propia, alta concentración. Mínimo viable: 3-4 mount helpers grandes (admin/system, iptv, federation) como proof-of-pattern.
+
+### Aprendizajes operativos
+
+- **LIFO de init order ≠ orden de shutdown**: bg workers (iptv scheduler, scan scheduler) se wirean tarde pero hay que pararlos pronto (antes de HTTP) — strict LIFO lo haría al revés. La `lifecycle` phased AddWorker/AddService captura el dominio.
+- **Setters como API de tests es legítimo**: el audit JJ pedía eliminar los 3 setters de `stream.Manager`, pero los tests usan `SetMetrics`/`SetEventBus` mid-test para swap de stubs. Setters quedan para tests, producción usa Deps.
+- **El comentario que admite el síntoma ES el smell**: el comentario de `runtime` ("adding a new bg service is now a one-line struct-field append…") presentaba el workaround como solución. Al cerrar G hay que sustituir tanto código como comentario.
