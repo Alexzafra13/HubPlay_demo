@@ -146,7 +146,14 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 	caps := capabilitiesFromWire(body.Capabilities)
 
 	peerUserID := peerUserPrefix + peer.ID
-	ms, err := h.streams.StartSession(r.Context(), peerUserID, itemID, profile, caps, 0, -1, -1)
+	ms, err := h.streams.StartSession(r.Context(), stream.StartSessionRequest{
+		UserID:           peerUserID,
+		ItemID:           itemID,
+		ProfileName:      profile,
+		Caps:             caps,
+		AudioStreamIndex: -1,
+		BurnSubIndex:     -1,
+	})
 	if err != nil {
 		h.logger.Warn("federation: start stream session failed", "err", err, "peer_id", peer.ID, "item_id", itemID)
 		handleServiceError(w, r, err)
@@ -235,7 +242,13 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 	// because the session was created with the right caps in
 	// StartSession; this call just hashes back to the same key.
 	peerUserID := peerUserPrefix + peer.ID
-	ms, err := h.streams.StartSession(r.Context(), peerUserID, sess.ItemID, quality, nil, 0, -1, -1)
+	ms, err := h.streams.StartSession(r.Context(), stream.StartSessionRequest{
+		UserID:           peerUserID,
+		ItemID:           sess.ItemID,
+		ProfileName:      quality,
+		AudioStreamIndex: -1,
+		BurnSubIndex:     -1,
+	})
 	if err != nil {
 		h.logger.Warn("federation: quality playlist start session", "err", err, "peer", peer.ID, "session", sess.ID)
 		handleServiceError(w, r, err)

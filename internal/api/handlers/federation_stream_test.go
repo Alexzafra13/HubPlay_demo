@@ -132,7 +132,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	// the can_play=true path; the can_play=false path never reaches
 	// it because the share gate fires first.
 	streams := newFakeStreamManager()
-	streams.startSessionFn = func(_ context.Context, _, _, _ string, _ *stream.Capabilities, _ float64) (*stream.ManagedSession, error) {
+	streams.startSessionFn = func(_ context.Context, _ stream.StartSessionRequest) (*stream.ManagedSession, error) {
 		return &stream.ManagedSession{
 			Decision: stream.PlaybackDecision{Method: stream.MethodTranscode},
 		}, nil
