@@ -6,9 +6,11 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21, Iter6 medio — composition root V+JJ+LL+G)
+## 🔭 Estado actual (2026-05-21 noche — Iter6 cerrada con H router-split)
 
-- Branch principal: `main`, V+JJ+LL ya mergeados via **PR #395** (commit `61396a3`). Branch de trabajo `claude/review-project-9YJxG` rebaseada sobre el nuevo main — aporta solo G parcial (`8b746fc`) + memoria (`e899169`) en hacia el PR siguiente.
+- Branch de trabajo actual: `claude/project-review-1Zrtv`. Olor H del audit cerrado en esta sesión: `internal/api/router.go` 1549 → 465 LoC (−70 %) mediante 7 ficheros `mount_*.go` per-feature. Sin cambio de comportamiento; 271 registros de ruta preservados verbatim; tests `-race` verde.
+- Branch previa `claude/review-project-9YJxG` sigue pendiente de PR (commit `8b746fc` — G parcial lifecycle refactor).
+- Branch principal: `main`, V+JJ+LL ya mergeados via **PR #395** (commit `61396a3`).
 - Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
 - Tests: `go test -race ./...` verde end-to-end con todo Iter 6 V+JJ+LL+G aplicado; frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
@@ -18,6 +20,88 @@
 - **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
 - **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🪓 Sesión 2026-05-21 (noche tardía) — Olor H: split de `router.go` en mountXxx helpers
+
+Sesión propia y dedicada al fichero de mayor blast-radius del repo. Cierra el último olor estructural de Iteración 6 del audit 2026-05-14 (en su variante "mountXxx helpers", la simple; la variante "interfaces en Dependencies" queda para otra iteración).
+
+### Diff principal
+
+| Fichero | Antes | Después | Δ |
+|---|---:|---:|---:|
+| `internal/api/router.go` | 1549 | 465 | −1084 (−70 %) |
+| `mount_public.go` | — | 84 | +84 |
+| `mount_federation.go` | — | 238 | +238 |
+| `mount_me.go` | — | 132 | +132 |
+| `mount_users.go` | — | 98 | +98 |
+| `mount_uploads.go` | — | 48 | +48 |
+| `mount_admin_system.go` | — | 247 | +247 |
+| `mount_media.go` | — | 434 | +434 |
+| **Total** | **1549** | **1746** | **+197 (+13 % por docstrings de cada fichero)** |
+
+### Pattern aplicado
+
+`NewRouter` queda como composition root puro:
+
+1. `applyGlobalMiddleware(r, deps)` — RealIP/RequestID/Logger/Recoverer/SecurityHeaders/Metrics/CORS/CSRF.
+2. `mountMetricsEndpoint(r, deps)` — `/metrics` top-level fuera de `/api/v1`.
+3. Construcción de handlers compartidos por varios mounts: `authHandler`, `userHandler`, `healthHandler`, `deviceHandler` (device auth tiene endpoints públicos + uno auth-gated), `fedImgSrv` (federation peer poster + local `/images/file/{id}` comparten cache).
+4. `r.Route("/api/v1", func(r) { mount*(...) })` cablea 14 mountXxx (más `mountSPAFallback` al final).
+
+Cada `mountXxx` recibe `r chi.Router` + las deps que necesita (la mayoría `Dependencies` completo + algún handler compartido por puntero). No se cambió `Dependencies` — sigue siendo god-struct con 60 campos. Los handlers consumidores ya estrechan vía interfaces locales, así que la doble-expresión del contrato (audit's "Dependencies-as-interfaces") queda como iteración futura.
+
+### Helpers nuevos
+
+| Función | Fichero | Responsabilidad |
+|---|---|---|
+| `mountHealthAndOpenAPI` | mount_public.go | `/health/*`, `/openapi.yaml` |
+| `mountAuthPublic` | mount_public.go | `/auth/login`, `/auth/refresh`, `/auth/setup`, device public |
+| `mountSetupWizard` | mount_public.go | `/setup/*` (wizard primera ejecución) |
+| `mountFederationPublic` | mount_federation.go | `/federation/info`, `/peer/*` (handshake + JWT-gated) |
+| `mountAdminAuthAndFederation` | mount_federation.go | `/admin/auth/keys`, `/me/peers`, `/admin/peers` (gated `ks != nil`) |
+| `mountAuthProtected` | mount_me.go | `/auth/logout`, `/auth/device/approve` |
+| `mountSSEEvents` | mount_me.go | `/events`, `/me/events` |
+| `mountMeIdentity` | mount_me.go | `/me`, `/me/password`, `/me/avatar`, `/me/sessions`, profiles |
+| `mountMeNotificationsAndPreferences` | mount_me.go | `/me/notifications`, `/me/preferences` |
+| `mountWatchProgress` | mount_me.go | `/me/continue-watching`, `/me/favorites`, `/me/progress` |
+| `mountHome` | mount_me.go | `/me/home/*` rails |
+| `mountUsers` | mount_users.go | `/users/*` (admin + auth-only sub-rutas pin/display-name/avatar) |
+| `mountUploads` | mount_uploads.go | `/uploads/*` (tus + audit + browse) |
+| `mountAdminSystem` | mount_admin_system.go | `/admin/system/*` (stats, settings, backup, db, cors, logs, audit, updates, sessions, storage) |
+| `mountStreaming` | mount_media.go | `/stream/{itemId}/*` |
+| `mountLibrariesItemsAndIPTV` | mount_media.go | `/libraries`, `/items`, `/channels`, `/iptv` |
+| `mountIPTVChannels` | mount_media.go | sub-helper interno (canales + EPG + favoritos + admin IPTV) |
+| `mountImagesPeopleStudiosCollections` | mount_media.go | imágenes, people, studios, collections |
+| `mountProviders` | mount_media.go | `/providers/*` |
+| `mountSPAFallback` | router.go | SPA fallback al final del router |
+
+### Test del drift OpenAPI ↔ router (`openapi_drift_test.go`)
+
+El test parseaba `router.go` por AST y enumeraba las rutas. Como las moví a `mount_*.go`, dejó de verlas. **Extendido** para:
+
+1. Parsear todos los `.go` no-test del paquete `internal/api/` y construir un map `mountFuncs[name]→*ast.FuncDecl` de funciones cuyo nombre empieza por `mount`.
+2. Cuando el walker encuentra una llamada como `mountAdminSystem(r, deps)` desde dentro del cuerpo de `NewRouter` (o de otro mount, recursivamente), descender al body de la función llamada **con el prefix vigente**. Así `mountAdminSystem` llamada desde dentro de `r.Route("/api/v1", ...)` aporta sus rutas bajo `/api/v1/admin/system/*` correctamente.
+
+Una iteración inicial añadió un `case "With"` en el switch del verbo para chained-middleware `r.With(mw).Put(...)` — bug: el walker existente ya manejaba ese patrón correctamente (el verbo final es el `Sel.Name` del outer SelectorExpr). Quitado antes del commit.
+
+### Aprendizajes
+
+- **`r.With(mw).Put(...)` parsea como SelectorExpr(X=CallExpr-de-With, Sel="Put")**, así que el walker original lo coge en el `case "Put"` sin tratamiento especial. Sólo hace falta extender el walker cuando aparece una construcción NUEVA del idioma chi, no por mover rutas a otro fichero.
+
+- **El test de drift OpenAPI es el guardián real del refactor**: sin él, mover rutas a ficheros aparte habría sido invisible a los tests unitarios (cada handler tiene sus propios tests, pero ninguno valida "esta ruta está mapeada en el router"). El AST walk catch'ea drift en milisegundos vs. levantar el router real con 30 servicios + DB.
+
+- **`Dependencies` se queda como god-struct esta sesión**. La variante "interfaces en Dependencies" (los 22 `*db.X` concretos del campo → interfaces) es ortogonal al split de router; el split ya cierra el síntoma principal del olor H (callback monolítico de ~1100 LoC en `r.Route("/api/v1", ...)`). Los handlers downstream ya consumen interfaces locales, así que el contrato sigue doblemente expresado pero ahora confinado al composition root.
+
+- **Construcción de handlers SE QUEDA en NewRouter cuando son compartidos** (`authHandler`, `userHandler`, `fedImgSrv`, `deviceHandler`). Lo opuesto — construir cada handler dentro de su propio mount — duplicaría instancias del mismo handler con state separado (caches, contadores). El compromiso: shared handlers cableados arriba + un nilcheck en cada mount que los recibe.
+
+### Métricas globales
+
+- **8 ficheros nuevos** (7 `mount_*.go` + cambios en `openapi_drift_test.go`).
+- **router.go 1549 → 465 LoC** (−70 %). Fichero ya no es el de mayor LoC del paquete (lo es `mount_media.go` con 434, justificado por agrupar streaming + libraries + items + IPTV + images + collections + providers).
+- **271 rutas chi preservadas** verbatim — `go test -race ./...` verde, `go vet` limpio.
+- **Test de drift extendido** para parsear el paquete entero y descender a las funciones `mount*` recursivamente.
 
 ---
 
@@ -625,12 +709,12 @@ Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.m
 - ~~CC fase 1~~ ✅ Favorites + WatchHistory + Health (PR #390, sesión tarde-noche)
 - ~~CC fase 2~~ ✅ ChannelOrderOps (PR #392, esta sesión)
 
-**Iteración 6 — composition root** (4 de 5 cerrados esta sesión 2026-05-21 noche):
+**Iteración 6 — composition root** (5 de 5 cerrados, G + H parciales/diferidos):
 - ~~V~~ ✅ primitivos de Config a `Dependencies` (PR #395, `61396a3`)
 - ~~JJ~~ ✅ `stream.NewManager(Deps{...})` wiring atómico (PR #395, `61396a3`)
 - ~~LL~~ ✅ docs `Manager`/`Transcoder` (cerrado por diseño, PR #395, `61396a3`)
 - ~~G~~ ⚠️ parcial — `runtime` god-struct sustituido por `lifecycle` con 3 fases (commit `8b746fc` en `claude/review-project-9YJxG`, pendiente PR). Feature modules (`library.Module`, `iptv.Module`) **diferidos** — cierra el síntoma del audit pero no al 100 %.
-- **H** ⏳ pendiente — split `router.go` (1460 LoC, `r.Route("/api/v1", ...)` monolítico de ~1100 LoC) en `mountXxx` helpers per-feature + opcionalmente interfaces en `Dependencies` para los 22 `*db.X` concretos. **Sesión propia** — router.go es el fichero de mayor blast-radius del repo. Branch `claude/review-project-9YJxG` pendiente de PR.
+- ~~H~~ ✅ split `router.go` 1549 → 465 LoC (−70 %) en 7 ficheros `mount_*.go` per-feature (sesión 2026-05-21 noche tardía, branch `claude/project-review-1Zrtv`). La variante "interfaces en Dependencies para los 22 `*db.X` concretos" queda **diferida** — el split cierra el síntoma principal (callback monolítico ~1100 LoC) y los handlers ya consumen interfaces locales.
 
 **Iteración 6 fase 2 (post-H)** — feature modules:
 - `library.New(ctx, deps) (*Module, error)` que devuelva Service + scnr + scanScheduler + imageRefresher + imageRefreshScheduler + segmentDetector + segmentFingerprinter + fsWatcher + `Shutdown(ctx)`. Cerraría G al 100%.

@@ -13,17 +13,20 @@ package api_test
 //      the spec (or explicitly listed as out-of-scope below).
 //   2. Every path declared in the spec is actually registered in the router.
 //
-// Implementation choice: parse router.go via go/ast rather than stand up
-// the live router. Booting the real router needs ~30 services + a SQLite
-// DB with migrations; an AST walk is two orders of magnitude faster and
-// catches the same drift class. Trade-off: the walker only understands
-// the chi idioms NewRouter uses today (Route, Group, Get/Post/Put/Patch/
-// Delete/Head). New chi calls (Mount, Method) need the walker extended.
+// Implementation choice: parse router.go + mount_*.go via go/ast rather
+// than stand up the live router. Booting the real router needs ~30
+// services + a SQLite DB with migrations; an AST walk is two orders of
+// magnitude faster and catches the same drift class. Trade-off: the
+// walker only understands the chi idioms used today (Route, Group,
+// Get/Post/Put/Patch/Delete/Head) plus descending into helper functions
+// whose name matches `mount*` and whose first parameter is a chi.Router.
+// New chi calls (Mount, Method) need the walker extended.
 
 import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -374,29 +377,54 @@ func TestOpenAPISpec_NoDeadPaths(t *testing.T) {
 
 // ─── helpers ────────────────────────────────────────────────────────────
 
-// registeredRoutes parses router.go and returns every consumer-facing
-// (method, path) pair under /api/v1 (the prefix is stripped). The SPA
-// fallback at /* and the metrics endpoint outside /api/v1 are excluded.
+// registeredRoutes parses router.go + every mount_*.go file in the same
+// directory and returns every consumer-facing (method, path) pair under
+// /api/v1 (the prefix is stripped). The SPA fallback at /* and the
+// metrics endpoint outside /api/v1 are excluded.
+//
+// The walker starts at NewRouter and descends through `mount*` helper
+// calls. router.go itself only does composition + middleware + handler
+// construction; the actual route registration lives in mount_*.go.
 func registeredRoutes(t *testing.T) []route {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
-	routerPath := filepath.Join(filepath.Dir(thisFile), "router.go")
+	pkgDir := filepath.Dir(thisFile)
 
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, routerPath, nil, parser.SkipObjectResolution)
+
+	entries, err := os.ReadDir(pkgDir)
 	if err != nil {
-		t.Fatalf("parse router.go: %v", err)
+		t.Fatalf("read api package dir: %v", err)
 	}
 
+	// Recolectamos todos los .go (no _test.go) del paquete así que el
+	// walker puede descender a las funciones mountXxx que viven en
+	// ficheros mount_*.go aparte. Las funciones mount* tienen un
+	// chi.Router como primer parámetro — el walker enchufa al callsite
+	// el prefix del router-padre y entra al body con ese prefix.
+	mountFuncs := make(map[string]*ast.FuncDecl)
 	var newRouter *ast.FuncDecl
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		if fn.Name.Name == "NewRouter" {
-			newRouter = fn
-			break
+		f, err := parser.ParseFile(fset, filepath.Join(pkgDir, name), nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			if fn.Name.Name == "NewRouter" {
+				newRouter = fn
+				continue
+			}
+			if strings.HasPrefix(fn.Name.Name, "mount") {
+				mountFuncs[fn.Name.Name] = fn
+			}
 		}
 	}
 	if newRouter == nil {
@@ -404,7 +432,7 @@ func registeredRoutes(t *testing.T) []route {
 	}
 
 	var all []route
-	walkRouterBlock(newRouter.Body, "", &all)
+	walkRouterBlock(newRouter.Body, "", mountFuncs, &all)
 
 	// Keep only consumer-facing paths under /api/v1; strip the prefix.
 	const prefix = "/api/v1"
@@ -427,41 +455,49 @@ func registeredRoutes(t *testing.T) []route {
 
 // walkRouterBlock walks a chi router function body, accumulating routes
 // with their effective path prefix.
-func walkRouterBlock(body *ast.BlockStmt, prefix string, out *[]route) {
+func walkRouterBlock(body *ast.BlockStmt, prefix string, mountFuncs map[string]*ast.FuncDecl, out *[]route) {
 	if body == nil {
 		return
 	}
 	for _, stmt := range body.List {
-		walkStmt(stmt, prefix, out)
+		walkStmt(stmt, prefix, mountFuncs, out)
 	}
 }
 
-func walkStmt(stmt ast.Stmt, prefix string, out *[]route) {
+func walkStmt(stmt ast.Stmt, prefix string, mountFuncs map[string]*ast.FuncDecl, out *[]route) {
 	switch s := stmt.(type) {
 	case *ast.ExprStmt:
-		walkCall(s.X, prefix, out)
+		walkCall(s.X, prefix, mountFuncs, out)
 	case *ast.IfStmt:
 		// Conditional registration like `if deps.X != nil { ... }`.
 		// For drift purposes we want to see every code path's routes.
-		walkRouterBlock(s.Body, prefix, out)
+		walkRouterBlock(s.Body, prefix, mountFuncs, out)
 		if s.Else != nil {
 			switch e := s.Else.(type) {
 			case *ast.BlockStmt:
-				walkRouterBlock(e, prefix, out)
+				walkRouterBlock(e, prefix, mountFuncs, out)
 			case *ast.IfStmt:
-				walkStmt(e, prefix, out)
+				walkStmt(e, prefix, mountFuncs, out)
 			}
 		}
 	case *ast.BlockStmt:
-		walkRouterBlock(s, prefix, out)
+		walkRouterBlock(s, prefix, mountFuncs, out)
 	case *ast.AssignStmt, *ast.DeclStmt:
 		// Locals that don't register routes; ignore.
 	}
 }
 
-func walkCall(expr ast.Expr, prefix string, out *[]route) {
+func walkCall(expr ast.Expr, prefix string, mountFuncs map[string]*ast.FuncDecl, out *[]route) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
+		return
+	}
+	// Llamada a una función mountXxx del propio paquete:
+	// descendemos a su body con el prefix vigente.
+	if ident, ok := call.Fun.(*ast.Ident); ok {
+		if fn, found := mountFuncs[ident.Name]; found {
+			walkRouterBlock(fn.Body, prefix, mountFuncs, out)
+		}
 		return
 	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
@@ -474,14 +510,14 @@ func walkCall(expr ast.Expr, prefix string, out *[]route) {
 		if len(call.Args) >= 2 {
 			subPrefix := stringLit(call.Args[0])
 			if fn, ok := call.Args[1].(*ast.FuncLit); ok {
-				walkRouterBlock(fn.Body, prefix+subPrefix, out)
+				walkRouterBlock(fn.Body, prefix+subPrefix, mountFuncs, out)
 			}
 		}
 	case "Group":
 		// r.Group(func(r chi.Router) { ... }) — same prefix, just middleware.
 		if len(call.Args) >= 1 {
 			if fn, ok := call.Args[0].(*ast.FuncLit); ok {
-				walkRouterBlock(fn.Body, prefix, out)
+				walkRouterBlock(fn.Body, prefix, mountFuncs, out)
 			}
 		}
 	case "Get", "Post", "Put", "Patch", "Delete", "Head", "Options":
