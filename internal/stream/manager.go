@@ -396,8 +396,45 @@ func (m *Manager) shouldForceDirectPlay(ctx context.Context) bool {
 // Burn-in forces a Transcode decision regardless of what the
 // capability waterfall would have picked — there's no decoded frame
 // to composite onto in DirectPlay / DirectStream paths.
-func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, audioStreamIndex, burnSubIndex int) (*ManagedSession, error) {
-	key := sessionKey(userID, itemID, profileName, audioStreamIndex, burnSubIndex)
+
+// StartSessionRequest agrupa los parámetros de `Manager.StartSession`
+// y `Manager.startSessionSlow`. Cierra el olor F14-2-b del audit
+// 2026-05-14 (firmas de 8 y 9 params posicionales). Permite añadir/
+// renombrar params sin tocar callers ni la `StreamManagerService`
+// interface que consumen los handlers.
+//
+// `BurnSubIndex`:
+//   - < 0 → no burn-in. El player o no tiene sub seleccionado o
+//     está consumiendo una HLS-native sub track (text format,
+//     sidecar).
+//   - >= 0 → burn-in del subtítulo en este per-type index. El
+//     manager resuelve el codec desde las MediaStream rows del item
+//     y decide entre overlay (bitmap) o subtitles= (ASS/SSA) en
+//     ffmpeg-arg time.
+//
+// Burn-in fuerza una decision Transcode independientemente de lo
+// que el capability waterfall haya elegido — no hay decoded frame
+// que componer en los paths DirectPlay/DirectStream.
+type StartSessionRequest struct {
+	UserID           string
+	ItemID           string
+	ProfileName      string
+	Caps             *Capabilities
+	StartTime        float64
+	AudioStreamIndex int
+	BurnSubIndex     int
+}
+
+// sessionKey deriva la clave canónica de la sesión desde los campos
+// identitarios del request (sin StartTime ni Caps, que no son
+// identidad). Centralizar la derivación garantiza que el fast-path
+// lookup y el singleflight admission usen el mismo string.
+func (r StartSessionRequest) sessionKey() string {
+	return sessionKey(r.UserID, r.ItemID, r.ProfileName, r.AudioStreamIndex, r.BurnSubIndex)
+}
+
+func (m *Manager) StartSession(ctx context.Context, req StartSessionRequest) (*ManagedSession, error) {
+	key := req.sessionKey()
 
 	// Fast path: already-running session bypasses the singleflight
 	// and the slow-path setup entirely. This is the >99% case once
@@ -412,7 +449,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	m.mu.Unlock()
 
 	v, err, _ := m.startGroup.Do(key, func() (any, error) {
-		return m.startSessionSlow(ctx, userID, itemID, profileName, caps, startTime, key, audioStreamIndex, burnSubIndex)
+		return m.startSessionSlow(ctx, key, req)
 	})
 	if err != nil {
 		return nil, err
@@ -426,7 +463,18 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 // the work — if it cancels mid-fetch, late joiners get the same
 // error, which is the right trade: callers who arrived 50 ms apart
 // for the same key were going to share the result anyway.
-func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, key string, audioStreamIndex, burnSubIndex int) (*ManagedSession, error) {
+func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSessionRequest) (*ManagedSession, error) {
+	// Unpack a local view del req así que el resto del body (90+
+	// LoC) no tiene que llamar req.X cada vez. Las variables son
+	// puro alias — el behaviour del cuerpo no cambia con el
+	// refactor F14-2-b.
+	userID := req.UserID
+	itemID := req.ItemID
+	profileName := req.ProfileName
+	caps := req.Caps
+	startTime := req.StartTime
+	audioStreamIndex := req.AudioStreamIndex
+	burnSubIndex := req.BurnSubIndex
 	// Re-check after singleflight admission: a previous Do for this
 	// key may have just finished and populated m.sessions in the
 	// brief window between this caller's fast-path miss and its

@@ -225,7 +225,15 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// today's web client which doesn't send the header yet.
 	caps := stream.CapabilitiesFromRequest(r)
 
-	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, caps, startTime, audioStreamIndex, burnSubIndex)
+	ms, err := h.manager.StartSession(r.Context(), stream.StartSessionRequest{
+		UserID:           claims.UserID,
+		ItemID:           itemID,
+		ProfileName:      quality,
+		Caps:             caps,
+		StartTime:        startTime,
+		AudioStreamIndex: audioStreamIndex,
+		BurnSubIndex:     burnSubIndex,
+	})
 	if err != nil {
 		// The manager returns typed AppErrors (e.g. TranscodeBusy) that
 		// handleServiceError renders without leaking internal messages.

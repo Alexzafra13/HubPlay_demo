@@ -6,12 +6,11 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21 noche tardía III — F14-2-b: Transcoder API a `TranscodeRequest`)
+## 🔭 Estado actual (2026-05-21 noche tardía IV — F14-2-b cadena completa)
 
-- Branch actual: `claude/f14-2-b-transcoder-startsession`. Extiende F14-2-a a `Transcoder.Start` y `Transcoder.RestartAt`: dos firmas de 11 params posicionales → `(sessionID, itemID string, req TranscodeRequest)`. Cierra el "patrón replicado tres veces" que el audit marca bajo F14-2-a/b.
-- PRs abiertas: **#397** (olor H — router split), **#398** (F14-2-a — BuildFFmpegArgs). Ambas pendientes review.
-- PR **#396** ya mergeada: olor G parcial (lifecycle refactor).
-- Branch principal `main` arrastra: V+JJ+LL (PR #395), G parcial (PR #396).
+- Branch actual: `claude/f14-2-b-manager-startsession`. Tercera pieza F14-2-b: `Manager.StartSession` (8 params) + `Manager.startSessionSlow` (9 params) → struct `StartSessionRequest`. Actualizado el `StreamManagerService` interface + los 3 callers en handlers (stream.go + federation_stream.go x2) + el fake en stream_test.go + 5 sites de `startSessionFn`.
+- Mergeadas a main hoy: **#396** (G parcial / lifecycle), **#397** (olor H / router split), **#398** (F14-2-a / BuildFFmpegArgs), **#399** (F14-2-b / Transcoder.Start+RestartAt).
+- Branch principal `main`: V+JJ+LL+G+H+F14-2-a+F14-2-b-trio cerrados.
 - Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
 - Tests: `go test -race ./...` verde end-to-end con todo Iter 6 V+JJ+LL+G aplicado; frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
@@ -24,44 +23,57 @@
 
 ---
 
-## 🔁 Sesión 2026-05-21 (noche tardía III) — F14-2-b: Transcoder.Start/RestartAt a `TranscodeRequest`
+## 🪛 Sesión 2026-05-21 (noche tardía IV) — F14-2-b: `Manager.StartSession` a `StartSessionRequest`
 
-Sesión continuación natural de F14-2-a. El audit indicaba ese olor como "patrón replicado tres veces" — `BuildFFmpegArgs` (13 params, cerrado en PR #398), `Transcoder.Start` (11 params), y `Transcoder.RestartAt` (11 params). Esta PR cierra los dos restantes.
+Tercera y última pieza de la cadena F14-2-b. Tras cerrar `BuildFFmpegArgs` (PR #398) y `Transcoder.Start/RestartAt` (PR #399), llega el turno de la **API pública** del Manager — la firma que cruza el seam handler→stream.
 
 ### Cambio
 
 ```go
-// Antes
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
-    startTime float64, copyVideo, copyAudio, toneMap bool,
-    startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) (*Session, error)
+// Antes — 8 params posicionales (StartSession) + 9 (startSessionSlow)
+StartSession(ctx, userID, itemID, profileName, caps, startTime,
+             audioStreamIndex, burnSubIndex)
+
+startSessionSlow(ctx, userID, itemID, profileName, caps, startTime,
+                 key, audioStreamIndex, burnSubIndex)
 
 // Después
-func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Session, error)
+StartSession(ctx, req StartSessionRequest)
+startSessionSlow(ctx, key string, req StartSessionRequest)
 ```
 
-Reutiliza el `TranscodeRequest` introducido en F14-2-a. **Contrato split-de-llenado**: el caller llena los campos *caller-side* (`Input`, `Profile`, `StartTime`, `CopyVideo`, `CopyAudio`, `ToneMap`, `StartSegmentNumber`, `AudioStreamIndex`, `BurnSub`); el Transcoder sobrescribe los 4 *transcoder-side* (`OutputDir`, `HWAccel`, `Encoder`, `Libx264Preset`) desde su propio estado interno. Documentado en el doc-comment.
+`StartSessionRequest` con 7 campos: `UserID`, `ItemID`, `ProfileName`, `Caps`, `StartTime`, `AudioStreamIndex`, `BurnSubIndex`. Helper `(r StartSessionRequest) sessionKey()` centraliza la derivación de la clave canónica que tanto el fast-path lookup como el singleflight admission usan.
 
-`sessionID` y `itemID` siguen como params separados — son session identity (no ffmpeg args) y el handler de sesión los usa para keying en `t.sessions`. Pasarlos al struct sería leaking de concerns.
+### Call sites actualizados
 
-### Call sites
-
-- **2 producción** (`manager.go:560` y `manager.go:742` — Start + RestartAt en `startSessionSlow` + `RestartSessionAt`).
-- **1 test** (`TestTranscoder_Start_InvalidFFmpeg`).
-
-Todos updateados a struct literal.
+- **Interface `StreamManagerService.StartSession`** (`handlers/interfaces.go`): cambia firma.
+- **3 callers producción** en handlers:
+  - `stream.go:228` (player web)
+  - `federation_stream.go:149` (`StartSession` para peer)
+  - `federation_stream.go:245` (`QualityPlaylist` reusa la sesión)
+- **fake `fakeStreamManager.StartSession` y su `startSessionFn`** en `stream_test.go` — cambian firma. 5 sites donde se asigna `startSessionFn = func(...)` updateados con `sed` (los firmaban con `func(_ context.Context, _, _, _ string, _ *Capabilities, _ float64)`).
 
 ### Aprendizajes
 
-- **`sessionID` + `itemID` se quedan fuera del struct**. Son identidad de sesión y la `Transcoder.sessions` map usa `sessionID` como key. Forzarlos dentro de `TranscodeRequest` mezclaría dos concerns. La firma `(sessionID, itemID string, req TranscodeRequest)` es clara: "identifica la sesión y dame la receta de transcoding".
+- **Rebase tras squash-merge** es la pieza operativa olvidada en stacks de PRs. Cualquier rama basada en otra rama de PR queda stale tras squash-merge porque el SHA en main es distinto al ancestor commit local. Fix consistente: `git rebase --onto origin/main <ancestor-sha>` o `git rebase origin/main` + resolver conflictos. Aplicado a #399 (basado en #398) y luego de nuevo a #400 (basado en main pre-#399).
 
-- **Split-de-llenado** (caller llena algunos campos, callee sobrescribe otros) es un patrón válido cuando los conjuntos están claramente delimitados. Documentado in-line es suficiente — alternativa "dos structs" introduciría duplicación.
+- **`startSessionFn` es un patrón sano para tests**: el fake `fakeStreamManager` tiene un campo `startSessionFn func(ctx, req) (*Session, error)` que los tests asignan ad-hoc. Cuando cambia la firma del verdadero `StartSession`, sólo hay que actualizar el tipo del campo + los 5-N sites de asignación. Los call-sites no cambian (siguen llamando `env.manager.StartSession(...)` indirectamente vía el handler).
+
+- **Tener helper `sessionKey()` en el request** evita que el fast-path lookup y el singleflight derivan keys distintas si se renombran campos. Antes la derivación estaba inline en dos sitios del Manager; ahora un solo metodo en el struct.
 
 ### Métricas
 
-- **3 ficheros tocados** (transcode.go, manager.go, transcode_test.go).
-- Diff neto: el body de Start/RestartAt sin cambios (sólo se sustituye la construcción manual del `TranscodeRequest{...}` por reuso del param + 4 overrides); las firmas pasan de 11 a 3 params (sessionID + itemID + req).
-- 2 callers actualizados (producción) + 1 caller (test).
+- **7 ficheros tocados** (manager.go + interfaces.go + 2 handlers + 2 test files + project-status.md).
+- 1 commit (post-rebase con resolución del conflict en memoria).
+- 0 callers no-test sin actualizar (verificado por `go build ./...` limpio).
+
+---
+
+## 🔁 Sesión 2026-05-21 (noche tardía III) — F14-2-b: Transcoder.Start/RestartAt a `TranscodeRequest`
+
+Continuación natural de F14-2-a. Cierra el "patrón replicado tres veces" del audit aplicado a las dos firmas restantes del trío: `Transcoder.Start` (11 params) y `Transcoder.RestartAt` (11 params) → `(sessionID, itemID string, req TranscodeRequest)`. **Contrato split-de-llenado** documentado: caller llena 9 campos caller-side, Transcoder sobrescribe los 4 transcoder-side (OutputDir, HWAccel, Encoder, Libx264Preset) desde su estado interno.
+
+Esta PR descubrió la operativa **rebase tras squash-merge**: PR #399 estaba basada en `claude/f14-2-a-transcode-request`. Cuando se mergeó #398 con squash, el SHA en main era distinto al ancestor de #399 — GitHub mostró `Can't automatically merge`. Fix: `git rebase --onto origin/main fc26b43` para dropear el commit ya-en-main, + force-push, + cambiar la base de #399 a main vía MCP. PR pasó de `mergeable_state: "dirty"` a `"clean"` con 1 commit. Mergeada después.
 
 ---
 
