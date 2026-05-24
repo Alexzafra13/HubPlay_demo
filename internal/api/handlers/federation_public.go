@@ -247,7 +247,7 @@ func (h *FederationPublicHandler) ServeIdentityAvatar(w http.ResponseWriter, r *
 	// la URL publicada en /federation/info incluye el nombre
 	// nuevo como query param. ServeContent también pone ETag /
 	// Last-Modified para revalidación.
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", CacheControlMediumPublic)
 	http.ServeContent(w, r, relName, stat.ModTime(), f)
 }
 

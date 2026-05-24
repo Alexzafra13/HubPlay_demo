@@ -66,7 +66,7 @@ func (h *PeopleHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 
 	// Same caching policy as /api/v1/images/file/{id}: profiles rarely
 	// change, the URL is content-stable per person id.
-	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	w.Header().Set("Cache-Control", CacheControlImage)
 	http.ServeFile(w, r, person.ThumbPath)
 }
 

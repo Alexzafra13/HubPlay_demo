@@ -288,11 +288,7 @@ func (r *ItemRepository) List(ctx context.Context, filter librarymodel.ItemFilte
 		// non-empty allow-list it always means "the caller has a
 		// cap set" and we deny unrated items the same way the
 		// AllowedRating helper does for symmetry.
-		placeholders := "?"
-		for range filter.AllowedContentRatings[1:] {
-			placeholders += ",?"
-		}
-		where += " AND content_rating IS NOT NULL AND content_rating IN (" + placeholders + ")"
+		where += " AND content_rating IS NOT NULL AND content_rating IN (" + sqlPlaceholders(len(filter.AllowedContentRatings)) + ")"
 		for _, v := range filter.AllowedContentRatings {
 			args = append(args, v)
 		}
@@ -540,11 +536,7 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 		// Same content_rating IN (...) gate as List() above; the
 		// "+ Nuevos" / "Reciente en X" rails honour the caller
 		// profile's content cap.
-		placeholders := "?"
-		for range allowedRatings[1:] {
-			placeholders += ",?"
-		}
-		where += " AND content_rating IS NOT NULL AND content_rating IN (" + placeholders + ")"
+		where += " AND content_rating IS NOT NULL AND content_rating IN (" + sqlPlaceholders(len(allowedRatings)) + ")"
 		for _, v := range allowedRatings {
 			args = append(args, v)
 		}

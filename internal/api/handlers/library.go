@@ -232,7 +232,7 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 	// drive). 30s is short enough that any real change is picked up
 	// quickly while still letting the modal re-open instantly when the
 	// user closes and re-opens it within the same flow.
-	w.Header().Set("Cache-Control", "private, max-age=30")
+	w.Header().Set("Cache-Control", CacheControlListing)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
 			"current":     absPath,

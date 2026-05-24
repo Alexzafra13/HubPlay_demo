@@ -85,7 +85,7 @@ func (h *TrickplayHandler) TrickplayManifest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	w.Header().Set("Cache-Control", CacheControlImage)
 	http.ServeFile(w, r, filepath.Join(itemDir, "manifest.json"))
 }
 
@@ -113,7 +113,7 @@ func (h *TrickplayHandler) TrickplaySprite(w http.ResponseWriter, r *http.Reques
 		handleServiceError(w, r, err)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	w.Header().Set("Cache-Control", CacheControlImage)
 	http.ServeFile(w, r, filepath.Join(itemDir, "sprite.png"))
 }
 

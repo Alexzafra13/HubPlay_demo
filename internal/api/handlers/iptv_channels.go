@@ -289,7 +289,7 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Cache-Control", CacheControlNoStoreFull)
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 	_, _ = w.Write(body)
@@ -407,7 +407,7 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 	// the cheapest possible bug. ServeContent honours
 	// If-Modified-Since for conditional requests, so the actual
 	// bytes are usually only sent once per browser cache lifetime.
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", CacheControlDailyPublic)
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 
@@ -453,7 +453,7 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "video/mp2t")
-	w.Header().Set("Cache-Control", "public, max-age=10")
+	w.Header().Set("Cache-Control", CacheControlShortLived)
 	http.ServeFile(w, r, sess.SegmentPath(segment))
 }
 

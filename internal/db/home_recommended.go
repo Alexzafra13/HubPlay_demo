@@ -93,10 +93,7 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 	//   2. ud.user_id = ?            — left join filter
 	//   3. la.user_id = ?            — library access guard
 	//   4. LIMIT ?
-	placeholders := "?"
-	for i := 1; i < len(topGenres); i++ {
-		placeholders += ",?"
-	}
+	placeholders := sqlPlaceholders(len(topGenres))
 	args := make([]any, 0, len(topGenres)+3)
 	for _, g := range topGenres {
 		args = append(args, g)
@@ -225,10 +222,7 @@ func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, l
 	// scoped to the seed's specific genres rather than the user's
 	// top-3, AND we exclude the seed itself from the result so
 	// "Porque viste X" doesn't include X.
-	placeholders := "?"
-	for i := 1; i < len(genres); i++ {
-		placeholders += ",?"
-	}
+	placeholders := sqlPlaceholders(len(genres))
 	args := make([]any, 0, len(genres)+4)
 	for _, g := range genres {
 		args = append(args, g)

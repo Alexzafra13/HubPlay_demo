@@ -450,7 +450,7 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 	wParam := r.URL.Query().Get("w")
 	etag := strongImageETag(imageID, wParam)
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	w.Header().Set("Cache-Control", CacheControlImage)
 	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return

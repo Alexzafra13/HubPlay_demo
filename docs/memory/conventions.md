@@ -1195,4 +1195,27 @@ import type { StudioDetail } from "./types";
 async getStudio(slug: string): Promise<StudioDetail> { … }
 ```
 
+## Naming `Is{X}Safe` / `Is{X}Blocked` para validators (2026-05-21, audit F14-5-a)
+
+Convención para helpers booleanos de validación. La elección entre **Safe** y **Blocked** marca **la dirección de la lista**, no la severidad de la falla:
+
+- **`Is{X}Safe(...)` / `is{X}Safe(...)`** — el helper es **whitelist**: devuelve `true` cuando el valor está en el conjunto permitido. Falsable por construcción (lista positiva). Ejemplo: `isSafeUpstream(url)` valida que la URL outbound caiga en el set de schemes/hosts permitidos (no `data:`, no `file:`, no IP privada).
+
+- **`{X}Blocked(...)` / `is{X}Blocked(...)`** — el helper es **blacklist**: devuelve `true` cuando el valor está en el conjunto denegado. La lista negativa siempre tiene riesgo de incompletitud (algo nuevo cae por defecto en "allowed"). Ejemplo: `BlockedIP(ip)` valida que la IP NO esté en rangos privados/loopback (defensa SSRF).
+
+- **Exported (`Is...` / camelcase inicial mayúscula)** cuando lo consumen otros paquetes; **unexported (`is...`)** cuando es helper privado del paquete.
+
+Casos sanos hoy:
+
+| Helper | Paquete | Dirección |
+|---|---|---|
+| `isSafeMethod` | `api/csrf.go` | whitelist (`GET/HEAD/OPTIONS`) |
+| `isSafeUpstream` | `iptv/proxy.go` | whitelist (schemes + hosts SSRF-safe) |
+| `IsSafePathSegment` | `imaging/safety.go` | whitelist (sin `..`, sin `/`) |
+| `BlockedIP` | `imaging/safety.go` | blacklist (rangos privados/loopback) |
+
+`BlockedIP` rompe la familia `IsSafe...` pero el nombre **es correcto** — su semántica es blacklist, no whitelist. Renombrar a `IsIPBlocked` haría el call-site más verboso (`if IsIPBlocked(ip)` vs `if BlockedIP(ip)`); la convención privilegia el nombre que se lee mejor en el caller.
+
+**Regla nueva al añadir un validator**: elegir según la dirección de la lista. Si dudas, prefiere whitelist y nómbralo `Is{X}Safe` — las whitelists son inherentemente más conservadoras.
+
 **Convención**: types `*Props` / `*Variant` / `*Size` que sólo se usan dentro del archivo del componente NO se exportan. Mantenerlos como `interface FooProps {…}` sin `export`. El componente público importa fine — el type interno no.

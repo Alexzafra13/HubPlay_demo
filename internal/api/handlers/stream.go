@@ -170,7 +170,7 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles, audioStreamIndex, burnSubIndex)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", CacheControlNoCache)
 	_, _ = fmt.Fprint(w, playlist)
 }
 
@@ -286,7 +286,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 		manifest := stream.SynthesizeVODManifest(duration, segmentDurationSeconds, segmentTpl)
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", CacheControlNoCache)
 		_, _ = w.Write([]byte(manifest))
 		return
 	}
@@ -300,7 +300,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", CacheControlNoCache)
 	http.ServeFile(w, r, manifestPath)
 }
 
@@ -434,7 +434,7 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 // without duplicating the headers.
 func serveSegment(w http.ResponseWriter, r *http.Request, path string) {
 	w.Header().Set("Content-Type", "video/mp2t")
-	w.Header().Set("Cache-Control", "max-age=3600")
+	w.Header().Set("Cache-Control", CacheControlHourly)
 	http.ServeFile(w, r, path)
 }
 
@@ -663,7 +663,7 @@ func (h *StreamHandler) DownloadExternalSubtitle(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	w.Header().Set("Cache-Control", CacheControlImage)
 	_, _ = w.Write(vtt)
 }
 
@@ -708,6 +708,6 @@ func (h *StreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/vtt")
-	w.Header().Set("Cache-Control", "max-age=86400")
+	w.Header().Set("Cache-Control", CacheControlDailyOpaque)
 	_, _ = io.Copy(w, vttData)
 }
