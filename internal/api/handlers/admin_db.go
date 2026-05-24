@@ -476,7 +476,7 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Cache-Control", CacheControlNoStore)
 	w.WriteHeader(http.StatusOK)
 
 	emit := func(payload map[string]any) {

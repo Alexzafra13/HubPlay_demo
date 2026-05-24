@@ -230,7 +230,7 @@ func (h *IPTVHandler) serveLocalChannelLogo(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", CacheControlDailyPublic)
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 

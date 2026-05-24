@@ -144,7 +144,7 @@ func (h *SetupHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Cache-Control", "private, max-age=30")
+	w.Header().Set("Cache-Control", CacheControlListing)
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 

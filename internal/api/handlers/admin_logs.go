@@ -96,7 +96,7 @@ func (h *AdminLogsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", CacheControlNoCache)
 	w.Header().Set("X-Accel-Buffering", "no") // disable nginx response buffering
 	w.WriteHeader(http.StatusOK)
 

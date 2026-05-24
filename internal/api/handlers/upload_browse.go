@@ -148,7 +148,7 @@ func (h *UploadBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 
 	// Cache corta — el operador navega rápido entre carpetas y NO
 	// queremos re-readdir por cada click si está en el mismo nivel.
-	w.Header().Set("Cache-Control", "private, max-age=15")
+	w.Header().Set("Cache-Control", CacheControlListingShort)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
 			"library_id":   lib.ID,

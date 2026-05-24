@@ -668,7 +668,7 @@ func (h *UserHandler) ServeUserAvatar(w http.ResponseWriter, r *http.Request) {
 	// cambia (nuevo sufijo en relName) y el navegador refetchea
 	// igualmente. ServeContent también pone ETag/Last-Modified
 	// para revalidación con If-Modified-Since.
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", CacheControlMediumPublic)
 	http.ServeContent(w, r, target.AvatarPath, stat.ModTime(), f)
 }
 

@@ -86,7 +86,10 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 		"L2": {{ID: "c1", StreamURL: ""}},
 		"L4": {{ID: "c2", StreamURL: ""}},
 	}}
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
 	w.SetInterval(time.Hour)
 	w.SetInitialDelay(time.Millisecond)
 	w.Start(context.Background())
@@ -116,7 +119,10 @@ func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
 	w.SetInterval(40 * time.Millisecond)
 	w.SetInitialDelay(time.Millisecond)
 	w.Start(context.Background())
@@ -138,7 +144,10 @@ func TestProberWorker_StopDrainsAndIsIdempotent(t *testing.T) {
 	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
 	w.SetInterval(time.Hour)
 	w.SetInitialDelay(time.Hour) // never run a tick — keep the loop pure
 	w.Start(context.Background())
@@ -161,7 +170,10 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &blockingChanLister{hang: hang}
 
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
 	w.SetInterval(time.Hour)
 	w.SetInitialDelay(time.Millisecond)
 	w.Start(context.Background())
@@ -171,7 +183,7 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	err := w.Stop(stopCtx)
+	err = w.Stop(stopCtx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded when run is hung, got %v", err)
 	}
@@ -193,7 +205,10 @@ func TestProberWorker_LibraryListErrorIsLoggedNotFatal(t *testing.T) {
 	t.Parallel()
 	libs := &fakeLibLister{err: errors.New("db down")}
 	chans := &fakeChanLister{}
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
 	w.SetInterval(20 * time.Millisecond)
 	w.SetInitialDelay(time.Millisecond)
 	w.Start(context.Background())
@@ -215,7 +230,10 @@ func TestProberWorker_PanicInPrologueIsRecovered(t *testing.T) {
 	var calls atomic.Int32
 	libs := &panicLibLister{calls: &calls}
 	chans := &fakeChanLister{}
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
 	w.SetInterval(20 * time.Millisecond)
 	w.SetInitialDelay(time.Millisecond)
 	w.Start(context.Background())
@@ -248,8 +266,11 @@ func TestProberWorker_ProbeNowReturnsListError(t *testing.T) {
 		failOnce: true,
 		failErr:  errors.New("table missing"),
 	}
-	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
-	_, err := w.ProbeNow(context.Background(), "L1")
+	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
+	if err != nil {
+		t.Fatalf("NewProberWorker: %v", err)
+	}
+	_, err = w.ProbeNow(context.Background(), "L1")
 	if err == nil || !errors.Is(err, err) {
 		t.Fatalf("expected ListByLibrary error, got %v", err)
 	}

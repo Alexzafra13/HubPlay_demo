@@ -221,12 +221,10 @@ func (r *EPGProgramRepository) bulkScheduleChunk(
 	from, to time.Time,
 	result map[string][]*iptvmodel.EPGProgram,
 ) error {
-	placeholders := "?"
-	args := []any{from.UTC(), to.UTC()}
-	for i, id := range channelIDs {
-		if i > 0 {
-			placeholders += ",?"
-		}
+	placeholders := sqlPlaceholders(len(channelIDs))
+	args := make([]any, 0, len(channelIDs)+2)
+	args = append(args, from.UTC(), to.UTC())
+	for _, id := range channelIDs {
 		args = append(args, id)
 	}
 

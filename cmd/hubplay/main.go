@@ -500,7 +500,10 @@ func run(configPath string) error {
 	// channels nobody happens to be watching, so the user-facing list
 	// auto-hides them before a viewer clicks a dead tile.
 	iptvProber := iptv.NewProber(nil, iptvService)
-	iptvProberWorker := iptv.NewProberWorker(iptvProber, repos.Libraries, repos.Channels, logger)
+	iptvProberWorker, err := iptv.NewProberWorker(iptvProber, repos.Libraries, repos.Channels, logger)
+	if err != nil {
+		return fmt.Errorf("iptv prober worker: %w", err)
+	}
 	iptvProberWorker.Start(ctx)
 	iptvService.SetProberWorker(iptvProberWorker)
 	lc.AddWorker("iptv prober", func(ctx context.Context) error {

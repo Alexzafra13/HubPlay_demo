@@ -62,7 +62,7 @@ func (h *OpenAPIHandler) ServeYAML(w http.ResponseWriter, r *http.Request) {
 	// Cache for an hour at the edge — short enough that a fresh deploy
 	// propagates fast, long enough that a Kotlin client polling for
 	// spec updates doesn't hammer the server.
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", CacheControlHourlyPublic)
 	if r.Method == http.MethodHead {
 		return
 	}

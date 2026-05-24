@@ -206,7 +206,7 @@ func (h *FederationStreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.
 	// stream.GenerateMasterPlaylist because it hardcodes the local
 	// /api/v1/stream/{itemId}/{quality}/index.m3u8 path.
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", CacheControlNoCache)
 	_, _ = fmt.Fprint(w, generatePeerMasterPlaylist(sess.ID))
 }
 
@@ -270,7 +270,7 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", CacheControlNoCache)
 	http.ServeFile(w, r, manifestPath)
 }
 
@@ -328,7 +328,7 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "video/mp2t")
-	w.Header().Set("Cache-Control", "max-age=3600")
+	w.Header().Set("Cache-Control", CacheControlHourly)
 	http.ServeFile(w, r, segmentPath)
 }
 
@@ -421,7 +421,7 @@ func (h *FederationStreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "text/vtt")
-	w.Header().Set("Cache-Control", "max-age=86400")
+	w.Header().Set("Cache-Control", CacheControlDailyOpaque)
 	_, _ = io.Copy(w, vttData)
 }
 

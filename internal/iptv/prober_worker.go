@@ -81,11 +81,14 @@ type channelLister interface {
 }
 
 // NewProberWorker wires a worker around the building blocks. Logger
-// is required (a silent worker is a debugging nightmare); panics on
-// nil.
-func NewProberWorker(prober *Prober, libraries libraryLister, channels channelLister, logger *slog.Logger) *ProberWorker {
+// es required (un worker silencioso es pesadilla de debug); devuelve
+// error si cualquier dep es nil — consistente con el resto del repo
+// (`federation.NewManager` también devuelve `(nil, err)` y `main.go`
+// hace fail-soft). Cierra olor F14-4-a del audit 2026-05-14 — el
+// `panic()` previo violaba la convención.
+func NewProberWorker(prober *Prober, libraries libraryLister, channels channelLister, logger *slog.Logger) (*ProberWorker, error) {
 	if prober == nil || libraries == nil || channels == nil || logger == nil {
-		panic("iptv.NewProberWorker: nil dependency")
+		return nil, errors.New("iptv.NewProberWorker: nil dependency")
 	}
 	return &ProberWorker{
 		prober:       prober,
@@ -94,7 +97,7 @@ func NewProberWorker(prober *Prober, libraries libraryLister, channels channelLi
 		logger:       logger.With("module", "iptv-prober"),
 		interval:     proberDefaultInterval,
 		initialDelay: proberDefaultInitialDelay,
-	}
+	}, nil
 }
 
 // SetInterval overrides the periodic-tick interval. Tests use a tiny
