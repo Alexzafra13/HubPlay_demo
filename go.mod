@@ -15,6 +15,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/tus/tusd/v2 v2.9.2
+	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/image v0.40.0
 	golang.org/x/sync v0.20.0
