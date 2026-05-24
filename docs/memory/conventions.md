@@ -1196,3 +1196,103 @@ async getStudio(slug: string): Promise<StudioDetail> { … }
 ```
 
 **Convención**: types `*Props` / `*Variant` / `*Size` que sólo se usan dentro del archivo del componente NO se exportan. Mantenerlos como `interface FooProps {…}` sin `export`. El componente público importa fine — el type interno no.
+
+## Estilo de comentarios (2026-05-21)
+
+Tres reglas, en orden de importancia:
+
+1. **Español, no inglés.** Convención del repo. Los nombres de identificadores se quedan en inglés (es Go); los comentarios y los doc-comments largos van en castellano.
+2. **Cortos por defecto.** 1-3 líneas. Si necesitas un párrafo es porque hay un invariante no obvio — entonces sí, pero no narres history ni alternativas descartadas.
+3. **Comenta el "por qué", no el "qué".** El código ya dice qué hace. Los comentarios son para el contexto que no se ve.
+
+### Qué SÍ comentar
+
+- Restricciones no obvias del entorno ("ffmpeg ignora -preset si el encoder no es libx264").
+- Workarounds de un bug ajeno con link/issue.
+- Decisiones contraintuitivas que parecen errores a primera vista.
+- Invariantes de concurrencia/locking que el compilador no enforza.
+
+### Qué NO comentar
+
+- **El "qué" cuando el nombre lo dice.** `func cleanupOldSessions()` no necesita `// limpia las sesiones viejas`.
+- **El "cómo" si el código es legible.** No narres el algoritmo línea a línea.
+- **Historia del fichero.** "Antes esto vivía en X, lo movimos a Y porque..." va al commit message + memoria, no al código. El código se lee por su estado actual.
+- **Alternativas descartadas.** Si en review se discutieron 3 opciones y se eligió una, el comentario no necesita las otras 2. Quedan en la PR.
+- **Sinónimos.** `// Inicializa el cliente` arriba de `client := newClient()` es ruido.
+
+### Antes / después (ejemplos reales del repo)
+
+**Antes** — 8 líneas para explicar un map de sesión:
+
+```go
+// Burn-in subtitle codec from BurnSubtitle.Codec, only present when
+// the player picked a PGS/DVDSUB/ASS sub for burn-in. The codec
+// itself is what BuildFFmpegArgs needs to choose between filter
+// strategies (overlay vs subtitles= filter), so the wrapper hangs
+// onto the spec rather than re-resolving from MediaStream rows on
+// every restart. nil means no burn-in selected — the player either
+// has no sub or relies on a native HLS sub track.
+BurnSubtitle *BurnSubtitleSpec
+```
+
+**Después** — 2 líneas:
+
+```go
+// Subtítulo burned (PGS/DVDSUB/ASS). nil = sin burn-in.
+// RestartAt lo reusa para no re-resolver la spec en cada seek.
+BurnSubtitle *BurnSubtitleSpec
+```
+
+El "por qué" (no re-resolver en cada restart) sobrevive. Lo demás eran apuntes para PR review que ya quedaron en el PR.
+
+**Antes** — 15 líneas justificando un panic:
+
+```go
+// NewProberWorker wires a worker around the building blocks.
+// Logger is required (a silent worker is a debugging nightmare).
+// We panic on a nil dependency rather than returning an error
+// because every production caller would have to error-check
+// something that's always a programming bug, never a runtime
+// condition. The other auth-side constructors (federation, library)
+// follow the same pattern. Tests construct workers with concrete
+// fakes so this never triggers there either.
+//
+// If you're seeing this panic in production, the issue is upstream
+// in main.go's wiring — there's a nil being passed where there
+// shouldn't be one. Trace back from the panic message.
+func NewProberWorker(...) *ProberWorker {
+    if prober == nil || libs == nil || ... {
+        panic("iptv.NewProberWorker: nil dependency")
+    }
+    ...
+}
+```
+
+**Después** — 1 línea:
+
+```go
+// Devuelve error si cualquier dep es nil. main.go decide qué hacer.
+func NewProberWorker(...) (*ProberWorker, error) { ... }
+```
+
+(Y de paso pasó de `panic` a `error` por convención del repo — F14-4-a del audit.)
+
+### Tamaño de doc-comment de función
+
+- **Privada (lowercase)**: 0-1 líneas. Si no necesita comentario, no lo pongas.
+- **Pública (uppercase)**: máx 3 líneas, salvo un invariante real que merezca explicación.
+- **Constructor**: 1 línea + lista de defaults si los hay (estilo `TranscoderConfig`).
+- **Función pura con contrato matemático** (`buildVideoFilterChain`, `DetectFromChapters`): puede ser más larga si describe el "shape" del input/output. Pero igual: 5 líneas, no 30.
+
+### Regla operativa al editar código existente
+
+Cuando toques un fichero, si pasas por un comentario obviamente sobredimensionado, **acórtalo en el mismo commit**. No fuerces una pasada "barrer todos los comentarios" — es BB del audit y se hace en sesión propia. Pero si ya tienes el fichero abierto, recortar 5 líneas no cuesta nada y mejora la siguiente lectura.
+
+### Reglas para el assistant
+
+Aplican también a comentarios generados por IA. Antes de escribir un doc-comment de más de 3 líneas, preguntarse:
+
+1. ¿Esto lo dice el código por sí solo? → No comentar.
+2. ¿Esto es contexto histórico de la PR? → Va al commit message, no al código.
+3. ¿Estoy parafraseando el nombre de la función? → Borrar.
+4. ¿Esto es realmente un invariante no obvio? → OK, comentar.
