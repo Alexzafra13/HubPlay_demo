@@ -402,9 +402,8 @@ func (h *UploadBrowseHandler) RenameEntry(w http.ResponseWriter, r *http.Request
 // y retorna (nil, false). Sin filtrar existencia (always 404, never
 // 403) — un user que no tiene acceso no debería poder enumerar.
 func (h *UploadBrowseHandler) resolveLibrary(w http.ResponseWriter, r *http.Request) (*librarymodel.Library, bool) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_ID", "library id required")
 		return nil, false
 	}
 

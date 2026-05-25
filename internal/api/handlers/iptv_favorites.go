@@ -72,7 +72,10 @@ func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	// Look up the channel so we can verify the caller can access its library.
 	// Favoriting a channel from a library the user can't see would leak the
@@ -104,7 +107,10 @@ func (h *IPTVHandler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	// ACL gate by channel's library. If the channel no longer exists (e.g.
 	// removed during an M3U refresh after it was favorited), skip the ACL
@@ -148,7 +154,10 @@ func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request)
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {

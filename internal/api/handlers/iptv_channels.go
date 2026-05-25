@@ -26,7 +26,10 @@ import (
 // itself, which needs to show every channel (including the ones the
 // user has hidden) so the toggle remains reachable.
 func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -95,7 +98,10 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 
 // GetChannel returns a single channel.
 func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -146,7 +152,10 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 
 // Groups returns channel group names for a library.
 func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -181,7 +190,10 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -230,7 +242,10 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 			"live transmux is not enabled on this server")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -314,7 +329,10 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "logo cache disabled")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -428,8 +446,14 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 			"live transmux is not enabled on this server")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
-	segment := chi.URLParam(r, "segment")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
+	segment := requireParam(w, r, "segment")
+	if segment == "" {
+		return
+	}
 
 	if !iptv.IsValidSegmentName(segment) {
 		// Path traversal guard: ffmpeg only writes seg-NNNNN.ts and
@@ -459,7 +483,10 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 
 // ProxyURL proxies an HLS segment or sub-playlist for a channel.
 func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		respondError(w, r, http.StatusBadRequest, "MISSING_URL", "url parameter required")
@@ -486,7 +513,10 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 
 // Schedule returns EPG schedule for a channel.
 func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {

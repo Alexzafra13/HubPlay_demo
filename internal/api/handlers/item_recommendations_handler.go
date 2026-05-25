@@ -50,7 +50,10 @@ func (h *RecommendationsHandler) Recommendations(w http.ResponseWriter, r *http.
 			"no metadata provider is configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	item, err := h.lib.GetItem(r.Context(), id)
 	if err != nil {
 		handleServiceError(w, r, err)

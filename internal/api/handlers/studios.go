@@ -79,7 +79,10 @@ func (h *StudioHandler) List(w http.ResponseWriter, r *http.Request) {
 // the studio header (so the user lands on a coherent page if they
 // share the URL).
 func (h *StudioHandler) Get(w http.ResponseWriter, r *http.Request) {
-	slug := chi.URLParam(r, "slug")
+	slug := requireParam(w, r, "slug")
+	if slug == "" {
+		return
+	}
 	studio, err := h.studios.GetBySlug(r.Context(), slug)
 	if err != nil {
 		h.logger.Error("get studio", "slug", slug, "error", err)

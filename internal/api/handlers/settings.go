@@ -253,7 +253,10 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 // the YAML default. This is the explicit way to undo a UI edit
 // without having to guess what the YAML value was.
 func (h *SettingsHandler) Reset(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
+	key := requireParam(w, r, "key")
+	if key == "" {
+		return
+	}
 	if !isAllowedSettingKey(key) {
 		respondError(w, r, http.StatusBadRequest, "UNKNOWN_KEY",
 			"setting key is not editable from the UI")

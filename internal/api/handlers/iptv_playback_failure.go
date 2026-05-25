@@ -92,7 +92,10 @@ func (h *IPTVHandler) RecordPlaybackFailure(w http.ResponseWriter, r *http.Reque
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "auth required")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {

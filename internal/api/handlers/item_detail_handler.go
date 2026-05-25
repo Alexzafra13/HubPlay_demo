@@ -104,7 +104,10 @@ func (h *ItemDetailHandler) callerCapRating(ctx context.Context) string {
 // mantiene sólo las preocupaciones de HTTP: parsing de param,
 // extracción de claims, status code, envelope.
 func (h *ItemDetailHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	userID := ""
 	if claims := auth.GetClaims(r.Context()); claims != nil {
 		userID = claims.UserID
@@ -529,7 +532,10 @@ func (h *ItemDetailHandler) attachSeriesContextFromSeries(ctx context.Context, r
 // para cards), episode counts en filas season, overview metadata
 // para hover/expanded en SeasonGrid.
 func (h *ItemDetailHandler) Children(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	children, err := h.lib.GetItemChildren(r.Context(), id)
 	if err != nil {
 		handleServiceError(w, r, err)

@@ -410,9 +410,8 @@ func (h *AuthHandler) SetContentRating(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	var req setContentRatingRequest
@@ -447,9 +446,8 @@ func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 
@@ -812,9 +810,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 // once. The legacy /api/v1/users router gates this with RequireAdmin so
 // the handler can trust the caller already has admin role.
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	plain, err := h.auth.ResetPassword(r.Context(), id)
@@ -1048,9 +1045,8 @@ func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	sessionID := chi.URLParam(r, "id")
+	sessionID := requireParam(w, r, "id")
 	if sessionID == "" {
-		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "session id is required")
 		return
 	}
 

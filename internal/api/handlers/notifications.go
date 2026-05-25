@@ -113,9 +113,8 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing notification id")
 		return
 	}
 	if err := h.svc.MarkRead(r.Context(), id, claims.UserID); err != nil {

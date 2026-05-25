@@ -132,9 +132,8 @@ func (h *FederationPublicHandler) ReceivePairingRequest(w http.ResponseWriter, r
 // ReceivePairingCallback recibe la respuesta de B tras accept/decline
 // (B -> A). Verifica la firma Ed25519 con el pubkey pineado en step 1.
 func (h *FederationPublicHandler) ReceivePairingCallback(w http.ResponseWriter, r *http.Request) {
-	requestID := chi.URLParam(r, "id")
+	requestID := requireParam(w, r, "id")
 	if requestID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "missing request id")
 		return
 	}
 	var body pairingCallbackWire
@@ -169,9 +168,8 @@ func (h *FederationPublicHandler) ReceivePairingCallback(w http.ResponseWriter, 
 // Best-effort: si no encontramos la peticion (ya respondida, expirada,
 // purgada), devolvemos 204 igualmente para que A no haga retries.
 func (h *FederationPublicHandler) ReceivePairingCancel(w http.ResponseWriter, r *http.Request) {
-	requestID := chi.URLParam(r, "id")
+	requestID := requireParam(w, r, "id")
 	if requestID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "missing request id")
 		return
 	}
 	var body pairingCancelWire
@@ -292,9 +290,8 @@ func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *htt
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
-	libraryID := chi.URLParam(r, "libraryID")
+	libraryID := requireParam(w, r, "libraryID")
 	if libraryID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "library id required")
 		return
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))

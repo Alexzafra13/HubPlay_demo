@@ -111,7 +111,10 @@ func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	lib, err := h.lib.GetByID(r.Context(), id)
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -126,7 +129,10 @@ func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 
 	var req library.UpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -144,7 +150,10 @@ func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	// Capturamos nombre pre-delete para el audit.
 	var name string
 	if lib, err := h.lib.GetByID(r.Context(), id); err == nil {
@@ -159,7 +168,10 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	refreshMeta := r.URL.Query().Get("refresh_metadata") == "true"
 	if err := h.lib.Scan(r.Context(), id, refreshMeta); err != nil {
 		handleServiceError(w, r, err)
@@ -243,7 +255,10 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	sortBy := r.URL.Query().Get("sort_by")

@@ -165,9 +165,8 @@ type updateRoleRequest struct {
 // preventing self-DoS where a sibling admin demotes the owner of
 // the deploy.
 func (h *UserHandler) SetRole(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	var req updateRoleRequest
@@ -217,9 +216,8 @@ type updateAvatarColorRequest struct {
 // authorisation matrix as SetDisplayName / SetPIN: admin OR
 // parent-of-target OR self.
 func (h *UserHandler) SetAvatarColor(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	claims := auth.GetClaims(r.Context())
@@ -258,9 +256,8 @@ func (h *UserHandler) SetAvatarColor(w http.ResponseWriter, r *http.Request) {
 // the URL path param is the only identity input, the JWT claims
 // drive the gate.
 func (h *UserHandler) SetDisplayName(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	claims := auth.GetClaims(r.Context())
@@ -312,9 +309,8 @@ type updateAccessRequest struct {
 // reason as Delete + SetActive: a sibling admin could otherwise
 // time-bomb the deploy owner.
 func (h *UserHandler) SetAccess(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	if primaryID, _ := h.users.PrimaryAdminID(r.Context()); primaryID != "" && primaryID == id {
@@ -349,9 +345,8 @@ func (h *UserHandler) SetAccess(w http.ResponseWriter, r *http.Request) {
 // also protected — they're the recovery path for a deactivated
 // sibling admin.
 func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	claims := auth.GetClaims(r.Context())
@@ -383,9 +378,8 @@ func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 // profile's grants returns the parent's set (which is what the profile
 // actually inherits at runtime).
 func (h *UserHandler) GetLibraryAccess(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	if h.libraries == nil {
@@ -434,9 +428,8 @@ type updateLibraryAccessRequest struct {
 // re-targeting (which would surprise the admin when the profile got
 // access through a sibling later). Unknown library_ids also 400.
 func (h *UserHandler) SetLibraryAccess(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	if h.libraries == nil {
@@ -507,9 +500,8 @@ type createPersonalIPTVRequest struct {
 // the admin can still hand a profile member an IPTV list by
 // targeting the household's top-level user.
 func (h *UserHandler) CreatePersonalIPTV(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	if h.libraries == nil {
@@ -628,9 +620,8 @@ func (h *UserHandler) DeleteMyAvatar(w http.ResponseWriter, r *http.Request) {
 // 404 si el usuario no tiene avatar subido — el frontend cae al
 // círculo de iniciales sobre color en ese caso.
 func (h *UserHandler) ServeUserAvatar(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	target, err := h.users.GetByID(r.Context(), id)
@@ -685,9 +676,8 @@ func avatarPublicURL(userID, relName string) string {
 
 // Delete removes a user by ID (admin only).
 func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 

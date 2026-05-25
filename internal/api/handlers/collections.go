@@ -144,7 +144,10 @@ func (h *CollectionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// validly-routed request, but we fall back to the raw value so a
 	// future malformed input surfaces as 404 from the lookup rather
 	// than crashing the handler.
-	rawID := chi.URLParam(r, "id")
+	rawID := requireParam(w, r, "id")
+	if rawID == "" {
+		return
+	}
 	id := rawID
 	if decoded, err := netUrl.PathUnescape(rawID); err == nil {
 		id = decoded
@@ -458,12 +461,18 @@ func (h *CollectionHandler) ServeCollectionImage(w http.ResponseWriter, r *http.
 // Devuelve (collectionID, imageType, true) en caso ok, o escribe el
 // error y devuelve (_, _, false) — el caller debe abortar.
 func (h *CollectionHandler) parseCollectionImageRoute(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	rawID := chi.URLParam(r, "id")
+	rawID := requireParam(w, r, "id")
+	if rawID == "" {
+		return
+	}
 	id := rawID
 	if decoded, err := netUrl.PathUnescape(rawID); err == nil {
 		id = decoded
 	}
-	imageType := chi.URLParam(r, "type")
+	imageType := requireParam(w, r, "type")
+	if imageType == "" {
+		return
+	}
 	if imageType != "poster" && imageType != "backdrop" {
 		respondError(w, r, http.StatusBadRequest, "INVALID_TYPE", "image type must be poster or backdrop")
 		return "", "", false

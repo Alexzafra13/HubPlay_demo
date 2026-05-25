@@ -34,10 +34,12 @@ import (
 // The origin's ImageHandler already emits a strong content-addressed
 // ETag so a re-render of the same grid hits a 304 in the browser.
 func (h *MePeersHandler) ProxyPeerItemPoster(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "peerID")
-	itemID := chi.URLParam(r, "itemId")
-	if peerID == "" || itemID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and itemId required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
 		return
 	}
 

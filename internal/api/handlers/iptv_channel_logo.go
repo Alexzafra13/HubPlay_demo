@@ -50,7 +50,10 @@ type setChannelLogoRequest struct {
 // remoto en la próxima petición de GET /channels/{id}/logo. URLs rotas
 // caen al fallback de iniciales como cualquier otro fallo de fetch.
 func (h *IPTVHandler) SetChannelLogo(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	var req setChannelLogoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -92,7 +95,10 @@ func (h *IPTVHandler) SetChannelLogo(w http.ResponseWriter, r *http.Request) {
 // itemID/channel id se valida como path segment seguro antes de
 // componer el nombre del archivo.
 func (h *IPTVHandler) UploadChannelLogo(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 	if !imaging.IsSafePathSegment(channelID) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid channel id")
 		return
@@ -175,7 +181,10 @@ func (h *IPTVHandler) UploadChannelLogo(w http.ResponseWriter, r *http.Request) 
 // ClearChannelLogo borra el override (URL o archivo) del canal. La
 // próxima petición al proxy cae al tvg-logo del M3U.
 func (h *IPTVHandler) ClearChannelLogo(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 	previousFile, err := h.svc.ClearChannelLogo(r.Context(), channelID)
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -282,7 +291,10 @@ func extensionForContentType(ct string) string {
 // POST /libraries/{libraryId}/iptv/refresh-logos-from-iptv-org
 // Admin-only. Retorna el count de canales actualizados.
 func (h *IPTVHandler) RefreshLogosFromIPTVOrg(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	sum, err := h.svc.RefreshLogosFromIPTVOrg(r.Context(), libraryID)
 	if err != nil {
 		// "not configured" colapsa a 503 igual que el resto del flujo

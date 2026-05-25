@@ -7,11 +7,23 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"hubplay/internal/api/apperror"
 	"hubplay/internal/domain"
 )
+
+// requireParam extracts a chi URL parameter by name and writes a 400
+// response if it is empty. Returns the value; callers should return
+// immediately when the result is "".
+func requireParam(w http.ResponseWriter, r *http.Request, name string) string {
+	v := chi.URLParam(r, name)
+	if v == "" {
+		respondError(w, r, http.StatusBadRequest, "MISSING_PARAM", "missing path parameter: "+name)
+	}
+	return v
+}
 
 // SetErrorRecorder installs the observability hook fired for every
 // rendered AppError. Thin wrapper around apperror.SetRecorder kept on

@@ -68,7 +68,10 @@ func (h *ImageHandler) auditEmit() AuditEmitter {
 
 // List returns all images stored for an item.
 func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
 
 	images, err := h.images.ListByItem(r.Context(), itemID)
 	if err != nil {
@@ -86,7 +89,10 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Available queries all registered image providers for available images.
 func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
 
 	// Get external IDs for this item
 	extIDs, err := h.externalIDs.ListByItem(r.Context(), itemID)
@@ -155,8 +161,14 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 
 // Select downloads an image from a URL and saves it locally, setting it as primary.
 func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
-	imgType := chi.URLParam(r, "type")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
+	imgType := requireParam(w, r, "type")
+	if imgType == "" {
+		return
+	}
 
 	if !imaging.IsSafePathSegment(itemID) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid item id")
@@ -215,8 +227,14 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 //   - Image dimensions are bounded via imaging.EnforceMaxPixels to block
 //     decompression bombs before the blurhash/resize stages.
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
-	imgType := chi.URLParam(r, "type")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
+	imgType := requireParam(w, r, "type")
+	if imgType == "" {
+		return
+	}
 
 	if !imaging.IsSafePathSegment(itemID) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid item id")
@@ -283,8 +301,14 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 // so admins can pin curated artwork without the next refresh
 // silently overwriting it. Body shape: `{"locked": true|false}`.
 func (h *ImageHandler) SetLocked(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
-	imageID := chi.URLParam(r, "imageId")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
+	imageID := requireParam(w, r, "imageId")
+	if imageID == "" {
+		return
+	}
 
 	img, err := h.images.GetByID(r.Context(), imageID)
 	if err != nil {
@@ -316,8 +340,14 @@ func (h *ImageHandler) SetLocked(w http.ResponseWriter, r *http.Request) {
 
 // SetPrimary sets an existing image as the primary for its type.
 func (h *ImageHandler) SetPrimary(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
-	imageID := chi.URLParam(r, "imageId")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
+	imageID := requireParam(w, r, "imageId")
+	if imageID == "" {
+		return
+	}
 
 	img, err := h.images.GetByID(r.Context(), imageID)
 	if err != nil {
@@ -342,8 +372,14 @@ func (h *ImageHandler) SetPrimary(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes an image record and its local file.
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
-	imageID := chi.URLParam(r, "imageId")
+	itemID := requireParam(w, r, "id")
+	if itemID == "" {
+		return
+	}
+	imageID := requireParam(w, r, "imageId")
+	if imageID == "" {
+		return
+	}
 
 	img, err := h.images.GetByID(r.Context(), imageID)
 	if err != nil {
@@ -388,7 +424,10 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // download, save, persist) is now a single service call so this handler
 // stays focused on HTTP-shaped concerns.
 func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 
 	updated, err := h.refresher.RefreshForLibrary(r.Context(), libraryID)
 	if err != nil {
@@ -408,7 +447,10 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 //   - Before passing any path to http.ServeFile we verify that it resolves
 //     inside h.imageDir. Defense in depth against a poisoned mapping file.
 func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
-	imageID := chi.URLParam(r, "id")
+	imageID := requireParam(w, r, "id")
+	if imageID == "" {
+		return
+	}
 	h.ServeImageByID(w, r, imageID)
 }
 

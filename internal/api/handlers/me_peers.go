@@ -119,9 +119,8 @@ func (h *MePeersHandler) BrowseAllPeerLibraries(w http.ResponseWriter, r *http.R
 // Routed under /me/peers/{peerID}/libraries. Live fetch — small list,
 // no cache layer.
 func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "peerID")
+	peerID := requireParam(w, r, "peerID")
 	if peerID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID required")
 		return
 	}
 	libs, err := h.mgr.BrowsePeerLibraries(r.Context(), peerID)
@@ -193,10 +192,12 @@ func paletteFromShared(it *federation.SharedItem) *peerItemPalette {
 // has_poster=false get no poster_url (the card falls back to the
 // dominant-colour placeholder).
 func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "peerID")
-	libraryID := chi.URLParam(r, "libraryID")
-	if peerID == "" || libraryID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and libraryID required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	libraryID := requireParam(w, r, "libraryID")
+	if libraryID == "" {
 		return
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -357,10 +358,12 @@ func (h *MePeersHandler) RecentPeers(w http.ResponseWriter, r *http.Request) {
 // browse forces a live re-fetch. Wired to a "Refresh" button in the
 // peer-library UI.
 func (h *MePeersHandler) RefreshPeerLibrary(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "peerID")
-	libraryID := chi.URLParam(r, "libraryID")
-	if peerID == "" || libraryID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and libraryID required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	libraryID := requireParam(w, r, "libraryID")
+	if libraryID == "" {
 		return
 	}
 	if err := h.mgr.PurgeCache(r.Context(), peerID, libraryID); err != nil {

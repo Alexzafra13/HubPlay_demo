@@ -91,9 +91,8 @@ func (h *FederationImageHandler) ItemPoster(w http.ResponseWriter, r *http.Reque
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
 	if itemID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "item id required")
 		return
 	}
 

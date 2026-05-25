@@ -58,7 +58,10 @@ func (h *ProgressHandler) GetProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 	ud, err := h.userData.Get(r.Context(), claims.UserID, itemID)
 	if err != nil {
 		h.logger.Error("get progress", "error", err)
@@ -107,7 +110,10 @@ func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	var req updateProgressRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -141,7 +147,10 @@ func (h *ProgressHandler) MarkPlayed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 	if err := h.userData.MarkPlayed(r.Context(), claims.UserID, itemID); err != nil {
 		h.logger.Error("mark played", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark played")
@@ -163,7 +172,10 @@ func (h *ProgressHandler) MarkUnplayed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 	if err := h.userData.Delete(r.Context(), claims.UserID, itemID); err != nil {
 		h.logger.Error("mark unplayed", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark unplayed")
@@ -185,7 +197,10 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	// Get current state
 	ud, err := h.userData.Get(r.Context(), claims.UserID, itemID)
@@ -231,7 +246,10 @@ func (h *ProgressHandler) RemoveFromContinueWatching(w http.ResponseWriter, r *h
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 	if err := h.userData.ClearProgress(r.Context(), claims.UserID, itemID); err != nil {
 		h.logger.Error("clear progress", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to remove from continue watching")

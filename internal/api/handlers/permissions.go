@@ -64,9 +64,8 @@ func (h *PermissionsHandler) auditEmit() AuditEmitter {
 // usuario pueda consultarse en /me (ya cubierto por /me, pero exponer
 // el endpoint separado simplifica el panel admin "edit user").
 func (h *PermissionsHandler) GetPermissions(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	u, err := h.store.GetByID(r.Context(), id)
@@ -116,9 +115,8 @@ type SetPermissionsRequest struct {
 //      adicionales aunque tengan el flag. Es la defensa contra
 //      sprawl de admins comprometidos.
 func (h *PermissionsHandler) PutPermissions(w http.ResponseWriter, r *http.Request) {
-	targetID := chi.URLParam(r, "id")
+	targetID := requireParam(w, r, "id")
 	if targetID == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 

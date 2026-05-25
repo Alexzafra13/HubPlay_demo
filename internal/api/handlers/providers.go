@@ -69,7 +69,10 @@ type updateProviderRequest struct {
 
 // Update modifies a provider's configuration (API key, status, priority).
 func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+	name := requireParam(w, r, "name")
+	if name == "" {
+		return
+	}
 
 	var req updateProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -159,7 +162,10 @@ func (h *ProviderHandler) SearchMetadata(w http.ResponseWriter, r *http.Request)
 
 // GetMetadata fetches full metadata for a specific external ID.
 func (h *ProviderHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
-	externalID := chi.URLParam(r, "externalId")
+	externalID := requireParam(w, r, "externalId")
+	if externalID == "" {
+		return
+	}
 	itemType := provider.ItemType(r.URL.Query().Get("type"))
 	if itemType == "" {
 		itemType = provider.ItemMovie

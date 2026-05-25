@@ -91,7 +91,10 @@ func jobToDTO(j *iptvmodel.IPTVScheduledJob) scheduledJobDTO {
 // "never configured" placeholders for missing kinds so the UI can
 // always render both rows without a separate zero-state.
 func (h *IPTVScheduleHandler) List(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccess(r, libraryID) {
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "library not found")
 		return
@@ -134,8 +137,14 @@ type upsertScheduleRequest struct {
 // current value so the UI can save just the interval without
 // accidentally toggling.
 func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
-	kind := chi.URLParam(r, "kind")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
+	kind := requireParam(w, r, "kind")
+	if kind == "" {
+		return
+	}
 	if !h.canAccess(r, libraryID) {
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "library not found")
 		return
@@ -197,8 +206,14 @@ func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 // Delete removes a schedule row. Equivalent to "stop scheduling";
 // the admin keeps the manual Refrescar button in the existing panels.
 func (h *IPTVScheduleHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
-	kind := chi.URLParam(r, "kind")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
+	kind := requireParam(w, r, "kind")
+	if kind == "" {
+		return
+	}
 	if !h.canAccess(r, libraryID) {
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "library not found")
 		return
@@ -222,8 +237,14 @@ func (h *IPTVScheduleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // (or the runner's internal timeout fires) — the admin expects
 // immediate feedback.
 func (h *IPTVScheduleHandler) RunNow(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
-	kind := chi.URLParam(r, "kind")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
+	kind := requireParam(w, r, "kind")
+	if kind == "" {
+		return
+	}
 	if !h.canAccess(r, libraryID) {
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "library not found")
 		return

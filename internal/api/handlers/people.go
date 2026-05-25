@@ -40,7 +40,10 @@ func NewPeopleHandler(people PeopleRepository, imageDir string, logger *slog.Log
 // the client can fall back to its initial-letter placeholder via
 // onError.
 func (h *PeopleHandler) Thumb(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	person, err := h.people.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -92,7 +95,10 @@ func (h *PeopleHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 // frontend falls back to an initial-letter placeholder via the same
 // path it uses on cast strips.
 func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	person, err := h.people.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

@@ -65,7 +65,10 @@ const refreshM3UAsyncTimeout = 10 * time.Minute
 // this check is effectively a documentation anchor today. It becomes
 // load-bearing the day a non-admin role gains access to refresh endpoints.
 func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -122,7 +125,10 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 
 // RefreshEPG triggers an EPG refresh for a library.
 func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return

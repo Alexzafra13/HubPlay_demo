@@ -32,9 +32,8 @@ type libraryChannelOrderRequest struct {
 // per-user endpoint so the frontend can reuse its serialisation
 // code.
 func (h *IPTVHandler) ReplaceLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_LIBRARY_ID", "library id required")
 		return
 	}
 	var req libraryChannelOrderRequest
@@ -66,10 +65,12 @@ type libraryChannelVisibilityRequest struct {
 // each row of the curation panel — avoids re-uploading the full
 // reordered list when the admin just wants to hide one channel.
 func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
-	channelID := chi.URLParam(r, "channelId")
-	if libraryID == "" || channelID == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "libraryId + channelId required")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
 		return
 	}
 	var req libraryChannelVisibilityRequest
@@ -87,9 +88,8 @@ func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http
 // ResetLibraryChannelOrder wipes the admin overlay for a library,
 // restoring the order + visibility from the M3U import.
 func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_LIBRARY_ID", "library id required")
 		return
 	}
 	if err := h.svc.ResetLibraryChannelOrder(r.Context(), libraryID); err != nil {
@@ -106,9 +106,8 @@ func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Re
 // because admins curating need to see what they hid in order to
 // un-hide it, but downstream users must NOT (hard constraint).
 func (h *IPTVHandler) ListLibraryChannelsAdmin(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_LIBRARY_ID", "library id required")
 		return
 	}
 	channels, rows, err := h.svc.GetChannelsForLibraryAdmin(r.Context(), libraryID, true)
