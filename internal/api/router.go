@@ -137,6 +137,17 @@ type Dependencies struct {
 	// compatibilidad); en producción el middleware dynamic lo consulta
 	// con statics+dynamics combinados.
 	AllowedOrigins []string
+	// TrustedProxies es la lista de CIDRs que pertenecen a proxies de
+	// confianza delante del server. Wirea el client-IP middleware:
+	//   - lista vacía ⇒ no se honra X-Forwarded-For (client IP =
+	//     RemoteAddr de la conexión TCP; seguro si el server está
+	//     expuesto directo a Internet).
+	//   - 1+ CIDRs ⇒ ClientIPFromXFF camina XFF saltándose entradas
+	//     dentro de esos prefixes; la primera no-trusted es el cliente.
+	// Cierra la migración de middleware.RealIP (deprecated en chi
+	// v5.3.0 por 3 advisories de IP spoofing — GHSA-3fxj-6jh8-hvhx,
+	// GHSA-rjr7-jggh-pgcp, GHSA-9g5q-2w5x-hmxf).
+	TrustedProxies []string
 	Logger         *slog.Logger
 	Metrics        *observability.Metrics
 	// LogBuffer is the in-memory ring the admin "Logs" surface
@@ -316,14 +327,26 @@ func NewRouter(deps Dependencies) http.Handler {
 	return r
 }
 
-// applyGlobalMiddleware monta el stack que envuelve toda la API: real
+// applyGlobalMiddleware monta el stack que envuelve toda la API: client
 // IP, request id, logging, recoverer, security headers, métricas
 // (cuando wired), CORS (con preferencia por el middleware dynamic) y
 // CSRF. El orden importa — security headers después de Recoverer así
 // que un panic que devuelva 500 sigue cargando headers; antes de CORS
 // así que la misma capa aplica a preflights.
+//
+// Client-IP middleware: usa `ClientIPFromXFF(deps.TrustedProxies...)`
+// si el operador ha declarado proxies de confianza, sino
+// `ClientIPFromRemoteAddr`. Reemplaza `middleware.RealIP` que se
+// deprecó en chi v5.3.0 por IP spoofing (3 CVE incl. Critical 9.3).
+// La nueva API NO muta r.RemoteAddr — el IP va en el ctx; los
+// handlers lo leen con `handlers.ClientIP(r)` (helper local que cae
+// a r.RemoteAddr si el middleware no lo dejó set).
 func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
-	r.Use(middleware.RealIP)
+	if len(deps.TrustedProxies) > 0 {
+		r.Use(middleware.ClientIPFromXFF(deps.TrustedProxies...))
+	} else {
+		r.Use(middleware.ClientIPFromRemoteAddr)
+	}
 	r.Use(middleware.RequestID)
 	r.Use(RequestLogger(deps.Logger))
 	r.Use(middleware.Recoverer)

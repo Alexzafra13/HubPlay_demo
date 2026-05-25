@@ -247,7 +247,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		req.DeviceID = "unknown"
 	}
 
-	token, err := h.auth.Login(r.Context(), req.Username, req.Password, req.DeviceName, req.DeviceID, r.RemoteAddr)
+	token, err := h.auth.Login(r.Context(), req.Username, req.Password, req.DeviceName, req.DeviceID, ClientIP(r))
 	if err != nil {
 		// Audit del intento fallido. Sólo logueamos el username y el
 		// error class — NUNCA la contraseña intentada (ni siquiera
@@ -366,7 +366,7 @@ func (h *AuthHandler) SwitchProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := h.auth.SwitchProfile(
 		r.Context(), claims.UserID, req.ProfileID, req.PIN,
-		req.DeviceName, req.DeviceID, r.RemoteAddr,
+		req.DeviceName, req.DeviceID, ClientIP(r),
 	)
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -518,7 +518,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.auth.RefreshToken(r.Context(), req.RefreshToken, r.RemoteAddr)
+	token, err := h.auth.RefreshToken(r.Context(), req.RefreshToken, ClientIP(r))
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
@@ -961,7 +961,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	h.auditEmit().LogUserCreated(r.Context(), r, u.ID, u.Username, "admin")
 
 	// Auto-login the new admin user
-	token, err := h.auth.Login(r.Context(), req.Username, req.Password, r.UserAgent(), "setup", r.RemoteAddr)
+	token, err := h.auth.Login(r.Context(), req.Username, req.Password, r.UserAgent(), "setup", ClientIP(r))
 	if err != nil {
 		handleServiceError(w, r, err)
 		return

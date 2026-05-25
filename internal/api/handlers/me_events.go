@@ -152,7 +152,7 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	h.logger.Info("user SSE client connected", "user_id", userID, "remote_addr", r.RemoteAddr)
+	h.logger.Info("user SSE client connected", "user_id", userID, "remote_addr", ClientIP(r))
 	fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -162,7 +162,7 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			h.logger.Info("user SSE client disconnected", "user_id", userID, "remote_addr", r.RemoteAddr)
+			h.logger.Info("user SSE client disconnected", "user_id", userID, "remote_addr", ClientIP(r))
 			return
 
 		case <-keepalive.C:

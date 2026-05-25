@@ -2,6 +2,13 @@ server:
   bind: "0.0.0.0"
   port: 8096
   base_url: ""
+  # trusted_proxies: CIDRs de proxies de confianza delante del server.
+  # Decide cómo se extrae el IP del cliente para audit, rate limit y
+  # logs. Lista vacía ⇒ usar IP de la conexión TCP (RemoteAddr), seguro
+  # si el server está expuesto directo a internet. 1+ entradas ⇒ se
+  # honra X-Forwarded-For saltando hops dentro de esos CIDRs; la
+  # primera IP no-trusted es el cliente. Los defaults cubren docker
+  # bridge (172.16/12) + localhost (nginx/traefik en la misma máquina).
   trusted_proxies:
     - "127.0.0.1"
     - "172.16.0.0/12"
