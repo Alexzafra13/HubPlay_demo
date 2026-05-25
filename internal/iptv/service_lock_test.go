@@ -24,11 +24,17 @@ func TestService_RefreshEPG_SecondCallIsRejectedWhileFirstRuns(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	repos := db.NewRepositories(testutil.Driver(), database)
 
-	// Seed a library with an EPG URL that points to a slow httptest server.
-	// The slow server lets us catch the "in-progress" window.
+	// The slow server signals when the first request arrives (= the lock
+	// is held) and blocks until we release it, replacing the old
+	// time.Sleep synchronization.
+	firstRequestArrived := make(chan struct{})
+	releaseServer := make(chan struct{})
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Sleep just long enough for the second caller to race us.
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case firstRequestArrived <- struct{}{}:
+		default:
+		}
+		<-releaseServer
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><tv></tv>`))
 	}))
@@ -61,9 +67,16 @@ func TestService_RefreshEPG_SecondCallIsRejectedWhileFirstRuns(t *testing.T) {
 		firstCount, firstErr = svc.RefreshEPG(context.Background(), "lib-1")
 	}()
 
-	// Give the first refresh a head start so it's holding the gate.
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the first refresh hits the server (= lock is held).
+	select {
+	case <-firstRequestArrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first refresh did not reach the server in time")
+	}
 	secondCount, secondErr = svc.RefreshEPG(context.Background(), "lib-1")
+
+	// Let the server finish so the first goroutine can complete.
+	close(releaseServer)
 	wg.Wait()
 
 	if secondErr == nil {
