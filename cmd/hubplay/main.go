@@ -36,7 +36,6 @@ import (
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
 	"hubplay/internal/retention"
-	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/mdns"
@@ -226,22 +225,53 @@ func run(configPath string) error {
 	_ = providerManager.Register(ctx, provider.NewFanartProvider())
 	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
 
-	// Image storage shared with the HTTP image handler/refresher: the
-	// scanner downloads every poster/backdrop here so re-scans and
-	// admin refreshes write to the same root. Path-mapping is plain
-	// filesystem state, so it's safe to instantiate independent
-	// `pathmap.Store`s pointing at the same directory.
+	// Image storage shared with the HTTP image handler/refresher: el
+	// scanner descarga aquí cada poster/backdrop, los re-scans y los
+	// refreshes admin escriben al mismo root. Pathmap es plain
+	// filesystem state — instances independientes apuntando al mismo
+	// directorio son seguras.
 	imageDir := filepath.Join(filepath.Dir(cfg.Database.Path), "images")
 	scannerPathmap := pathmap.New(imageDir)
 
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, repos.ItemMetadataLocks, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
-	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, repos.ItemValues, scnr, logger)
-	// Drain librería en LIFO de la fase services — sus goroutines de
-	// auto-scan tocan DB y deben terminar ANTES del database.Close().
-	lc.AddService("library service", func(context.Context) error {
-		libraryService.Shutdown()
-		return nil
+	// ═══ Phase 4a: Library ═══
+	//
+	// `library.New` agrupa los 9 componentes long-lived del feature
+	// library (scanner + service + 2 schedulers + 2 detectores
+	// skip-intro + fingerprinter + fs watcher), aplica el
+	// cross-wiring (scanner inyectado en service; segment-detector +
+	// fingerprinter suscritos al bus) y arranca los workers contra
+	// `ctx`. `libMod.RegisterWith(lc)` añade los 6 hooks de shutdown
+	// en orden (workers add-order; services LIFO empezando por
+	// library service que drena scans). Cierra la fase library del
+	// olor G del audit 2026-05-14 — con esto y la fase iptv (#417)
+	// + lifecycle.go (#396) el olor queda al 100 %.
+	libMod, err := library.New(ctx, library.Deps{
+		Libraries:           repos.Libraries,
+		Items:               repos.Items,
+		MediaStreams:        repos.MediaStreams,
+		Metadata:            repos.Metadata,
+		ExternalIDs:         repos.ExternalIDs,
+		Images:              repos.Images,
+		Chapters:            repos.Chapters,
+		EpisodeSegments:     repos.EpisodeSegments,
+		People:              repos.People,
+		ItemValues:          repos.ItemValues,
+		Studios:             repos.Studios,
+		Collections:         repos.Collections,
+		ItemMetadataLocks:   repos.ItemMetadataLocks,
+		Channels:            repos.Channels,
+		Providers:           providerManager,
+		Prober:              prober,
+		EventBus:            eventBus,
+		Pathmap:             scannerPathmap,
+		ImageDir:            imageDir,
+		FingerprintCacheDir: cfg.Streaming.EffectiveCacheDir(),
+		Logger:              logger,
 	})
+	if err != nil {
+		return err
+	}
+	libMod.RegisterWith(lc)
 
 	// Periodic SQLite query-planner refresh + FTS5 merge. Fires every
 	// 6h once started; first tick is on the interval, not immediately,
@@ -249,79 +279,6 @@ func run(configPath string) error {
 	// No-op on Postgres (autovacuum handles ANALYZE on its own schedule).
 	stopOptimize := db.StartPeriodicOptimize(ctx, cfg.Database.Driver, database, logger)
 	defer stopOptimize()
-
-	// ═══ Phase 4a: Library Scan Scheduler ═══
-	scanScheduler := library.NewScheduler(libraryService, logger)
-	scanScheduler.Start(ctx)
-	lc.AddWorker("scan scheduler", func(context.Context) error {
-		scanScheduler.Stop()
-		return nil
-	})
-
-	// ═══ Phase 4a-bis: Image Refresh Scheduler ═══
-	//
-	// The scan scheduler reacts to filesystem changes (new files appear in
-	// a library); image freshness is a different signal — TMDb periodically
-	// publishes better artwork for shows that already exist on disk, and
-	// without a periodic sweep nothing ever updates them. Weekly is
-	// sufficient: provider art doesn't change daily, and locked images
-	// (admin curation) are skipped per-kind by the refresher itself
-	// (ADR-003) so curation work is never overwritten.
-	imageRefresher := library.NewImageRefresher(
-		repos.Items, repos.ExternalIDs, repos.Images, providerManager,
-		scannerPathmap, imageDir, logger,
-	)
-	imageRefreshScheduler := library.NewImageRefreshScheduler(repos.Libraries, imageRefresher, logger)
-	imageRefreshScheduler.Start(ctx)
-	lc.AddWorker("image refresh scheduler", func(context.Context) error {
-		imageRefreshScheduler.Stop()
-		return nil
-	})
-
-	// ═══ Phase 4a-ter: Episode Segment Detector (skip-intro) ═══
-	//
-	// Subscribes to library.scan.completed and writes intro / outro /
-	// recap markers for each episode by reading its chapter titles.
-	// Secondary detector — does NOT block scans, runs in its own
-	// goroutine off the bus. The unsubscribe handle is held for the
-	// process lifetime; bus.Subscribe leaks the handler if it's
-	// never released.
-	segmentDetector := library.NewSegmentDetector(
-		repos.Items, repos.Chapters, repos.EpisodeSegments, eventBus, logger,
-	)
-	segmentDetectorUnsub := segmentDetector.Start(ctx)
-	defer segmentDetectorUnsub()
-
-	// Phase 4a-quinquies: Audio fingerprint segment detector.
-	//
-	// Phase 2 of the skip-intro feature — kicks in when the file
-	// has no chapter markers (most cases). Listens to the same
-	// library.scan.completed event as the chapter detector, runs
-	// chromaprint over each episode's first / last few minutes,
-	// and writes any common runs as fingerprint-source segments.
-	// Disabled at runtime when fpcalc isn't on PATH.
-	fingerprinter := library.NewFingerprinter(cfg.Streaming.EffectiveCacheDir())
-	segmentFingerprinter := library.NewSegmentFingerprinter(
-		repos.Items, repos.EpisodeSegments, fingerprinter, eventBus, logger,
-	)
-	segmentFingerprinterUnsub := segmentFingerprinter.Start(ctx)
-	defer segmentFingerprinterUnsub()
-
-	// ═══ Phase 4a-quater: Filesystem Watcher ═══
-	//
-	// Reactive complement to scanScheduler — when a file is copied
-	// into a library path, the watcher fires a scan within ~2 s
-	// instead of waiting for the next scheduled tick (15 min).
-	// Fail-soft on platforms without inotify/equivalent (Docker on
-	// Windows with bind mounts is the realistic case): the start
-	// error is logged and the scheduler keeps doing its job.
-	fsWatcher := library.NewFSWatcher(libraryService, logger)
-	if err := fsWatcher.Start(ctx); err != nil {
-		logger.Warn("filesystem watcher unavailable, scheduler-only mode",
-			"error", err)
-	} else {
-		defer fsWatcher.Stop()
-	}
 
 	// ═══ Phase 4b: Streaming ═══
 	//
@@ -648,7 +605,7 @@ func run(configPath string) error {
 		Auth:          authService,
 		DeviceCode:    deviceCodeService,
 		Users:         userService,
-		Libraries:     libraryService,
+		Libraries:     libMod.Service,
 		StreamManager: streamManager,
 		IPTV:          iptvMod.Service,
 		IPTVProxy:     iptvMod.Proxy,
@@ -670,7 +627,7 @@ func run(configPath string) error {
 		UserPreferences: repos.UserPreferences,
 		Home:            repos.Home,
 		Providers:     providerManager,
-		Scanner:       scnr,
+		Scanner:       libMod.Scanner,
 		ExternalIDs:   repos.ExternalIDs,
 		LibraryRepo:   repos.Libraries,
 		ProviderRepo:  repos.Providers,
