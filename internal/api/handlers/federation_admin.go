@@ -40,7 +40,7 @@ func (h *FederationAdminHandler) GetServerIdentity(w http.ResponseWriter, r *htt
 	if info.AdvertisedURL == "" {
 		info.AdvertisedURL = deriveURLFromRequest(r)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+	respondData(w, http.StatusOK, infoToWire(info))
 }
 
 // UpdateServerIdentityRequest es el body aceptado por el PUT del
@@ -87,7 +87,7 @@ func (h *FederationAdminHandler) UpdateServerIdentity(w http.ResponseWriter, r *
 	if info.AdvertisedURL == "" {
 		info.AdvertisedURL = deriveURLFromRequest(r)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+	respondData(w, http.StatusOK, infoToWire(info))
 }
 
 // UploadServerAvatar acepta una imagen multipart en POST
@@ -129,7 +129,7 @@ func (h *FederationAdminHandler) UploadServerAvatar(w http.ResponseWriter, r *ht
 	if info.AdvertisedURL == "" {
 		info.AdvertisedURL = deriveURLFromRequest(r)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+	respondData(w, http.StatusOK, infoToWire(info))
 }
 
 // DeleteServerAvatar borra la foto del servidor. Idempotente:
@@ -185,11 +185,11 @@ func (h *FederationAdminHandler) GenerateInvite(w http.ResponseWriter, r *http.R
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite")
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]any{"data": inviteWire{
+	respondData(w, http.StatusCreated, inviteWire{
 		ID:        inv.ID,
 		Code:      inv.Code,
 		ExpiresAt: inv.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
-	}})
+	})
 }
 
 // ListActiveInvites returns codes that are still usable.
@@ -208,7 +208,7 @@ func (h *FederationAdminHandler) ListActiveInvites(w http.ResponseWriter, r *htt
 			ExpiresAt: inv.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // ─── Peer pairing (we received an invite from the remote admin) ─────
@@ -240,7 +240,7 @@ func (h *FederationAdminHandler) ProbePeer(w http.ResponseWriter, r *http.Reques
 			"could not reach the peer; check the URL and try again")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+	respondData(w, http.StatusOK, infoToWire(info))
 }
 
 type acceptInviteRequest struct {
@@ -298,7 +298,7 @@ func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Req
 		respondError(w, r, status, code, msg)
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]any{"data": peerToWire(peer)})
+	respondData(w, http.StatusCreated, peerToWire(peer))
 }
 
 // ─── Peer CRUD ──────────────────────────────────────────────────────
@@ -315,7 +315,7 @@ func (h *FederationAdminHandler) ListPeers(w http.ResponseWriter, r *http.Reques
 	for _, p := range peers {
 		out = append(out, peerToWire(p))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // GetPeer returns a single peer by local UUID.
@@ -335,7 +335,7 @@ func (h *FederationAdminHandler) GetPeer(w http.ResponseWriter, r *http.Request)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch peer")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": peerToWire(p)})
+	respondData(w, http.StatusOK, peerToWire(p))
 }
 
 // ─── Library shares ─────────────────────────────────────────────────
@@ -366,7 +366,7 @@ func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Reque
 	for _, s := range shares {
 		out = append(out, shareToWire(s))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // CreateShare opts a library into being visible to a peer with the
@@ -416,7 +416,7 @@ func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Requ
 		respondError(w, r, status, code, msg)
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]any{"data": shareToWire(share)})
+	respondData(w, http.StatusCreated, shareToWire(share))
 }
 
 // DeleteShare removes a single share. Idempotent — missing share
@@ -472,9 +472,9 @@ type federationSettingsWire struct {
 // otros sin romper el shape - cualquier feature nueva se añade como
 // campo opcional).
 func (h *FederationAdminHandler) GetFederationSettings(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]any{"data": federationSettingsWire{
+	respondData(w, http.StatusOK, federationSettingsWire{
 		AcceptPairingRequests: h.mgr.AcceptingPairingRequests(r.Context()),
-	}})
+	})
 }
 
 // UpdateFederationSettings persiste el toggle. Idempotente.
@@ -489,9 +489,9 @@ func (h *FederationAdminHandler) UpdateFederationSettings(w http.ResponseWriter,
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to update settings")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": federationSettingsWire{
+	respondData(w, http.StatusOK, federationSettingsWire{
 		AcceptPairingRequests: h.mgr.AcceptingPairingRequests(r.Context()),
-	}})
+	})
 }
 
 // ─── Pairing requests "Steam-style" (migration 048) ────────────────
@@ -574,7 +574,7 @@ func (h *FederationAdminHandler) SendPairingRequest(w http.ResponseWriter, r *ht
 		respondError(w, r, status, code, msg)
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]any{"data": pendingRequestToWire(pending)})
+	respondData(w, http.StatusCreated, pendingRequestToWire(pending))
 }
 
 // ListPairingRequests — GET /admin/peers/pairing-requests.
@@ -590,7 +590,7 @@ func (h *FederationAdminHandler) ListPairingRequests(w http.ResponseWriter, r *h
 	for _, p := range reqs {
 		out = append(out, pendingRequestToWire(p))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // AcceptPairingRequest — POST /admin/peers/pairing-requests/{id}/accept.
@@ -616,7 +616,7 @@ func (h *FederationAdminHandler) AcceptPairingRequest(w http.ResponseWriter, r *
 		respondError(w, r, http.StatusBadRequest, "ACCEPT_FAILED", "could not accept pairing request")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": peerToWire(peer)})
+	respondData(w, http.StatusOK, peerToWire(peer))
 }
 
 // DeclinePairingRequest — POST /admin/peers/pairing-requests/{id}/decline.
@@ -691,7 +691,7 @@ func (h *FederationAdminHandler) RefreshPeer(w http.ResponseWriter, r *http.Requ
 			"could not reach the peer to refresh its branding")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": peerToWire(peer)})
+	respondData(w, http.StatusOK, peerToWire(peer))
 }
 
 // RevokePeer terminates a peer. 204 on success, 404 on unknown id.

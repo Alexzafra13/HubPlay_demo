@@ -143,5 +143,5 @@ func (h *AuditLogHandler) EventTypes(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": types})
+	respondData(w, http.StatusOK, types)
 }

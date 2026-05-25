@@ -401,7 +401,7 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		result = append(result, entry)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // Favorites returns items the user has marked as favorite.
@@ -463,7 +463,7 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 		result = append(result, entry)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // NextUp returns the next unwatched episode per series.
@@ -501,5 +501,5 @@ func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }

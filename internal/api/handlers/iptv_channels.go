@@ -90,7 +90,7 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		result = append(result, dto)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // GetChannel returns a single channel.
@@ -141,7 +141,7 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // Groups returns channel group names for a library.
@@ -158,7 +158,7 @@ func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": groups})
+	respondData(w, http.StatusOK, groups)
 }
 
 // Stream proxies a live IPTV stream to the client.
@@ -511,7 +511,7 @@ func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 		result = append(result, programToJSON(p))
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // bulkScheduleMaxChannels caps how many channels a single request may
@@ -561,7 +561,7 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(allowed) == 0 {
-		respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{}})
+		respondData(w, http.StatusOK, map[string]any{})
 		return
 	}
 
@@ -580,7 +580,7 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 		result[chID] = progs
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // parseBulkScheduleRequest normalises the two transports (GET query,

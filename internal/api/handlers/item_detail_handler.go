@@ -126,7 +126,7 @@ func (h *ItemDetailHandler) Get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": detail})
+	respondData(w, http.StatusOK, detail)
 }
 
 // buildItemDetail orquesta el seven-repo fan-out para la respuesta
@@ -624,5 +624,5 @@ func (h *ItemDetailHandler) Children(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }

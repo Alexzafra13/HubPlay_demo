@@ -190,9 +190,9 @@ func (h *AdminStorageHandler) Disks(w http.ResponseWriter, r *http.Request) {
 		return disks[i].UsedBytes > disks[j].UsedBytes
 	})
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+	respondData(w, http.StatusOK, map[string]any{
 		"disks": disks,
-	}})
+	})
 }
 
 // mountFor resuelve la library path al mount que la contiene,

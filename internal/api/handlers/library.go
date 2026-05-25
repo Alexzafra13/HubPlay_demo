@@ -76,7 +76,7 @@ func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditEmit().LogLibraryCreated(r.Context(), r, lib.ID, lib.Name, lib.ContentType)
 
-	respondJSON(w, http.StatusCreated, map[string]any{"data": libraryResponse(lib)})
+	respondData(w, http.StatusCreated, libraryResponse(lib))
 }
 
 func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 		items[i] = resp
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": items})
+	respondData(w, http.StatusOK, items)
 }
 
 func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +122,7 @@ func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	resp := libraryResponse(lib)
 	resp["item_count"] = count
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": libraryResponse(lib)})
+	respondData(w, http.StatusOK, libraryResponse(lib))
 }
 
 func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +281,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 		resp["next_cursor"] = items[len(items)-1].ID
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // AllItems lists items across every library, paginated and sorted.
@@ -344,7 +344,7 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 		resp["next_cursor"] = items[len(items)-1].ID
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // Genres exposes the catalogue's genre vocabulary so the /movies and
@@ -366,7 +366,7 @@ func (h *LibraryHandler) Genres(w http.ResponseWriter, r *http.Request) {
 	for i, g := range genres {
 		data[i] = map[string]any{"name": g.Name, "count": g.Count}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {

@@ -67,7 +67,7 @@ func (h *IPTVHandler) ReplaceChannelOrder(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.publishOrderUpdated(claims.UserID)
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
+	respondData(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 type meIPTVVisibilityRequest struct {
@@ -112,7 +112,7 @@ func (h *IPTVHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.publishOrderUpdated(claims.UserID)
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
+	respondData(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 // ResetChannelOrder wipes the user's overrides, restoring the admin
@@ -128,7 +128,7 @@ func (h *IPTVHandler) ResetChannelOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.publishOrderUpdated(claims.UserID)
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
+	respondData(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func contains(s []string, target string) bool {

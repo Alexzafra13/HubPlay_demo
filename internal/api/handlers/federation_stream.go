@@ -352,7 +352,7 @@ func (h *FederationStreamHandler) Subtitles(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if h.mediaStreams == nil {
-		respondJSON(w, http.StatusOK, map[string]any{"data": []map[string]any{}})
+		respondData(w, http.StatusOK, []map[string]any{})
 		return
 	}
 
@@ -376,7 +376,7 @@ func (h *FederationStreamHandler) Subtitles(w http.ResponseWriter, r *http.Reque
 			"default":  s.IsDefault,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": subs})
+	respondData(w, http.StatusOK, subs)
 }
 
 // SubtitleTrack extracts and serves a single subtitle track as

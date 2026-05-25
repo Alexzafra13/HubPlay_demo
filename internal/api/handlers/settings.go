@@ -194,7 +194,7 @@ func (h *SettingsHandler) List(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to read settings")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": settingsResponse{Settings: descriptors}})
+	respondData(w, http.StatusOK, settingsResponse{Settings: descriptors})
 }
 
 // Update applies one setting at a time. PUT body shape:
@@ -243,10 +243,10 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	descriptors, err := h.describeAll(r.Context())
 	if err != nil {
 		h.logger.Warn("describe after update", "error", err)
-		respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"key": body.Key, "value": normalised}})
+		respondData(w, http.StatusOK, map[string]any{"key": body.Key, "value": normalised})
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": settingsResponse{Settings: descriptors}})
+	respondData(w, http.StatusOK, settingsResponse{Settings: descriptors})
 }
 
 // Reset clears the override for a key so the next read falls back to
@@ -268,10 +268,10 @@ func (h *SettingsHandler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	descriptors, err := h.describeAll(r.Context())
 	if err != nil {
-		respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"key": key, "reset": true}})
+		respondData(w, http.StatusOK, map[string]any{"key": key, "reset": true})
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": settingsResponse{Settings: descriptors}})
+	respondData(w, http.StatusOK, settingsResponse{Settings: descriptors})
 }
 
 // describeAll builds the descriptor slice from current DB + boot

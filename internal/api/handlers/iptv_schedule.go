@@ -120,7 +120,7 @@ func (h *IPTVScheduleHandler) List(w http.ResponseWriter, r *http.Request) {
 			Enabled:       false,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // upsertRequest is the body accepted by PUT /schedule/{kind}.
@@ -191,7 +191,7 @@ func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": jobToDTO(saved)})
+	respondData(w, http.StatusOK, jobToDTO(saved))
 }
 
 // Delete removes a schedule row. Equivalent to "stop scheduling";
@@ -253,7 +253,7 @@ func (h *IPTVScheduleHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": jobToDTO(saved)})
+	respondData(w, http.StatusOK, jobToDTO(saved))
 }
 
 func (h *IPTVScheduleHandler) canAccess(r *http.Request, libraryID string) bool {

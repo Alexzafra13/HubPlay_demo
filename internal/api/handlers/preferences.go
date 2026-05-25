@@ -58,7 +58,7 @@ func (h *PreferencesHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 	for _, p := range rows {
 		out[p.Key] = p.Value
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 type setPreferenceRequest struct {

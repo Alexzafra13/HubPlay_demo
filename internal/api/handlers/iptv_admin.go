@@ -155,7 +155,7 @@ func (h *IPTVHandler) PublicCountries(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // ImportPublicIPTV creates a livetv library for a country and triggers M3U import.

@@ -29,6 +29,15 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 	}
 }
 
+// respondData es el atajo para el envelope canónico `{"data": payload}`.
+// Elimina 115 sites de `map[string]any{"data": ...}` dispersos en los
+// handlers (audit F14-6-a). Mismo wire shape — sólo compacta el caller.
+func respondData(w http.ResponseWriter, status int, payload any) {
+	respondJSON(w, status, struct {
+		Data any `json:"data"`
+	}{payload})
+}
+
 func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }

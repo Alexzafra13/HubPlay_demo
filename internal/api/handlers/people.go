@@ -154,7 +154,7 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["filmography"] = entries
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // isUnderImageDir delega en isPathUnderImageDir (ADR-021): el guard

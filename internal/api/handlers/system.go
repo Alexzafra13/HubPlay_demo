@@ -405,7 +405,7 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// ── Libraries (inventory rollup) ───────────────────────────────────
 	out.Libraries = h.collectLibraryStats(r.Context())
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // collectLibraryStats walks every configured library and returns a

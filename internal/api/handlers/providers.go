@@ -57,7 +57,7 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = append(result, entry)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 type updateProviderRequest struct {
@@ -154,7 +154,7 @@ func (h *ProviderHandler) SearchMetadata(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 // GetMetadata fetches full metadata for a specific external ID.
@@ -172,7 +172,7 @@ func (h *ProviderHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // GetImages fetches images for an item by its external IDs.
@@ -212,7 +212,7 @@ func (h *ProviderHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 // SearchSubtitles searches for subtitles across all providers.
@@ -257,7 +257,7 @@ func (h *ProviderHandler) SearchSubtitles(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 // maskAPIKey returns a masked version of an API key for display.
