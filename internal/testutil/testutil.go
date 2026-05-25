@@ -154,6 +154,16 @@ func newTestPostgresDB(tb testing.TB) *sql.DB {
 	return testDB
 }
 
+// closePostgresAdmin cierra el singleton admin pool si está inicializado.
+// Llamado desde RunWithGoleak antes de verificar leaks. No-op en runs
+// SQLite (el singleton nunca se inicializa).
+func closePostgresAdmin() {
+	if pgAdminDB != nil {
+		_ = pgAdminDB.Close()
+		pgAdminDB = nil
+	}
+}
+
 func initPostgresAdmin() {
 	raw := os.Getenv(envTestPostgresDSN)
 	if raw == "" {
