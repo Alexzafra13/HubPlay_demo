@@ -6,12 +6,18 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-25, extensión post-cierre — G fase iptv)
+## 🔭 Estado actual (2026-05-25, extensión post-cierre — G al 100 %)
 
-Sesión corta sobre la "todo mergeado" ya cerrada. **Una PR
-estructural cerrada**: G fase iptv (`iptv.Module`) — la primera de
-las dos sub-fases que faltaban para llevar G al 100 % (sólo queda
-library.Module).
+Sesión corta sobre la "todo mergeado" ya cerrada. **Dos PRs
+estructurales** consecutivas cerraron el olor G del audit
+2026-05-14 al 100 %:
+
+1. **G fase iptv** (`iptv.Module`, PR #417, mergeada).
+2. **G fase library** (`library.Module`, rama
+   `claude/g-library-module`).
+
+Con `lifecycle.go` (#396, ya en main) + las dos PRs nuevas, las
+tres piezas del refactor propuesto en el audit están en su sitio.
 
 **20 PRs en la sesión 2026-05-25 base** (#396-#415). Todas mergeadas. 0 PRs abiertas al inicio.
 
@@ -47,7 +53,7 @@ Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, 
 
 ### Arquitectónicos (sesión grande cada uno)
 
-- ~~**G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado~~ — **iptv.Module cerrado en extensión 2026-05-25** (rama `claude/g-iptv-module`). Queda `library.Module` (misma plantilla aplicada al paquete library).
+- ~~**G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado~~ — **cerrada al 100 %** (iptv.Module #417 + library.Module en `claude/g-library-module`, post lifecycle.go #396).
 - **H** — 22 `*db.X` → interfaces en Dependencies
 - **LL** — Transcoder stateless (cmd/cancel/done a ManagedSession)
 
@@ -87,6 +93,111 @@ Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, 
 - **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
 - **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🧩 Sesión 2026-05-25 (extensión post-cierre, parte II) — G fase library: `library.Module`
+
+Sigue inmediatamente a G fase iptv (mismo día). Nuevo
+`internal/library/module.go` (~245 LoC) agrupa los 9 componentes
+long-lived del feature library — el feature con mayor surface de
+todos los del repo.
+
+### Componentes agrupados
+
+| Componente | Tipo | Lifecycle |
+|---|---|---|
+| `Scanner` | `*scanner.Scanner` | sin Start/Stop propio — driven por service |
+| `Service` | `*library.Service` | `Shutdown()` drena bgWG (scans en vuelo) |
+| `ScanScheduler` | `*Scheduler` | `Start(ctx)` + `Stop()` |
+| `ImageRefresher` | `*ImageRefresher` | sin lifecycle — call-on-demand |
+| `ImageRefreshScheduler` | `*ImageRefreshScheduler` | `Start(ctx)` + `Stop()` |
+| `Fingerprinter` | `*Fingerprinter` | helper puro (fpcalc wrapper) |
+| `SegmentDetector` | `*SegmentDetector` | suscriptor del bus; `Start()` devuelve unsub que drena bgWG |
+| `SegmentFingerprinter` | `*SegmentFingerprinter` | idem; fail-soft sin fpcalc |
+| `FSWatcher` | `*FSWatcher` | `Start(ctx)` puede fallar (sin inotify), fail-soft |
+
+### Cross-wiring que el Module encapsula
+
+- `scanner.New(...)` con 16 args → injected en `library.NewService(... scnr ...)`.
+- Los dos detectores se atan al event.Bus en `library.scan.completed`
+  dentro de su propio `Start`; el Module captura los dos handles de
+  unsub para llamarlos en shutdown (sin ellos el bus filtra
+  handlers + las goroutines de `DetectLibrary` no se drenan — audit
+  olor Y).
+- `fsWatcher.Start` puede fallar sin que el módulo aborte el boot
+  (boolean `fsWatcherStarted` decide si registrar el hook de Stop
+  o saltárselo).
+
+### Orden de shutdown en RegisterWith
+
+Workers (fase 1, add-order):
+
+1. scan scheduler
+2. image refresh scheduler
+3. fs watcher *(sólo si arrancó OK)*
+
+Services (fase 3, **LIFO** ⇒ último registrado = primero parado):
+
+| Orden de registro | Orden de shutdown |
+|---:|---|
+| 1. segment detector | 3. último — drena bgWG de DetectLibrary |
+| 2. segment fingerprinter | 2. drena bgWG de DetectLibrary audio |
+| 3. library service | 1. **primero** — drena scans en vuelo |
+
+La inversión es deliberada: library.Service.Shutdown drena scans
+que pueden emitir `library.scan.completed` durante el drain. Si
+desuscribimos los detectores primero, esos eventos finales se
+pierden y no se generan markers de skip-intro para el último scan.
+Manteniendo los detectores activos hasta después del library
+Shutdown, el último scan SÍ produce markers — y luego los unsubs
+drenan limpiamente sus propias goroutines.
+
+### Aislamiento
+
+`library/module.go` añade 6 imports nuevos al paquete library
+(`context`, `slog`, `db`, `event`, `pathmap`, `probe`, `provider`,
+`scanner`) — **todos** ya existentes en el paquete por otros
+ficheros. **Cero imports nuevos cross-paquete**. El paquete sigue
+libre de `config`/`observability`/`stream`.
+
+### Impacto en main.go
+
+- `cmd/hubplay/main.go`: bloque library 88 → 45 LoC (**−43 LoC**).
+- `import "hubplay/internal/scanner"` desaparece — el Module lo
+  encapsula.
+- 8 variables locales (`scnr`, `libraryService`, `scanScheduler`,
+  `imageRefresher`, `imageRefreshScheduler`, `segmentDetector`,
+  `segmentFingerprinter`, `fingerprinter`, `fsWatcher`) → 1
+  (`libMod`).
+- 4 `defer X.Stop()` históricos desaparecen — RegisterWith los
+  lleva al lifecycle ordenado.
+- `api.Dependencies.Libraries` / `.Scanner` ahora vienen de
+  `libMod.Service` / `libMod.Scanner` (preservando surface).
+
+### Tests
+
+`go test -count=1 ./internal/library/... ./internal/scanner/...
+./internal/api/...` verde sin modificaciones — cero churn de
+behaviour.
+
+### G cerrada al 100 %
+
+Las tres piezas del refactor propuesto en el audit 2026-05-14
+están en su sitio:
+
+1. **`cmd/hubplay/lifecycle.go`** (#396) — sustituye el `runtime`
+   god-struct por phased `lc.AddWorker/AddService`.
+2. **`internal/iptv/module.go`** (#417) — feature module IPTV.
+3. **`internal/library/module.go`** (esta PR) — feature module
+   library.
+
+`main.run` pasa de los 645 LoC originales del audit a ~485 LoC
+(−25 %), sin contar el lifecycle.go separado. Los **6 olores
+estructurales altos** del audit están cerrados (A+M, B+J, CC, P,
+W, F14-2-a) más los **5 olores composition-root** (V, JJ, LL, G,
+H mountXxx). Sólo queda Dependencies-as-interfaces (H parte 2) y
+LL stateless como sesiones grandes futuras.
 
 ---
 

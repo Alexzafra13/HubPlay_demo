@@ -21,7 +21,7 @@ en este doc (no se edita el audit original).
 | 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
 | 4 | ✅ cerrada | Split de god-handlers/services | P, Z, QQ | Sesión 2026-05-21 tarde (PRs #384, #386+#388, #389) |
 | 5 | ✅ cerrada | Refactor estructural `iptv/` | CC (fase 1 + 2) | Fase 1 sesión tarde-noche (PR #390); fase 2 sesión post-cierre (PR #392) |
-| 6 | 🔄 en curso | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, G (lifecycle ✅ + iptv ✅, library pendiente), **H mountXxx ✅** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G lifecycle.go en main, G fase iptv cerrada sesión 2026-05-25 (rama `claude/g-iptv-module`); H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC) — Dependencies-as-interfaces queda para iteración aparte; sólo queda library.Module |
+| 6 | ✅ cerrada | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, ~~G~~ (lifecycle ✅ + iptv ✅ + library ✅), **H mountXxx ✅** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G lifecycle.go en main (#396), G fase iptv cerrada en #417, G fase library cerrada en sesión 2026-05-25 (rama `claude/g-library-module`) — **olor G al 100 %**; H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC) — Dependencies-as-interfaces queda para iteración aparte |
 | 7 | 🔄 en curso | Cosmética + schema | D, X, ~~W~~, BB, ~~UUU-mig~~ | W cerrada sesión post-cierre (PR #393, scanner.go 1491 → 332 LoC); D/X/BB pendientes |
 | 8 | 🔄 en curso | Polish de calidad de código | ~~F14-2-a~~ ✅, F14-X, F15-X, F16-X | F14-2-a cerrado sesión 2026-05-21 noche tardía II — `BuildFFmpegArgs` 13 params → `TranscodeRequest` struct |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
@@ -834,6 +834,68 @@ fallo de `internal/clock` en local es WDAC de Windows bloqueando el
 **Cierra la fase iptv del olor G al 100 %**. Queda library.Module
 (misma plantilla aplicada al paquete library, que cierra G por
 completo).
+
+**✅ G fase library — `library.Module` agrupa los 9 componentes
+library** (rama `claude/g-library-module`)
+
+Sigue inmediatamente a la fase iptv (mismo día). Nuevo
+`internal/library/module.go` (~245 LoC) con tipo `Module` que
+agrupa los 9 componentes long-lived del feature library:
+
+- `*scanner.Scanner` (paquete propio — library ya lo importaba, sin
+  ciclo nuevo)
+- `*Service` (libraryService — recibe el scanner como arg directo)
+- `*Scheduler` (scan periódico, 15 min)
+- `*ImageRefresher` + `*ImageRefreshScheduler` (poster/backdrop
+  freshness, weekly)
+- `*SegmentDetector` (skip-intro chapter-based; suscriptor de
+  `library.scan.completed`)
+- `*Fingerprinter` + `*SegmentFingerprinter` (skip-intro audio
+  fingerprint fallback; suscriptor del mismo event; fail-soft sin
+  fpcalc)
+- `*FSWatcher` (reactivo a fs changes — 2s en vez de 15min;
+  fail-soft sin inotify en la plataforma)
+
+`library.New(ctx, Deps)` arranca workers (`scanScheduler.Start`,
+`imageRefreshSched.Start`, `segDetector.Start` → unsub captured,
+`segFingerprinter.Start` → unsub captured, `fsWatcher.Start` →
+boolean started captured). Cero cross-wiring externo entre módulos
+— scanner se inyecta en libraryService dentro de New; los dos
+detectores se atan al event.Bus en su propio Start.
+
+`library.Module.RegisterWith(lc)` añade 6 hooks de shutdown:
+
+- Workers (fase 1, add-order): `scan scheduler` →
+  `image refresh scheduler` → `fs watcher` (sólo si arrancó).
+- Services (fase 3, LIFO ⇒ último registrado = primero parado):
+  registrados en orden `segment detector` → `segment fingerprinter`
+  → `library service`. LIFO ⇒ library service primero (drena scans
+  que pueden emitir `library.scan.completed` con los dos detectores
+  aún suscritos), después fingerprinter y por último detector (los
+  unsubs drenan sus goroutines de DetectLibrary aún en vuelo —
+  audit olor Y).
+
+`Deps` mantiene `library` libre de imports hacia `config` — main
+pre-resuelve `ImageDir` y `FingerprintCacheDir`. Los 14 repos +
+4 singletons (`Providers`, `Prober`, `EventBus`, `Pathmap`) llegan
+explícitos en el struct.
+
+`cmd/hubplay/main.go`: bloque library de **88 LoC → 45 LoC**
+(−43 LoC). Los 4 `defer X.Stop()` históricos (segmentDetectorUnsub,
+segmentFingerprinterUnsub, fsWatcher.Stop, libraryService.Shutdown
+vía AddService) desaparecen del run() main — ahora viven dentro
+de RegisterWith. Import del paquete `scanner` desaparece de
+main.go (lo lleva library.Module por dentro).
+
+Tests verdes sin modificaciones: `internal/library` 5s,
+`internal/scanner` 2s, `internal/api` 8s, `internal/api/handlers`
+19s. Cero churn de behaviour.
+
+**Cierra el olor G al 100 %**. Las tres piezas (lifecycle.go en
+#396, iptv.Module en #417, library.Module en esta sesión)
+componen la solución completa propuesta en el audit
+2026-05-14:`lc.AddXxx` reemplaza el `runtime` god-struct + cada
+feature module agrupa su wiring.
 
 ### Pendiente
 
