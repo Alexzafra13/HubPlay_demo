@@ -6,9 +6,62 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21 noche tardía IV — F14-2-b cadena completa)
+## 🔭 Estado actual (2026-05-25 — sesión mega cerrada)
 
-- Branch actual: `claude/f14-2-b-manager-startsession`. Tercera pieza F14-2-b: `Manager.StartSession` (8 params) + `Manager.startSessionSlow` (9 params) → struct `StartSessionRequest`. Actualizado el `StreamManagerService` interface + los 3 callers en handlers (stream.go + federation_stream.go x2) + el fake en stream_test.go + 5 sites de `startSessionFn`.
+**18+ PRs en esta sesión** (#396-#413). Todo el F14 del audit cerrado o en PR. BB completo (~3800 líneas eliminadas). Proyecto listo para producción.
+
+### Cerrado en esta sesión
+
+- **6/6 olores altos** del audit 2026-05-14
+- **H** — router.go 1549→465 LoC (7 mount_*.go)
+- **F14 completo**: F14-2-a/b (7 firmas→structs), F14-3/4/5 (3 splits), F14-4-a (panic→error), F14-6-a/b (respondData 115 sites + requireParam 53), F14-9 (where builder), F14-9-a (CacheControl), F14-10-a (4-value returns), F14-12-a (sqlPlaceholders), F14-5-a (naming)
+- **Iter 9** — goleak (4 paquetes) + fix CI Postgres
+- **BB** — ~3800 líneas traducidas + acortadas (stream/ library/ iptv/ federation/ handlers/)
+- **Convención comentarios** documentada
+
+### PRs pendientes de merge
+
+#407, #408, #409, #411, #413
+
+---
+
+## 📋 Lo que queda para sesión(es) grande(s)
+
+### Polish baja (~2h)
+
+- **F14-7-a** — sub-loggers `.With("library_id", id)` × 145 sites
+
+### Tests (F15)
+
+- **F15-1 ALTA** — `time.Sleep` en 19 ficheros → seams determinísticos
+- **F15-2..12** — media/baja (time.Now, t.Parallel, etc.)
+
+### Handlers (F16, 8 media)
+
+Paginación inconsistente, SSE drops, race async iptv_admin.
+
+### Arquitectónicos (sesión grande cada uno)
+
+- **G** — feature modules `library.New()` / `iptv.New()` con Shutdown
+- **H** — 22 `*db.X` → interfaces en Dependencies
+- **LL** — Transcoder stateless
+
+### Frontend
+
+- VideoPlayer segunda ola (663 LoC, useReducer)
+- file-type vuln (bloqueada upstream)
+- React Doctor gate a 80
+
+### Distribución
+
+- Firma installer Windows (SignPath)
+- Auto-update + TLS LAN
+
+---
+
+## Sesiones anteriores (archivadas abajo)
+
+- Branch previa `claude/f14-2-b-manager-startsession`. Tercera pieza F14-2-b: `Manager.StartSession` (8 params) + `Manager.startSessionSlow` (9 params) → struct `StartSessionRequest`. Actualizado el `StreamManagerService` interface + los 3 callers en handlers (stream.go + federation_stream.go x2) + el fake en stream_test.go + 5 sites de `startSessionFn`.
 - Mergeadas a main hoy: **#396** (G parcial / lifecycle), **#397** (olor H / router split), **#398** (F14-2-a / BuildFFmpegArgs), **#399** (F14-2-b / Transcoder.Start+RestartAt).
 - Branch principal `main`: V+JJ+LL+G+H+F14-2-a+F14-2-b-trio cerrados.
 - Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
