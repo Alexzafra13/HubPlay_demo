@@ -159,7 +159,7 @@ func (h *DeviceAuthHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tok, err := h.svc.PollDevice(r.Context(), req.DeviceCode, r.RemoteAddr)
+	tok, err := h.svc.PollDevice(r.Context(), req.DeviceCode, ClientIP(r))
 	if err != nil {
 		h.writePollError(w, r, err)
 		return
@@ -394,7 +394,7 @@ func (h *DeviceAuthHandler) Events(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	h.logger.Info("device events client connected",
-		"device_code_prefix", deviceCode[:8], "remote_addr", r.RemoteAddr)
+		"device_code_prefix", deviceCode[:8], "remote_addr", ClientIP(r))
 
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()

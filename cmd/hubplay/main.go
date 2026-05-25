@@ -660,6 +660,7 @@ func run(configPath string) error {
 		MDNSHostname:   cfg.MDNS.Hostname,
 		HWAccelDefault: cfg.Streaming.HWAccel,
 		AllowedOrigins: api.AllowedOrigins(cfg),
+		TrustedProxies: cfg.Server.TrustedProxies,
 		Logger:        logger,
 		Metrics:       metrics,
 		LogBuffer:     logBuffer,

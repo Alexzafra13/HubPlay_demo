@@ -6,6 +6,62 @@
 
 ---
 
+## 🔒 Sesión 2026-05-25 (parte IV) — Security: migrar middleware.RealIP a ClientIPFromXFF
+
+chi v5.3.0 deprecó `middleware.RealIP` por 3 CVE de IP spoofing (incl.
+GHSA-3fxj-6jh8-hvhx Critical 9.3). Bump del go-deps group (#423) lo
+descubre + golangci-lint lo flagga como `SA1019`. Migración a la nueva
+API (`ClientIPFromXFF` + `GetClientIP` del ctx) hecha en una sola PR
+junto al bump.
+
+### Cambios
+
+- `internal/api/router.go::applyGlobalMiddleware`: sustituye
+  `middleware.RealIP` por `ClientIPFromXFF(deps.TrustedProxies...)` si
+  hay CIDRs trusted declarados, sino `ClientIPFromRemoteAddr` (seguro
+  por defecto: si el operador no declara proxy de confianza, no
+  honramos XFF).
+- `Dependencies.TrustedProxies []string` (campo nuevo) — el operador
+  lo declara en `server.trusted_proxies` (campo YAML que ya existía
+  pero nunca se cableaba).
+- `internal/api/handlers/client_ip.go` (nuevo, ~28 LoC) — helper
+  `ClientIP(r)` que lee `middleware.GetClientIP(r.Context())` con
+  fallback a `r.RemoteAddr` para tests sin router completo.
+- 10 sitios migrados de `r.RemoteAddr` a `ClientIP(r)`: 4 en `auth.go`
+  (Login, RefreshToken, deviceLogin, setupLogin), 2 en `auth_device.go`
+  (PollDevice, audit log), 2 en `events.go` (SSE connect/disconnect),
+  2 en `me_events.go` (user SSE).
+- `iprate_middleware.go`: el helper local `clientIP(r)` (lowercase) que
+  parseaba XFF manualmente sin trust verification — **mismo bug que el
+  deprecation arregla** — se elimina. El middleware ahora consume
+  `ClientIP(r)` directamente.
+- `hubplay.example.yaml`: doc del setting `server.trusted_proxies`
+  explicando el trade-off seguro vs honrar XFF.
+- `go.mod` / `go.sum`: bump chi 5.2.5→5.3.0 + crypto 0.51→0.52 +
+  image 0.40→0.41 (cierra #423 + dependabot).
+
+### Comportamiento
+
+- **Operador con docker + nginx en localhost** (default config):
+  trusted_proxies = `["127.0.0.1", "172.16.0.0/12"]` ⇒ XFF honrado
+  saltando hops trusted. Comportamiento equivalente al pre-refactor
+  con `RealIP`.
+- **Operador directo a Internet** sin proxy: trusted_proxies vacío ⇒
+  `ClientIPFromRemoteAddr` ⇒ usa la IP de la conexión TCP, **seguro
+  contra spoofing**.
+- La nueva API NO muta `r.RemoteAddr` — el IP va en el ctx. Los
+  handlers leen con `ClientIP(r)` (helper) en vez de `r.RemoteAddr`.
+
+### Cierra
+
+- 3 CVE de spoofing (GHSA-3fxj-6jh8-hvhx Critical 9.3,
+  GHSA-rjr7-jggh-pgcp, GHSA-9g5q-2w5x-hmxf).
+- Dependabot #423 (go-deps group).
+- Bug latente del helper `clientIP(r)` lowercase que confiaba en XFF
+  sin trust verification (mismo vector que el de RealIP).
+
+---
+
 ## 🔭 Estado actual (2026-05-25, extensión post-cierre — G + H al 100 %)
 
 Sesión de extensión sobre la "todo mergeado" del cierre 2026-05-25.

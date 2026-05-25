@@ -121,7 +121,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	h.logger.Info("SSE client connected", "remote_addr", r.RemoteAddr)
+	h.logger.Info("SSE client connected", "remote_addr", ClientIP(r))
 
 	// Initial keepalive comment doubles as a "connection ready"
 	// signal for the browser EventSource: anything we write before
@@ -135,7 +135,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			h.logger.Info("SSE client disconnected", "remote_addr", r.RemoteAddr)
+			h.logger.Info("SSE client disconnected", "remote_addr", ClientIP(r))
 			return
 
 		case <-keepalive.C:
