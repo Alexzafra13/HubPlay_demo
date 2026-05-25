@@ -188,7 +188,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.NAME }}
           path: |
@@ -223,7 +223,7 @@ jobs:
           sha256sum dist/hubplay.service  > dist/hubplay.service.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hubplay-linux-installer-assets
           path: |
@@ -313,7 +313,7 @@ jobs:
             > "HubPlay-Setup-${VERSION}-windows-amd64.exe.sha256"
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hubplay-installer-windows-amd64
           path: |
