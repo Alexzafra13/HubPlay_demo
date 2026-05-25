@@ -21,7 +21,7 @@ en este doc (no se edita el audit original).
 | 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
 | 4 | ✅ cerrada | Split de god-handlers/services | P, Z, QQ | Sesión 2026-05-21 tarde (PRs #384, #386+#388, #389) |
 | 5 | ✅ cerrada | Refactor estructural `iptv/` | CC (fase 1 + 2) | Fase 1 sesión tarde-noche (PR #390); fase 2 sesión post-cierre (PR #392) |
-| 6 | 🔄 en curso | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, G parcial, **H mountXxx ✅** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G parcial pendiente PR en `claude/review-project-9YJxG` (`8b746fc`); H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC) — Dependencies-as-interfaces queda para iteración aparte |
+| 6 | 🔄 en curso | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, G (lifecycle ✅ + iptv ✅, library pendiente), **H mountXxx ✅** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G lifecycle.go en main, G fase iptv cerrada sesión 2026-05-25 (rama `claude/g-iptv-module`); H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC) — Dependencies-as-interfaces queda para iteración aparte; sólo queda library.Module |
 | 7 | 🔄 en curso | Cosmética + schema | D, X, ~~W~~, BB, ~~UUU-mig~~ | W cerrada sesión post-cierre (PR #393, scanner.go 1491 → 332 LoC); D/X/BB pendientes |
 | 8 | 🔄 en curso | Polish de calidad de código | ~~F14-2-a~~ ✅, F14-X, F15-X, F16-X | F14-2-a cerrado sesión 2026-05-21 noche tardía II — `BuildFFmpegArgs` 13 params → `TranscodeRequest` struct |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
@@ -785,6 +785,55 @@ de 98 LoC → ~70 LoC.
 Esos cerrarían el olor G al 100%, pero cada uno toca seams
 inter-paquete (scanner shared library/iptv, libraryService passed
 a iptv proxy via interface). Diferido como sesiones futuras.
+
+### Cierres en sesión 2026-05-25
+
+**✅ G fase iptv — `iptv.Module` agrupa los 6 componentes IPTV**
+(rama `claude/g-iptv-module`)
+
+Nuevo `internal/iptv/module.go` (~225 LoC) con tipo `Module` que
+agrupa los 6 componentes long-lived del feature IPTV: `Service`,
+`StreamProxy`, `TransmuxManager` (opcional), `LogoCache` (opcional),
+`Scheduler`, `ProberWorker`. `iptv.New(ctx, Deps)` aplica el
+cross-wiring interno que antes vivía en main.go inline
+(`proxy.SetHealthReporter(service)`,
+`transmux.Gate=proxy.Breaker()`, `transmux.Reporter=service`,
+`service.SetIPTVOrgLogos(...)`, `service.SetProberWorker(...)`) y
+arranca los workers contra el ctx pasado.
+
+`iptv.Module.RegisterWith(lc)` recibe el `*lifecycle` del binario
+vía una `LifecycleRegistrar` interface local al paquete (firmas
+idénticas; el alias `stopFn = func(context.Context) error` lo deja
+estructuralmente compatible sin convertir). RegisterWith añade 5
+hooks en el orden correcto:
+- Workers (fase 1, add-order): `iptv scheduler` → `iptv prober`.
+- Services (fase 3, LIFO ⇒ último registrado = primero parado):
+  `iptv service` → `iptv proxy` → `iptv transmux` (sólo si enabled).
+
+`Deps` mantiene `iptv` libre de imports hacia `config` /
+`observability` / `stream` — main resuelve los valores pre-derivados
+(hwaccel encoder, cache dirs, sink Prometheus, callback
+`RegisterGauges`) y los pasa por struct. `TransmuxOpts` con
+`Enabled=false` deshabilita el TransmuxManager (los demás campos se
+ignoran), reemplazando el `if cfg.IPTV.Transmux.Enabled { … }` que
+vivía en main.
+
+`cmd/hubplay/main.go` pierde 70 LoC en el bloque iptv: 123 →
+~53. La construcción de las 6 piezas + cross-wiring + arranque +
+registro de hooks queda en una sola llamada a `iptv.New` + un
+`iptvMod.RegisterWith(lc)`. `api.Dependencies` recibe los punteros
+individuales vía `iptvMod.Service / .Proxy / .Transmux / .LogoCache
+/ .Scheduler` — handlers no se tocan (api ya cubría 5 punteros
+diferenciados; preservar surface fue minimum-blast-radius).
+
+Tests: `go test ./internal/iptv/... ./internal/api/...` verde sin
+modificaciones (cero churn de behaviour). Resto del repo verde (el
+fallo de `internal/clock` en local es WDAC de Windows bloqueando el
+.exe en TEMP, no relacionado).
+
+**Cierra la fase iptv del olor G al 100 %**. Queda library.Module
+(misma plantilla aplicada al paquete library, que cierra G por
+completo).
 
 ### Pendiente
 

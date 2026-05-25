@@ -6,9 +6,14 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-25, sesión cerrada — todo mergeado a main)
+## 🔭 Estado actual (2026-05-25, extensión post-cierre — G fase iptv)
 
-**20 PRs en esta sesión** (#396-#415). Todas mergeadas. 0 PRs abiertas.
+Sesión corta sobre la "todo mergeado" ya cerrada. **Una PR
+estructural cerrada**: G fase iptv (`iptv.Module`) — la primera de
+las dos sub-fases que faltaban para llevar G al 100 % (sólo queda
+library.Module).
+
+**20 PRs en la sesión 2026-05-25 base** (#396-#415). Todas mergeadas. 0 PRs abiertas al inicio.
 
 ### Cerrado en esta sesión
 
@@ -42,7 +47,7 @@ Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, 
 
 ### Arquitectónicos (sesión grande cada uno)
 
-- **G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado
+- ~~**G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado~~ — **iptv.Module cerrado en extensión 2026-05-25** (rama `claude/g-iptv-module`). Queda `library.Module` (misma plantilla aplicada al paquete library).
 - **H** — 22 `*db.X` → interfaces en Dependencies
 - **LL** — Transcoder stateless (cmd/cancel/done a ManagedSession)
 
@@ -82,6 +87,95 @@ Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, 
 - **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
 - **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🧩 Sesión 2026-05-25 (extensión post-cierre) — G fase iptv: `iptv.Module`
+
+Sesión corta sobre la cierre del 2026-05-25. Una sola PR (open al
+cierre, esperando review): el módulo per-feature de iptv que faltaba
+para llevar el olor G hacia el 100 %.
+
+### Cambio
+
+Nuevo `internal/iptv/module.go` (~225 LoC) con tipo `Module` que
+agrupa los 6 componentes long-lived del feature IPTV:
+
+| Componente | Antes (main.go) | Ahora (Module) |
+|---|---|---|
+| `Service` | `iptv.NewService(11 args)` + `SetEventBus` + `SetIPTVOrgLogos` + `SetProberWorker` | `iptv.New` interno |
+| `StreamProxy` | `iptv.NewStreamProxy` + `SetHealthReporter(service)` | idem, en `iptv.New` |
+| `TransmuxManager` | `if cfg.IPTV.Transmux.Enabled { … }` 35 LoC en main con `Gate=proxy.Breaker()` + `Reporter=service` + gauges Prometheus | `Deps.Transmux TransmuxOpts` (zero-value = disabled), `RegisterGauges` callback inyectado |
+| `LogoCache` | `iptv.NewLogoCache(dir, logger)` con fallback log-warn | idem, en `iptv.New` |
+| `Scheduler` | `iptv.NewScheduler(...) + Start(ctx) + lc.AddWorker` | `iptv.New` lo arranca, `RegisterWith(lc)` registra el hook |
+| `ProberWorker` | `iptv.NewProber + iptv.NewProberWorker + Start(ctx) + SetProberWorker + lc.AddWorker` | idem |
+
+`iptv.New(ctx, Deps)` aplica todo el cross-wiring interno y arranca
+los workers contra el ctx. `iptv.Module.RegisterWith(lc)` recibe el
+`*lifecycle` del binario vía `iptv.LifecycleRegistrar` interface
+local al paquete (compatible estructuralmente con `*lifecycle` —
+mismo alias `stopFn = func(context.Context) error`). RegisterWith
+añade 5 hooks en el orden correcto:
+
+- **Workers** (fase 1, add-order): `iptv scheduler` → `iptv prober`.
+- **Services** (fase 3, LIFO ⇒ último registrado = primero parado):
+  `iptv service` → `iptv proxy` → `iptv transmux` (sólo si enabled).
+  Service queda fuera el último porque proxy y transmux le reportan
+  health durante su drain.
+
+### Aislamiento de dependencias
+
+`iptv.Deps` recibe **valores pre-resueltos** para no abrir imports
+desde `iptv` hacia `config` / `observability` / `stream`:
+
+- HWAccel encoder + flags → `TransmuxOpts.ReencodeEncoder`,
+  `.ReencodeHWAccelArgs` (main los saca de `streamManager.HWAccelInfo()`).
+- Sink Prometheus → `TransmuxOpts.Metrics = observability.NewIPTVTransmuxSink(metrics)`.
+- Register gauges → callback `func(*TransmuxManager) error` que
+  cierra sobre `metrics`.
+- Cache dirs → string paths absolutos (main los compone con
+  `filepath.Join(cfg.Streaming.EffectiveCacheDir(), ...)` y
+  `filepath.Dir(cfg.Database.Path)`).
+
+`internal/iptv` sigue importando sólo `db`, `event`, `clock`,
+`imaging`, `testutil` (más `iptv/model`).
+
+### Impacto en main.go
+
+- `cmd/hubplay/main.go`: 123 LoC → 53 LoC en el bloque iptv (**−70 LoC**).
+- 6 variables locales (`iptvService`, `iptvProxy`, `iptvTransmux`,
+  `iptvLogoCache`, `iptvScheduler`, `iptvProberWorker`) → 1 (`iptvMod`).
+- `retentionRunner` ahora consume `iptvMod.Service` (mismo interface).
+- `api.Dependencies` recibe los punteros vía `iptvMod.X` (handlers
+  no se tocan — preservar surface fue minimum-blast-radius;
+  Dependencies-as-interfaces queda diferido como en sesión H).
+
+### Tests
+
+`go test ./...` verde sin modificaciones — cero churn de behaviour
+(`internal/iptv` 13s, `internal/api` 13s, `internal/api/handlers`
+18s). El único fallo local es `internal/clock` por WDAC de Windows
+bloqueando .exe en TEMP — sin relación con iptv.
+
+### Aprendizajes
+
+- **El `lifecycle` del binario es compatible con interfaces locales
+  de paquete sin convertir**. La clave es que `stopFn = func(...)`
+  es **type alias** (con `=`), no defined type, así que cualquier
+  interface anónima con la misma firma lo acepta. Patrón
+  reutilizable para library.Module.
+- **Cross-wiring interno (proxy↔service, transmux↔proxy.Breaker) es
+  la parte más limpia del Module**. Antes el ordering de cuándo
+  llamar `SetHealthReporter` y `Gate=proxy.Breaker()` vivía
+  scattered en main.go entre construct + setter; ahora vive
+  encapsulado en una sola función. El comentario explicativo
+  ("wire health reporting now that both pieces exist") deja de
+  hacer falta porque la función fija el orden.
+- **Mantener `Dependencies` con los punteros individuales fue lo
+  correcto** vs cambiar `api.NewRouter` para que reciba un `IPTV
+  *iptv.Module`. El refactor de Dependencies-as-interfaces (olor H
+  pendiente) ya está en su propia sesión; mezclar aquí habría
+  duplicado work y aumentado blast-radius sin valor añadido.
 
 ---
 

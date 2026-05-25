@@ -385,130 +385,60 @@ func run(configPath string) error {
 	})
 
 	// ═══ Phase 4c: IPTV ═══
-	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelLogoOverrides, repos.ChannelWatchHistory, logger)
-	iptvService.SetEventBus(eventBus)
-	lc.AddService("iptv service", func(context.Context) error {
-		iptvService.Shutdown()
-		return nil
-	})
-	iptvProxy := iptv.NewStreamProxy(logger)
-	// iptvProxy.ClearRelays sólo vacía contabilidad — el drain real
-	// viene del http.Server.Shutdown previo (audit olor EE).
-	lc.AddService("iptv proxy", func(context.Context) error {
-		iptvProxy.ClearRelays()
-		return nil
-	})
-	// Wire health reporting now that both pieces exist. The proxy
-	// records probe outcomes against the channel repo through the
-	// service so dead upstreams drop out of the user view.
-	iptvProxy.SetHealthReporter(iptvService)
-
-	// Live MPEG-TS → HLS transmux. Required for Xtream Codes /
-	// raw-TS providers (most non-public IPTV today). Optional: if
-	// disabled in config, the channel-stream handler falls back to
-	// the raw passthrough proxy and only HLS providers play in the
-	// browser. The work dir is rooted under the streaming cache dir
-	// so a single volume mount covers both VOD transcoding and live
-	// transmux output.
-	var iptvTransmux *iptv.TransmuxManager
+	//
+	// `iptv.New` agrupa los 6 componentes long-lived del feature
+	// (service + proxy + transmux opcional + logo cache opcional +
+	// scheduler + prober), aplica el cross-wiring interno
+	// (proxy.SetHealthReporter, service.SetIPTVOrgLogos,
+	// service.SetProberWorker, transmux.Gate=proxy.Breaker()) y
+	// arranca los workers contra `ctx`. `iptvMod.RegisterWith(lc)`
+	// añade los 5 hooks de shutdown en el orden correcto. Cierra la
+	// fase iptv del olor G del audit 2026-05-14.
+	var iptvTransmuxOpts iptv.TransmuxOpts
 	if cfg.IPTV.Transmux.Enabled {
-		transmuxCacheDir := filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-hls")
-		// Share the proxy's circuit breaker with the transmux manager
-		// so failures on either plane (HLS proxy or MPEG-TS transmux)
-		// trip the same per-channel cooldown. Without this, a dead
-		// Xtream upstream produced a fork-bomb of failed ffmpeg spawns
-		// every time the player retried the manifest.
-		//
-		// Hwaccel reuse: same encoder + decode flags the VOD
-		// transcoder picked at boot. If the host has VAAPI / NVENC
-		// available, the reencode fallback runs there too — for HEVC
-		// → H.264 transcode that's often a 5-10× CPU win, which is
-		// what makes the fallback affordable on low-spec hosts.
+		// Hwaccel reuse: mismo encoder + decode flags que el VOD
+		// transcoder eligió al boot. En hosts con VAAPI / NVENC el
+		// reencode fallback corre ahí también (5-10× CPU win en
+		// HEVC → H.264 — lo que hace al fallback affordable en
+		// low-spec).
 		hwInfo := streamManager.HWAccelInfo()
-		iptvTransmux = iptv.NewTransmuxManager(iptv.TransmuxManagerConfig{
-			CacheDir:                 transmuxCacheDir,
-			MaxSessions:              cfg.IPTV.Transmux.MaxSessions,
-			MaxReencodeSessions:      cfg.IPTV.Transmux.MaxReencodeSessions,
-			IdleTimeout:              cfg.IPTV.Transmux.IdleTimeout,
-			ReadyTimeout:             cfg.IPTV.Transmux.ReadyTimeout,
-			Gate:                     iptvProxy.Breaker(),
-			Reporter:                 iptvService,
-			Metrics:                  observability.NewIPTVTransmuxSink(metrics),
-			ReencodeEncoder:          hwInfo.Encoder,
-			ReencodeHWAccelInputArgs: stream.HWAccelInputArgs(hwInfo.Selected),
-		}, logger)
-		if err := observability.RegisterIPTVTransmuxGauges(metrics, iptvTransmux); err != nil {
-			return fmt.Errorf("register iptv transmux gauges: %w", err)
+		iptvTransmuxOpts = iptv.TransmuxOpts{
+			Enabled:             true,
+			CacheDir:            filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-hls"),
+			MaxSessions:         cfg.IPTV.Transmux.MaxSessions,
+			MaxReencodeSessions: cfg.IPTV.Transmux.MaxReencodeSessions,
+			IdleTimeout:         cfg.IPTV.Transmux.IdleTimeout,
+			ReadyTimeout:        cfg.IPTV.Transmux.ReadyTimeout,
+			ReencodeEncoder:     hwInfo.Encoder,
+			ReencodeHWAccelArgs: stream.HWAccelInputArgs(hwInfo.Selected),
+			Metrics:             observability.NewIPTVTransmuxSink(metrics),
+			RegisterGauges: func(t *iptv.TransmuxManager) error {
+				return observability.RegisterIPTVTransmuxGauges(metrics, t)
+			},
 		}
-		logger.Info("iptv transmux enabled",
-			"cache_dir", transmuxCacheDir,
-			"max_sessions", cfg.IPTV.Transmux.MaxSessions,
-			"max_reencode_sessions", iptvTransmux.MaxReencodeSessions(),
-			"reencode_encoder", hwInfo.Encoder,
-			"hwaccel", hwInfo.Selected)
-		// Capturado por valor del puntero — `iptvTransmux` está vivo
-		// en el cierre de Add aunque después la variable salga de
-		// scope. AddService ejecuta en LIFO, así que transmux se
-		// para ANTES que iptv service (que es lo correcto: el
-		// transmux le devuelve health al service en cleanup).
-		tm := iptvTransmux
-		lc.AddService("iptv transmux", func(context.Context) error {
-			tm.Shutdown()
-			return nil
-		})
 	}
-
-	// Channel logo cache. Mirrors upstream `tvg-logo` URLs to disk
-	// so the frontend can load them from a same-origin URL without
-	// loosening the img-src CSP, and external hosts don't get to
-	// track the user. Construction failure is non-fatal: the
-	// handler treats nil as "logo cache disabled" and the React UI
-	// falls back to the existing initials/colour avatar.
-	var iptvLogoCache *iptv.LogoCache
-	logoCacheDir := filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-logos")
-	if lc, err := iptv.NewLogoCache(logoCacheDir, logger); err != nil {
-		logger.Warn("iptv logo cache disabled", "error", err)
-	} else {
-		iptvLogoCache = lc
-		logger.Info("iptv logo cache enabled", "cache_dir", logoCacheDir)
-	}
-
-	// iptv-org logo auto-discovery — fetcher + cache compartido con
-	// el resto de assets de imagen. La descarga se hace lazy (en la
-	// primera llamada del admin) para no pegar a iptv-org.github.io
-	// durante el arranque.
-	iptvOrgLogosCachePath := filepath.Join(filepath.Dir(cfg.Database.Path), "images", "iptv-org-channels.json")
-	iptvService.SetIPTVOrgLogos(iptv.NewIPTVOrgLogoLookup(iptvOrgLogosCachePath))
-
-	// ═══ Phase 4d: IPTV Scheduler ═══
-	// Runs periodic M3U + EPG refreshes per configured schedule so the
-	// product no longer requires an admin to click "Refrescar" every
-	// morning. Sequential — see scheduler.go for why.
-	iptvScheduler := iptv.NewScheduler(repos.IPTVSchedules, iptvService, logger)
-	iptvScheduler.Start(ctx)
-	// Stop scheduler antes que iptv service en la fase de workers
-	// — el comentario de audit lo justifica: una refresh en vuelo
-	// tiene que grabar su outcome contra un DB handle abierto.
-	lc.AddWorker("iptv scheduler", func(ctx context.Context) error {
-		iptvScheduler.Stop(ctx)
-		return nil
+	iptvMod, err := iptv.New(ctx, iptv.Deps{
+		Channels:              repos.Channels,
+		EPGPrograms:           repos.EPGPrograms,
+		Libraries:             repos.Libraries,
+		Favorites:             repos.ChannelFavorites,
+		ChannelOrder:          repos.ChannelOrder,
+		LibraryChannelOrder:   repos.LibraryChannelOrder,
+		EPGSources:            repos.LibraryEPGSources,
+		ChannelOverrides:      repos.ChannelOverrides,
+		ChannelLogoOverrides:  repos.ChannelLogoOverrides,
+		ChannelWatchHistory:   repos.ChannelWatchHistory,
+		Schedules:             repos.IPTVSchedules,
+		EventBus:              eventBus,
+		Transmux:              iptvTransmuxOpts,
+		LogoCacheDir:          filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-logos"),
+		IPTVOrgLogosCachePath: filepath.Join(filepath.Dir(cfg.Database.Path), "images", "iptv-org-channels.json"),
+		Logger:                logger,
 	})
-
-	// Active stream prober: walks every livetv library every few hours
-	// and records a probe outcome against each channel via the same
-	// ChannelHealthReporter the proxy uses. Catches dead upstreams on
-	// channels nobody happens to be watching, so the user-facing list
-	// auto-hides them before a viewer clicks a dead tile.
-	iptvProber := iptv.NewProber(nil, iptvService)
-	iptvProberWorker, err := iptv.NewProberWorker(iptvProber, repos.Libraries, repos.Channels, logger)
 	if err != nil {
-		return fmt.Errorf("iptv prober worker: %w", err)
+		return err
 	}
-	iptvProberWorker.Start(ctx)
-	iptvService.SetProberWorker(iptvProberWorker)
-	lc.AddWorker("iptv prober", func(ctx context.Context) error {
-		return iptvProberWorker.Stop(ctx)
-	})
+	iptvMod.RegisterWith(lc)
 
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
@@ -592,7 +522,7 @@ func run(configPath string) error {
 	// a fixed cadence so append-only tables don't grow forever. Both
 	// dependencies are nil-safe inside the runner — operators without
 	// IPTV or federation still get a no-op runner that costs nothing.
-	retentionRunner := retention.New(cfg.Retention, iptvService, federationRepo, logger)
+	retentionRunner := retention.New(cfg.Retention, iptvMod.Service, federationRepo, logger)
 	retentionRunner.Start(ctx)
 	lc.AddWorker("retention runner", func(context.Context) error {
 		retentionRunner.Stop()
@@ -720,11 +650,11 @@ func run(configPath string) error {
 		Users:         userService,
 		Libraries:     libraryService,
 		StreamManager: streamManager,
-		IPTV:          iptvService,
-		IPTVProxy:     iptvProxy,
-		IPTVTransmux:  iptvTransmux,
-		IPTVLogoCache: iptvLogoCache,
-		IPTVScheduler: iptvScheduler,
+		IPTV:          iptvMod.Service,
+		IPTVProxy:     iptvMod.Proxy,
+		IPTVTransmux:  iptvMod.Transmux,
+		IPTVLogoCache: iptvMod.LogoCache,
+		IPTVScheduler: iptvMod.Scheduler,
 		IPTVSchedules: repos.IPTVSchedules,
 		Items:         repos.Items,
 		MediaStreams:   repos.MediaStreams,
