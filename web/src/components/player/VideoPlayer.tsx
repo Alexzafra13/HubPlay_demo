@@ -11,6 +11,7 @@ import { useProgressReporter } from "@/hooks/useProgressReporter";
 import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
+import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
@@ -189,18 +190,25 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const setFullscreen = usePlayerStore((s) => s.setFullscreen);
   const updateTime = usePlayerStore((s) => s.updateTime);
 
-  // Up-next overlay visibility. Set on `ended` when nextUp is wired,
-  // cleared by play-now / cancel / next-load. Decoupled del callback
-  // del padre para que `onEndedCallback` sólo dispare cuando el usuario
-  // acepta (o se agota el contador del overlay).
-  const [upNextActive, setUpNextActive] = useState(false);
-  // External subs picker (OpenSubtitles, ...). Modal is opened from
-  // the PlayerControls subtitle dropdown; the picked result becomes
-  // a sibling `<track>` on the <video> below. Only one external sub
-  // active at a time — picking a new one replaces the previous track
-  // entirely.
-  const [externalSubsModalOpen, setExternalSubsModalOpen] = useState(false);
-  const [activeExternalSub, setActiveExternalSub] = useState<ExternalSubtitleResult | null>(null);
+  const {
+    upNextActive,
+    externalSubsModalOpen,
+    activeExternalSub,
+    showHelp,
+    handleEnded: handleVideoEnded,
+    handleUpNextConfirm,
+    handleUpNextCancel,
+    openExternalSubsModal,
+    closeExternalSubsModal,
+    pickExternalSub,
+    clearExternalSub,
+    toggleHelp,
+    closeHelp,
+  } = usePlayerOverlays({
+    itemId,
+    hasNextUp: !!nextUp,
+    onEndedCallback: onEndedCallback,
+  });
 
   // Subtítulos federados: el fetch, estado del track activo y el effect
   // que fuerza `track.mode = "showing"` viven en useFederatedSubs. IDs
@@ -257,17 +265,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     itemId,
     knownDuration,
     onProgress: updateTime,
-    onEnded: () => {
-      // Dos rutas: con next-item conocido, ocultar el auto-advance
-      // tras el contador del overlay para que el usuario pueda
-      // cancelar; sin él, disparar el callback inmediatamente como
-      // el flujo legacy.
-      if (nextUp && onEndedCallback) {
-        setUpNextActive(true);
-      } else {
-        onEndedCallback?.();
-      }
-    },
+    onEnded: handleVideoEnded,
     onActivity: () => controlsRef.current.showControls(),
     onSettled: () => controlsRef.current.keepControlsVisible(),
   });
@@ -418,12 +416,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     }
   }, []);
 
-  // Help overlay state. `?` toggles; clicking the backdrop or
-  // pressing Escape closes. The shortcut list itself is rendered
-  // by KeyboardHelpOverlay below.
-  const [showHelp, setShowHelp] = useState(false);
-  const toggleHelp = useCallback(() => setShowHelp((v) => !v), []);
-
   // ─── Tab close / navigation cleanup ──────────────────────────────────────
   //
   // If the user closes the tab or navigates away (back button, address
@@ -489,24 +481,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     seekedToStartRef.current = false;
   }, [masterPlaylistUrl, directUrl]);
 
-  // Reset del overlay up-next al cambiar de item (auto-advance entre
-  // episodios). `firstFrameReady` ya se resetea dentro de
-  // useVideoPlaybackEvents al detectar el cambio de `itemId`.
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    setUpNextActive(false);
-  }, [itemId]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const handleUpNextConfirm = useCallback(() => {
-    setUpNextActive(false);
-    onEndedCallback?.();
-  }, [onEndedCallback]);
-
-  const handleUpNextCancel = useCallback(() => {
-    setUpNextActive(false);
-  }, []);
-
   // External subs lifecycle.
   // - Opening the modal is a single setter; closing too.
   // - Picking a result: stash it as state so the JSX renders a fresh
@@ -514,15 +488,11 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   //   two systems don't race over which cues to show.
   const handleExternalSubPicked = useCallback(
     (pick: ExternalSubtitleResult) => {
-      setActiveExternalSub(pick);
-      setExternalSubsModalOpen(false);
-      setSubtitleTrack(-1); // disable any HLS sub
-      // Clear any federated track too — only one set of cues at a
-      // time. Without this, both <track> elements stayed mounted and
-      // the two rAF effects raced for which one ended in `showing`.
+      pickExternalSub(pick);
+      setSubtitleTrack(-1);
       setActiveFederatedSubIndex(null);
     },
-    [setSubtitleTrack, setActiveFederatedSubIndex],
+    [pickExternalSub, setSubtitleTrack, setActiveFederatedSubIndex],
   );
 
   // After a new external <track> mounts the browser keeps its mode
@@ -568,7 +538,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     subtitleStreams,
     burnSubtitleIndex,
     onBurnSubtitleSelected,
-    clearActiveExternalSub: () => setActiveExternalSub(null),
+    clearActiveExternalSub: clearExternalSub,
   });
 
   const {
@@ -729,7 +699,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
             if (open) keepControlsVisible();
             else showControls();
           }}
-          onSearchExternalSubs={() => setExternalSubsModalOpen(true)}
+          onSearchExternalSubs={openExternalSubsModal}
           trickplay={trickplay.available && trickplay.manifest ? {
             manifest: trickplay.manifest,
             spriteURL: trickplay.spriteURL,
@@ -762,7 +732,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         <ExternalSubsModal
           itemId={itemId}
           onSelect={handleExternalSubPicked}
-          onClose={() => setExternalSubsModalOpen(false)}
+          onClose={closeExternalSubsModal}
         />
       )}
 
@@ -808,7 +778,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           since the operator's expectation is "anywhere outside the
           card dismisses". */}
       {showHelp && (
-        <KeyboardHelpOverlay onClose={() => setShowHelp(false)} />
+        <KeyboardHelpOverlay onClose={closeHelp} />
       )}
     </div>
   );
