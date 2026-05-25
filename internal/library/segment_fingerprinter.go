@@ -118,6 +118,8 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	log := f.logger.With("library_id", libraryID)
+
 	episodes, _, err := f.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
 		Type:      "episode",
@@ -192,8 +194,7 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 			"source":     "fingerprint",
 		},
 	})
-	f.logger.Info("fingerprint detection complete",
-		"library_id", libraryID,
+	log.Info("fingerprint detection complete",
 		"episodes_scanned", scanned,
 		"segments_detected", detected)
 	return nil

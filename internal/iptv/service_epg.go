@@ -54,6 +54,8 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		s.mu.Unlock()
 	}()
 
+	log := s.logger.With("library_id", libraryID)
+
 	lib, err := s.libraries.GetByID(ctx, libraryID)
 	if err != nil {
 		return 0, fmt.Errorf("get library: %w", err)
@@ -115,8 +117,8 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		progs, matched, orphans, fetchErr := s.refreshOneSource(ctx, src, idx, ownedByChannel, lib.TLSInsecure)
 		totalOrphans += orphans
 		if fetchErr != nil {
-			s.logger.Warn("EPG source failed",
-				"library", libraryID, "url", src.URL, "error", fetchErr)
+			log.Warn("EPG source failed",
+				"url", src.URL, "error", fetchErr)
 			if src.ID != "" {
 				if rerr := s.epgSources.RecordRefresh(ctx, src.ID, "error", fetchErr.Error(), 0, 0); rerr != nil {
 					s.logger.Error("record source error", "source", src.ID, "error", rerr)
@@ -138,8 +140,8 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 				s.logger.Error("record source ok", "source", src.ID, "error", rerr)
 			}
 		}
-		s.logger.Info("EPG source loaded",
-			"library", libraryID, "url", src.URL,
+		log.Info("EPG source loaded",
+			"url", src.URL,
 			"programs", progCount, "channels_matched", matched)
 	}
 
@@ -171,8 +173,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 			crossLibMatches += count
 		}
 	}
-	s.logger.Info("EPG refresh complete",
-		"library", libraryID,
+	log.Info("EPG refresh complete",
 		"programs", totalPrograms,
 		"channels_matched", len(ownedByChannel),
 		"channels_matched_by_lib", matchedByLib,
@@ -191,9 +192,8 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	if len(ownedByChannel) == 0 && workedCount > 0 {
 		sample := sampleTvgIDs(channels, 8)
 		blanks := countBlankTvgIDs(channels)
-		s.logger.Warn(
+		log.Warn(
 			"EPG refresh matched zero channels — likely tvg-id mismatch between M3U and XMLTV",
-			"library", libraryID,
 			"library_channels", len(channels),
 			"library_channels_without_tvg_id", blanks,
 			"library_tvg_id_sample", sample,

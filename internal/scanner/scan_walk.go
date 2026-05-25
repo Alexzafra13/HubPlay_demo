@@ -122,17 +122,18 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		return fmt.Errorf("creating item: %w", err)
 	}
 
+	log := s.logger.With("item_id", itemID)
 	streams := probeResultToStreams(itemID, probeResult)
 	if len(streams) > 0 {
 		if err := s.streams.ReplaceForItem(ctx, itemID, streams); err != nil {
-			s.logger.Warn("failed to store streams", "item_id", itemID, "error", err)
+			log.Warn("failed to store streams", "error", err)
 		}
 	}
 
 	// El repositorio de capítulos es opcional (tests viejos no lo cablean).
 	if s.chapters != nil && len(probeResult.Chapters) > 0 {
 		if err := s.chapters.Replace(ctx, itemID, probeResultToChapters(probeResult)); err != nil {
-			s.logger.Warn("failed to store chapters", "item_id", itemID, "error", err)
+			log.Warn("failed to store chapters", "error", err)
 		}
 	}
 
@@ -173,19 +174,17 @@ func (s *Scanner) updateItem(ctx context.Context, item *librarymodel.Item, path,
 		return fmt.Errorf("updating item: %w", err)
 	}
 
+	log := s.logger.With("item_id", item.ID)
 	streams := probeResultToStreams(item.ID, probeResult)
 	if len(streams) > 0 {
 		if err := s.streams.ReplaceForItem(ctx, item.ID, streams); err != nil {
-			s.logger.Warn("failed to update streams", "item_id", item.ID, "error", err)
+			log.Warn("failed to update streams", "error", err)
 		}
 	}
 
-	// Re-leemos capítulos: una recodificación puede haber movido los marcadores.
-	// Replace borra los viejos antes de insertar, así un fichero sin capítulos
-	// también limpia los que tenía antes.
 	if s.chapters != nil {
 		if err := s.chapters.Replace(ctx, item.ID, probeResultToChapters(probeResult)); err != nil {
-			s.logger.Warn("failed to update chapters", "item_id", item.ID, "error", err)
+			log.Warn("failed to update chapters", "error", err)
 		}
 	}
 

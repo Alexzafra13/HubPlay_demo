@@ -217,12 +217,8 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 // scanner lo obtiene de Search→Fetch y el handler de Identify lo obtiene
 // llamando a FetchMetadata directo con el TMDb id que eligió el operador.
 func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, meta *provider.MetadataResult, itemType provider.ItemType, primaryExternalID string) {
-	// Title = nombre canónico que ve el usuario. Antes este flujo
-	// SÓLO actualizaba OriginalTitle y dejaba Title con el nombre
-	// crudo del filename ("Toy Story (2020).mkv" → Title="Toy Story
-	// (2020)") — por eso los grids enseñaban el filename aunque el
-	// match contra TMDb hubiera funcionado. El identify manual SÍ lo
-	// hacía, sólo el scan automático estaba roto.
+	log := s.logger.With("item_id", item.ID)
+
 	if meta.Title != "" {
 		item.Title = meta.Title
 		item.OriginalTitle = meta.OriginalTitle
@@ -241,7 +237,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 	}
 	item.UpdatedAt = time.Now()
 	if err := s.items.Update(ctx, item); err != nil {
-		s.logger.Warn("failed to update item with metadata", "id", item.ID, "error", err)
+		log.Warn("failed to update item with metadata", "error", err)
 	}
 
 	// El tráiler viene en la misma llamada de TMDb (vídeos adjuntos), así
@@ -259,7 +255,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 		TrailerSite:   meta.TrailerSite,
 		StudioLogoURL: meta.StudioLogoURL,
 	}); err != nil {
-		s.logger.Warn("failed to store metadata", "id", item.ID, "error", err)
+		log.Warn("failed to store metadata", "error", err)
 	}
 
 	// Replicamos los géneros en una tabla aparte para que los filtros de
@@ -267,7 +263,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 	// Es replace: si TMDb deja de devolver un género, el chip desaparece.
 	if s.itemValues != nil {
 		if err := s.itemValues.SetGenres(ctx, item.ID, meta.Genres); err != nil {
-			s.logger.Warn("failed to mirror genres into item_values", "id", item.ID, "error", err)
+			log.Warn("failed to mirror genres into item_values", "error", err)
 		}
 	}
 
@@ -281,9 +277,9 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 		}
 		studioID, sErr := s.studios.EnsureStudio(ctx, meta.Studio, meta.StudioLogoURL, tmdbIDPtr)
 		if sErr != nil {
-			s.logger.Warn("failed to ensure studio", "id", item.ID, "studio", meta.Studio, "error", sErr)
+			log.Warn("failed to ensure studio", "studio", meta.Studio, "error", sErr)
 		} else if err := s.studios.SetItemStudio(ctx, item.ID, studioID); err != nil {
-			s.logger.Warn("failed to link item to studio", "id", item.ID, "studio_id", studioID, "error", err)
+			log.Warn("failed to link item to studio", "studio_id", studioID, "error", err)
 		}
 	}
 
@@ -300,9 +296,9 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 			meta.CollectionBackdrop,
 		)
 		if cErr != nil {
-			s.logger.Warn("failed to ensure collection", "id", item.ID, "collection", meta.CollectionName, "error", cErr)
+			log.Warn("failed to ensure collection", "collection", meta.CollectionName, "error", cErr)
 		} else if err := s.collections.SetItemCollection(ctx, item.ID, collectionID); err != nil {
-			s.logger.Warn("failed to link item to collection", "id", item.ID, "collection_id", collectionID, "error", err)
+			log.Warn("failed to link item to collection", "collection_id", collectionID, "error", err)
 		}
 	}
 
@@ -312,7 +308,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 			Provider:   prov,
 			ExternalID: extID,
 		}); err != nil {
-			s.logger.Warn("failed to store external id", "id", item.ID, "provider", prov, "error", err)
+			log.Warn("failed to store external id", "provider", prov, "error", err)
 		}
 	}
 
@@ -328,7 +324,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 		s.fetchAndStoreImages(ctx, item.ID, meta.ExternalIDs, itemType)
 	}
 
-	s.logger.Info("enriched metadata", "title", item.Title, "tmdb_id", primaryExternalID, "year", item.Year)
+	log.Info("enriched metadata", "title", item.Title, "tmdb_id", primaryExternalID, "year", item.Year)
 }
 
 // itemTypeForProvider mapea el tipo interno de un item al tipo que entiende

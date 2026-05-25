@@ -225,13 +225,14 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.
 	// The admin UI triggers the first `iptv/refresh-m3u` right after creation
 	// to populate channels, so nothing is lost by not scanning here.
 	if lib.ScanMode != "manual" && lib.ContentType != "livetv" {
+		log := s.logger.With("library_id", lib.ID)
 		s.bgWG.Add(1)
 		go func() {
 			defer s.bgWG.Done()
 			scanCtx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 			defer cancel()
 			if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
-				s.logger.Error("auto-scan after creation failed", "library_id", lib.ID, "error", err)
+				log.Error("auto-scan after creation failed", "error", err)
 			}
 		}()
 	}
@@ -396,6 +397,7 @@ func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) 
 	s.mu.Unlock()
 
 	refresh := len(refreshMetadata) > 0 && refreshMetadata[0]
+	log := s.logger.With("library_id", id)
 
 	s.bgWG.Add(1)
 	go func() {
@@ -409,12 +411,12 @@ func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) 
 		scanCtx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 		defer cancel()
 		if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
-			s.logger.Error("scan failed", "library_id", id, "error", err)
+			log.Error("scan failed", "error", err)
 		}
 
 		if refresh {
 			if err := s.scanner.RefreshMetadata(scanCtx, lib); err != nil {
-				s.logger.Error("metadata refresh failed", "library_id", id, "error", err)
+				log.Error("metadata refresh failed", "error", err)
 			}
 		}
 	}()

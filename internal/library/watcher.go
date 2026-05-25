@@ -262,13 +262,13 @@ func (w *FSWatcher) reconcile(ctx context.Context) {
 //
 // Increments walksDone for test observability.
 func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
+	log := w.logger.With("library_id", libID)
 	w.walksDone.Add(1)
 	for _, root := range paths {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
-				w.logger.Warn("walk for watcher",
+				log.Warn("walk for watcher",
 					"path", path,
-					"library_id", libID,
 					"error", walkErr)
 				if entry != nil && entry.IsDir() {
 					return filepath.SkipDir
@@ -282,9 +282,8 @@ func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
 				return nil
 			}
 			if err := w.watch.Add(path); err != nil {
-				w.logger.Warn("fsnotify add",
+				log.Warn("fsnotify add",
 					"path", path,
-					"library_id", libID,
 					"error", err)
 				return nil
 			}
@@ -292,9 +291,8 @@ func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
 			return nil
 		})
 		if err != nil {
-			w.logger.Warn("walk root for watcher",
+			log.Warn("walk root for watcher",
 				"root", root,
-				"library_id", libID,
 				"error", err)
 		}
 	}
@@ -358,13 +356,11 @@ func (w *FSWatcher) handleEvent(ctx context.Context, ev fsnotify.Event) {
 // are logged once and the walk continues — losing one branch is
 // strictly better than losing the rest of the tree.
 func (w *FSWatcher) addSubtreeWatch(root, libID string) {
+	log := w.logger.With("library_id", libID)
 	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// Permission denied / vanished mid-walk / etc. Log and
-			// keep going; matches addLibraryTree's policy.
-			w.logger.Warn("subtree watch walk",
+			log.Warn("subtree watch walk",
 				"path", path,
-				"library_id", libID,
 				"error", walkErr)
 			if entry != nil && entry.IsDir() {
 				return filepath.SkipDir
@@ -378,9 +374,8 @@ func (w *FSWatcher) addSubtreeWatch(root, libID string) {
 			return nil
 		}
 		if err := w.watch.Add(path); err != nil {
-			w.logger.Warn("fsnotify add (subtree)",
+			log.Warn("fsnotify add (subtree)",
 				"path", path,
-				"library_id", libID,
 				"error", err)
 			return nil
 		}
@@ -396,19 +391,15 @@ func (w *FSWatcher) kickDebounce(ctx context.Context, libID string) {
 	if t, ok := w.debouncers[libID]; ok {
 		t.Stop()
 	}
+	log := w.logger.With("library_id", libID)
 	w.debouncers[libID] = time.AfterFunc(w.debounce, func() {
-		// Service.Scan dedups concurrent calls per library — if a
-		// scheduled scan is already running we get ErrConflict and
-		// silently skip; the in-flight scan will see our changes.
 		if err := w.service.Scan(ctx, libID); err != nil {
 			if errors.Is(err, domain.ErrConflict) {
 				return
 			}
-			w.logger.Warn("watcher-triggered scan failed",
-				"library_id", libID,
-				"error", err)
+			log.Warn("watcher-triggered scan failed", "error", err)
 		} else {
-			w.logger.Info("watcher-triggered scan", "library_id", libID)
+			log.Info("watcher-triggered scan")
 		}
 	})
 }
