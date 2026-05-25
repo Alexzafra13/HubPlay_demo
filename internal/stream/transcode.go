@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-// Session represents an active transcoding session.
+// Session representa una sesión de transcoding activa.
+// Los campos cmd/cancel/done son internos; Manager.sessions es la vista pública.
 type Session struct {
 	ID        string
 	ItemID    string
@@ -24,49 +25,22 @@ type Session struct {
 	done      chan struct{}
 }
 
-// Transcoder manages FFmpeg transcoding sessions.
-//
-// Owner del proceso ffmpeg (cmd, cancel, done) — distinto de
-// `Manager.sessions` que owns la sesión lógica del usuario. Ver
-// docstring de `Manager` para el porqué de mantener los dos mapas
-// (olor LL del audit 2026-05-14 — cerrado parcialmente por
-// documentación; refactor completo a "Transcoder stateless" deferred
-// como sesión propia).
+// Transcoder gestiona procesos ffmpeg.
 type Transcoder struct {
 	mu               sync.Mutex
-	sessions         map[string]*Session // keyed by session ID — proceso ffmpeg, no la sesión lógica del usuario
-	baseDir          string              // base directory for transcoded segments
-	ffmpeg           string              // path to ffmpeg binary
-	transcodeTimeout time.Duration       // max duration per transcode process
-	// hwAccel is the detected hardware acceleration kind (vaapi,
-	// nvenc, …) chosen at startup. Empty / HWAccelNone means software
-	// encode via libx264. The transcoder doesn't re-detect; this is
-	// set once and read on every session.
-	hwAccel HWAccelType
-	encoder string // ffmpeg encoder name, e.g. "h264_nvenc" or "libx264"
-	// libx264Preset is the -preset value passed to ffmpeg on the
-	// software encode path. Ignored when encoder != "libx264". Empty
-	// falls back to "veryfast" at use time. Auto-tuned at boot in
-	// AutoTuneStreaming so a fresh install picks a preset matching
-	// the host's core count (see autotune.go); admins can override
-	// from `streaming.transcode_preset` in the admin settings panel.
+	sessions         map[string]*Session
+	baseDir          string
+	ffmpeg           string
+	transcodeTimeout time.Duration
+	hwAccel       HWAccelType
+	encoder       string
 	libx264Preset string
 	logger        *slog.Logger
 }
 
-// TranscoderConfig agrupa los parámetros de `NewTranscoder`. Cierra
-// el olor F14-2-b del audit 2026-05-14 (constructor de 7 params
-// posicionales) y deja el call-site idiomático tanto en producción
-// (`stream.NewManager`) como en los helpers de test.
-//
-// Campos opcionales con defaults aplicados dentro de `NewTranscoder`:
-//   - FFmpegPath: "" → "ffmpeg" (resolución por PATH).
-//   - TranscodeTimeout: <=0 → 4h.
-//   - Encoder: "" → "libx264".
-//   - Libx264Preset: "" → "veryfast" (mismo default histórico).
-//
-// HWAccel="" significa software-encode; los HW paths se settean con
-// el resultado de `DetectHWAccel`.
+// TranscoderConfig agrupa los parámetros de NewTranscoder.
+// Campos opcionales: FFmpegPath ("ffmpeg"), TranscodeTimeout (4h),
+// Encoder ("libx264"), Libx264Preset ("veryfast").
 type TranscoderConfig struct {
 	BaseDir          string
 	FFmpegPath       string
@@ -77,15 +51,8 @@ type TranscoderConfig struct {
 	Logger           *slog.Logger
 }
 
-// NewTranscoder constructs a transcoder. Pass `HWAccelNone` y un
-// `cfg.Encoder` vacío para forzar software encoding (libx264); pasa
-// los valores de `DetectHWAccel` para usar el accelerator de la
-// plataforma.
-//
-// `cfg.Libx264Preset` es el `-preset` que ffmpeg recibirá en el
-// software encode path. Pasa "" para aceptar el "veryfast" histórico;
-// los callers cableados vía `stream.NewManager` reciben un valor
-// hardware-aware vía AutoTuneStreaming. Ignorado en HW encoders.
+// NewTranscoder crea un Transcoder. Defaults aplicados a campos vacíos
+// de cfg (ver TranscoderConfig).
 func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 	ffmpegPath := cfg.FFmpegPath
 	if ffmpegPath == "" {
@@ -115,33 +82,13 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 	}
 }
 
-// Start begins a new HLS transcoding session.
-//
-// El caller llena los campos *caller-side* de `req`: Input, Profile,
-// StartTime, CopyVideo, CopyAudio, ToneMap, StartSegmentNumber,
-// AudioStreamIndex, BurnSub. Los 4 campos *transcoder-side*
-// (OutputDir, HWAccel, Encoder, Libx264Preset) los sobrescribe el
-// Transcoder desde su propio estado interno — cualquier valor que
-// el caller pase en esos 4 será ignorado.
-//
-// `req.CopyVideo` / `req.CopyAudio` piden stream-copy del track
-// correspondiente. Pasar false en ambos da el path full-transcode
-// histórico. La decisión DirectStream pone CopyVideo=true (siempre)
-// y CopyAudio=true cuando el audio codec también matchea al cliente.
-//
-// `req.StartSegmentNumber` controla `-start_number` de HLS. El
-// canonical first-play pasa 0; restart-on-seek pasa el segment
-// index correspondiente al nuevo offset para que los `.ts`
-// producidos alineen con lo que la sintetizada VOD manifest ya
-// anunció al cliente.
-//
-// Cierra olor F14-2-b del audit 2026-05-14 ("patrón replicado tres
-// veces" en BuildFFmpegArgs + Start + RestartAt).
+// Start inicia una sesión HLS. El caller llena los campos caller-side
+// de req; los 4 campos transcoder-side (OutputDir, HWAccel, Encoder,
+// Libx264Preset) se sobrescriben con el estado interno del Transcoder.
 func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Clean up existing session for this ID
 	if existing, ok := t.sessions[sessionID]; ok {
 		existing.Stop()
 		delete(t.sessions, sessionID)
@@ -154,8 +101,6 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	// Sobrescribe los 4 campos transcoder-side del struct. Documentado
-	// en el doc-comment; cualquier valor caller-pasado aquí se ignora.
 	req.OutputDir = outputDir
 	req.HWAccel = t.hwAccel
 	req.Encoder = t.encoder
@@ -200,38 +145,21 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 	return session, nil
 }
 
-// RestartAt replaces the ffmpeg process behind an existing session
-// without wiping the segment cache. Used by the seek-restart path:
-// the old ffmpeg gets cancelled (the caller must already have done
-// that via the session's `cancel` func), and a new ffmpeg is spawned
-// pointing at the same outputDir but with a different `-ss` offset
-// and `-start_number`. Existing segment files from the previous run
-// stay on disk so backwards seeks within the encoded prefix continue
-// to work.
-//
-// Unlike Start(), this method does NOT call existing.Stop() (which
-// would RemoveAll the directory). El caller pasa el *mismo*
-// sessionID que usó en el Start original; ownership stays con este
-// Transcoder. El struct `req` sigue la misma contrato que en
-// `Start`: caller llena los campos caller-side, Transcoder
-// sobrescribe los 4 transcoder-side.
-//
-// Cierra olor F14-2-b del audit 2026-05-14.
+// RestartAt reemplaza el proceso ffmpeg de una sesión existente sin
+// borrar los segmentos previos (útil para seeks hacia atrás). A
+// diferencia de Start, NO llama Stop (no borra el outputDir).
+// Contrato de req igual que Start: caller-side / transcoder-side.
 func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	outputDir := filepath.Join(t.baseDir, sessionID)
-	// outputDir must already exist from the original Start; if
-	// somebody removed it out from under us, recreate so the new
-	// ffmpeg has somewhere to write.
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("ensuring output dir: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	// Sobrescribe los 4 campos transcoder-side. Igual que en Start.
 	req.OutputDir = outputDir
 	req.HWAccel = t.hwAccel
 	req.Encoder = t.encoder
@@ -274,7 +202,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 	return session, nil
 }
 
-// GetSession returns an active session by ID.
+// GetSession devuelve una sesión activa por ID.
 func (t *Transcoder) GetSession(sessionID string) (*Session, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -282,7 +210,7 @@ func (t *Transcoder) GetSession(sessionID string) (*Session, bool) {
 	return s, ok
 }
 
-// Stop terminates a transcoding session and cleans up.
+// Stop termina una sesión y limpia el directorio de salida.
 func (t *Transcoder) Stop(sessionID string) {
 	t.mu.Lock()
 	s, ok := t.sessions[sessionID]
@@ -297,7 +225,7 @@ func (t *Transcoder) Stop(sessionID string) {
 	}
 }
 
-// StopAll terminates all active sessions.
+// StopAll detiene todas las sesiones activas.
 func (t *Transcoder) StopAll() {
 	t.mu.Lock()
 	sessions := make([]*Session, 0, len(t.sessions))
@@ -313,19 +241,18 @@ func (t *Transcoder) StopAll() {
 	t.logger.Info("all transcoding sessions stopped", "count", len(sessions))
 }
 
-// ActiveSessions returns the number of active sessions.
+// ActiveSessions devuelve el número de sesiones activas.
 func (t *Transcoder) ActiveSessions() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.sessions)
 }
 
-// Stop terminates the transcoding process and cleans up output files.
+// Stop cancela el proceso ffmpeg y borra los ficheros de salida.
 func (s *Session) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	// Wait for process to finish (with timeout)
 	select {
 	case <-s.done:
 	case <-time.After(5 * time.Second):
