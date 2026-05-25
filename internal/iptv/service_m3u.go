@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/event"
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // TryAcquireRefresh reserves the per-library refresh slot synchronously
@@ -82,24 +83,46 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 	if err != nil {
 		return 0, fmt.Errorf("get library: %w", err)
 	}
-
 	if lib.M3UURL == "" {
 		return 0, fmt.Errorf("library %s has no M3U URL configured", libraryID)
 	}
 
 	s.logger.Info("refreshing M3U playlist", "library", libraryID, "url", lib.M3UURL)
 
-	body, err := s.fetchURL(ctx, lib.M3UURL, lib.TLSInsecure)
+	// Pipeline: fetch+parse → persistir canales → descubrir EPG → publicar+background.
+	result, err := s.fetchAndParseM3U(ctx, libraryID, lib.M3UURL, lib.TLSInsecure, lib.LanguageFilter)
 	if err != nil {
-		return 0, fmt.Errorf("fetch M3U: %w", err)
+		return 0, err
+	}
+
+	if err := s.persistChannels(ctx, libraryID, result.channels); err != nil {
+		return 0, err
+	}
+
+	epgDiscovered := s.discoverEPGURL(ctx, lib, result.playlistEPGURL, result.now)
+
+	s.publishAndTriggerBackground(libraryID, len(result.channels), epgDiscovered)
+
+	return len(result.channels), nil
+}
+
+// m3uParseResult agrupa la salida del paso fetch+parse para pasar entre etapas.
+type m3uParseResult struct {
+	channels       []*iptvmodel.Channel
+	playlistEPGURL string
+	now            time.Time
+}
+
+// fetchAndParseM3U descarga la playlist M3U y la parsea en streaming,
+// filtrando VOD y por idioma. Devuelve los canales válidos y la URL EPG
+// descubierta en la cabecera (si la hay).
+func (s *Service) fetchAndParseM3U(ctx context.Context, libraryID, m3uURL string, tlsInsecure bool, languageFilter string) (*m3uParseResult, error) {
+	body, err := s.fetchURL(ctx, m3uURL, tlsInsecure)
+	if err != nil {
+		return nil, fmt.Errorf("fetch M3U: %w", err)
 	}
 	defer body.Close() //nolint:errcheck
 
-	// Streaming parse: emit each entry through a callback so we can
-	// filter VOD + language on the fly and never hold the whole
-	// playlist in memory. Xtream-Codes "M3U_PLUS" exports bundle live
-	// + movies + series and routinely run into hundreds of thousands
-	// of entries.
 	now := time.Now()
 	var (
 		dbChannels      []*iptvmodel.Channel
@@ -107,15 +130,13 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 		vodSkipped      int
 		languageSkipped int
 	)
-	allowedLangs := parseLanguageFilter(lib.LanguageFilter)
+	allowedLangs := parseLanguageFilter(languageFilter)
+
 	playlistEPGURL, parsedLines, parseErr := ParseM3UStream(body, func(ch M3UChannel) error {
 		if IsVODChannel(ch) {
 			vodSkipped++
 			return nil
 		}
-		// Language filter — applied AFTER VOD so the operator-visible
-		// "vod_skipped" stat reflects the same denominator regardless
-		// of language config. Empty allowlist = no filter.
 		if !MatchesLanguageFilter(ch, allowedLangs) {
 			languageSkipped++
 			return nil
@@ -137,55 +158,57 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 		})
 		return nil
 	})
-	// Tolerate truncated downloads: large IPTV providers periodically
-	// drop the connection mid-stream. If we already have a usable
-	// count of live channels, prefer to commit them rather than lose
-	// the whole import on a transport hiccup.
-	if parseErr != nil {
-		// Provider returned HTML / non-playlist content. Surface a
-		// human-readable hint instead of the misleading "0 channels"
-		// the caller would otherwise see — this is the single most
-		// common failure mode for self-hosted IPTV (account suspended,
-		// court-ordered IP block in ES, rate-limit, captive portal).
-		if errors.Is(parseErr, ErrNotM3U) {
-			s.logger.Error("M3U source did not return a playlist",
-				"library", libraryID, "url", lib.M3UURL, "hint", "HTML/error page received")
-			return 0, fmt.Errorf("the M3U URL returned an HTML page, not a playlist — "+
-				"likely causes: account suspended, IP blocked (LaLiga/Movistar court "+
-				"order in Spain), bad credentials, or rate-limit. Verify the URL in a "+
-				"browser. Underlying: %w", parseErr)
-		}
-		const minUsable = 50
-		if len(dbChannels) >= minUsable {
-			s.logger.Warn("M3U parse truncated; importing what we got",
-				"library", libraryID, "lines", parsedLines,
-				"channels", len(dbChannels), "vod_skipped", vodSkipped,
-				"language_skipped", languageSkipped, "error", parseErr)
-		} else {
-			return 0, fmt.Errorf("parse M3U: %w", parseErr)
-		}
-	} else {
+
+	if err := s.handleParseResult(libraryID, m3uURL, dbChannels, parsedLines, vodSkipped, languageSkipped, parseErr); err != nil {
+		return nil, err
+	}
+
+	return &m3uParseResult{channels: dbChannels, playlistEPGURL: playlistEPGURL, now: now}, nil
+}
+
+// handleParseResult evalúa el error del parser y decide si el import
+// puede continuar (descarga truncada con suficientes canales) o debe
+// abortar (contenido no-M3U, muy pocos canales).
+func (s *Service) handleParseResult(libraryID, m3uURL string, channels []*iptvmodel.Channel, parsedLines, vodSkipped, languageSkipped int, parseErr error) error {
+	if parseErr == nil {
 		s.logger.Info("M3U parse complete",
 			"library", libraryID, "lines", parsedLines,
-			"channels", len(dbChannels), "vod_skipped", vodSkipped,
+			"channels", len(channels), "vod_skipped", vodSkipped,
 			"language_skipped", languageSkipped)
+		return nil
 	}
 
-	if err := s.channels.ReplaceForLibrary(ctx, libraryID, dbChannels); err != nil {
-		return 0, fmt.Errorf("replace channels: %w", err)
+	// Contenido HTML / no-playlist: error descriptivo para el admin.
+	if errors.Is(parseErr, ErrNotM3U) {
+		s.logger.Error("M3U source did not return a playlist",
+			"library", libraryID, "url", m3uURL, "hint", "HTML/error page received")
+		return fmt.Errorf("the M3U URL returned an HTML page, not a playlist — "+
+			"likely causes: account suspended, IP blocked (LaLiga/Movistar court "+
+			"order in Spain), bad credentials, or rate-limit. Verify the URL in a "+
+			"browser. Underlying: %w", parseErr)
 	}
 
-	// Re-apply hand-edited channel fields (currently tvg_id) that the
-	// admin configured via PATCH /channels/{id}. The overrides table is
-	// keyed by stream URL so the fresh channel rows inherited from the
-	// M3U get their operator-intent restored. Orphaned overrides (URL
-	// dropped from the playlist) are a no-op and stay in the table in
-	// case the URL returns later.
+	// Descarga truncada: aceptar si hay suficientes canales útiles.
+	const minUsable = 50
+	if len(channels) >= minUsable {
+		s.logger.Warn("M3U parse truncated; importing what we got",
+			"library", libraryID, "lines", parsedLines,
+			"channels", len(channels), "vod_skipped", vodSkipped,
+			"language_skipped", languageSkipped, "error", parseErr)
+		return nil
+	}
+	return fmt.Errorf("parse M3U: %w", parseErr)
+}
+
+// persistChannels reemplaza los canales de la biblioteca en la DB y
+// re-aplica los overrides de admin (tvg_id, etc.) keyed por stream URL.
+func (s *Service) persistChannels(ctx context.Context, libraryID string, channels []*iptvmodel.Channel) error {
+	if err := s.channels.ReplaceForLibrary(ctx, libraryID, channels); err != nil {
+		return fmt.Errorf("replace channels: %w", err)
+	}
+
 	if s.overrides != nil {
 		if n, err := s.overrides.ApplyToLibrary(ctx, libraryID); err != nil {
-			// A failure here shouldn't roll back the M3U refresh —
-			// channels are saved, overrides just didn't reapply. Logged
-			// loudly so the admin notices.
 			s.logger.Error("apply channel overrides post-import",
 				"library", libraryID, "error", err)
 		} else if n > 0 {
@@ -193,40 +216,41 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 				"library", libraryID, "count", n)
 		}
 	}
+	return nil
+}
 
-	// Persist any XMLTV URL the playlist advertised so the EPG refresher has
-	// something to fetch. We only overwrite when the library has no URL
-	// configured — an operator-set URL wins over whatever the feed suggests.
-	epgDiscovered := false
-	if playlistEPGURL != "" && lib.EPGURL == "" {
-		lib.EPGURL = playlistEPGURL
-		lib.UpdatedAt = now
-		if err := s.libraries.Update(ctx, lib); err != nil {
-			// Don't fail the whole refresh — the channels are already saved,
-			// and the EPG URL is nice-to-have. Log and move on.
-			s.logger.Warn("persist discovered EPG URL",
-				"library", libraryID, "epg_url", playlistEPGURL, "error", err)
-		} else {
-			epgDiscovered = true
-			s.logger.Info("discovered EPG URL from playlist header",
-				"library", libraryID, "epg_url", playlistEPGURL)
-		}
+// discoverEPGURL persiste la URL XMLTV anunciada en la cabecera del M3U
+// si la biblioteca no tiene una configurada manualmente por el operador.
+func (s *Service) discoverEPGURL(ctx context.Context, lib *librarymodel.Library, playlistEPGURL string, now time.Time) bool {
+	if playlistEPGURL == "" || lib.EPGURL != "" {
+		return false
 	}
 
-	s.logger.Info("M3U refresh complete", "library", libraryID, "channels", len(dbChannels))
+	lib.EPGURL = playlistEPGURL
+	lib.UpdatedAt = now
+	if err := s.libraries.Update(ctx, lib); err != nil {
+		s.logger.Warn("persist discovered EPG URL",
+			"library", lib.ID, "epg_url", playlistEPGURL, "error", err)
+		return false
+	}
+	s.logger.Info("discovered EPG URL from playlist header",
+		"library", lib.ID, "epg_url", playlistEPGURL)
+	return true
+}
+
+// publishAndTriggerBackground emite el evento SSE de refresh completado
+// y lanza las goroutines de EPG auto-refresh y probe post-import.
+func (s *Service) publishAndTriggerBackground(libraryID string, channelCount int, epgDiscovered bool) {
+	s.logger.Info("M3U refresh complete", "library", libraryID, "channels", channelCount)
 	s.publish(event.Event{
 		Type: event.PlaylistRefreshed,
 		Data: map[string]any{
 			"library_id":     libraryID,
-			"channels_count": len(dbChannels),
+			"channels_count": channelCount,
 		},
 	})
 
-	// EPG refresh para URLs recién descubiertas, en background para
-	// que el response del import no bloquee con un XMLTV lento.
-	// Usamos SpawnBackground (no context.Background) para que
-	// Shutdown drene la goroutine — antes era leak en shutdown
-	// concurrente con un refresh (audit olores DD + GGGG).
+	// EPG refresh para URLs recién descubiertas, en background.
 	if epgDiscovered {
 		id := libraryID
 		s.SpawnBackground(func(bgCtx context.Context) {
@@ -239,9 +263,7 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 		})
 	}
 
-	// Probe activo de los canales recién importados para que los
-	// upstreams muertos pasen al bucket "Sin señal" sin esperar al
-	// tick periódico del worker.
+	// Probe activo de canales importados para detectar upstreams muertos.
 	if s.proberWorker != nil {
 		id := libraryID
 		s.SpawnBackground(func(bgCtx context.Context) {
@@ -253,8 +275,6 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 			}
 		})
 	}
-
-	return len(dbChannels), nil
 }
 
 // parseLanguageFilter splits the comma-separated column value into
