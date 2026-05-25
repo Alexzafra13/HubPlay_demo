@@ -41,31 +41,19 @@ const (
 	breakerThreshold       = 5
 	breakerInitialCooldown = 30 * time.Second
 	breakerMaxCooldown     = 5 * time.Minute
-	// If a half-open trial neither succeeds nor fails within this
-	// window, the slot is forfeited so another caller can probe.
-	// Guards against the (rare) path where the trialling fetch
-	// neither completes nor reports — e.g. the request context is
-	// cancelled mid-fetch and the cancel branch skips Record* (we
-	// don't tick the breaker on client cancels).
+	// Si un trial half-open no termina en este plazo, el slot se
+	// libera. Protege contra el caso donde el ctx se cancela
+	// mid-fetch y la rama de cancel no llama a Record*.
 	breakerTrialTimeout = 30 * time.Second
-	// Closed entries with no recent failures are evicted after this
-	// idle window so a server with millions of channels doesn't
-	// grow an unbounded breaker map.
+	// Entradas cerradas sin fallos recientes se eviccionan tras este
+	// periodo para no crecer el map indefinidamente.
 	breakerIdleEvictAfter = 10 * time.Minute
 )
 
-// channelBreaker is the per-channel fast-fail switch in front of the
-// stream proxy's upstream. Self-contained: no DB, no HTTP. The zero
-// value is invalid — always go through newChannelBreaker.
-//
-// Rationale for keying on channelID (not URL or host):
-//   - Per-URL: blows up on segment fetches (each segment is its own
-//     short-lived URL).
-//   - Per-host: too coarse — one expired token on a shared CDN would
-//     punish every working channel hosted there.
-//   - Per-channel: matches the user-visible concept and the existing
-//     ChannelHealthReporter granularity. Stream-URL overrides reset
-//     the channel naturally on the prober's next pass.
+// channelBreaker — fast-fail per-canal delante del upstream del proxy.
+// Sin DB, sin HTTP. Indexado por channelID porque per-URL explota con
+// segmentos y per-host es demasiado amplio (un token caducado en CDN
+// compartido penalizaría todos los canales allí).
 type channelBreaker struct {
 	mu      sync.Mutex
 	entries map[string]*breakerEntry
@@ -82,20 +70,12 @@ func newChannelBreaker(clk clock.Clock) *channelBreaker {
 	}
 }
 
-// Allow reports whether a fresh upstream attempt is allowed for the
-// channel right now. The second return is the time the caller should
-// wait before retrying when allowed=false (zero when allowed=true).
-//
-// Side-effect: when the cooldown of an open breaker has expired, this
-// call promotes it to half-open and reserves the trial slot for the
-// caller. Concurrent callers see allowed=false until the trial
-// resolves via RecordSuccess / RecordFailure (or the trial-timeout
-// window expires). This is what stops a thundering herd from
-// re-hammering a freshly recovered upstream.
+// Allow indica si se permite un intento upstream ahora. Efecto
+// secundario: al expirar el cooldown, promueve a half-open y reserva
+// el slot de trial para este caller (evita thundering herd).
 func (b *channelBreaker) Allow(channelID string) (bool, time.Duration) {
 	if channelID == "" {
-		// No channel context (test paths, ProxyURL with empty ID):
-		// skip rather than create a phantom shared entry under "".
+		// Sin channelID: skip para no crear entrada fantasma en "".
 		return true, 0
 	}
 	b.mu.Lock()
@@ -115,8 +95,7 @@ func (b *channelBreaker) Allow(channelID string) (bool, time.Duration) {
 		if elapsed < e.cooldown {
 			return false, e.cooldown - elapsed
 		}
-		// Cooldown expired — promote to half-open and reserve the
-		// trial slot for this caller.
+		// Cooldown expirado — promover a half-open.
 		e.state = breakerHalfOpen
 		e.trialInFlight = true
 		e.lastChange = now
@@ -125,8 +104,7 @@ func (b *channelBreaker) Allow(channelID string) (bool, time.Duration) {
 		if e.trialInFlight && now.Sub(e.lastChange) < breakerTrialTimeout {
 			return false, breakerTrialTimeout - now.Sub(e.lastChange)
 		}
-		// Either no trial in flight, or the previous trial has
-		// gone stale and is forfeited.
+		// Sin trial en vuelo o trial previo expirado.
 		e.trialInFlight = true
 		e.lastChange = now
 		return true, 0
@@ -134,8 +112,7 @@ func (b *channelBreaker) Allow(channelID string) (bool, time.Duration) {
 	return true, 0
 }
 
-// RecordSuccess closes the breaker and clears the failure counter.
-// Idempotent for unknown channels and already-closed states.
+// RecordSuccess cierra el breaker y resetea el contador de fallos.
 func (b *channelBreaker) RecordSuccess(channelID string) {
 	if channelID == "" {
 		return
@@ -144,7 +121,7 @@ func (b *channelBreaker) RecordSuccess(channelID string) {
 	defer b.mu.Unlock()
 	e, ok := b.entries[channelID]
 	if !ok {
-		// No prior failures — nothing to record.
+		// Sin fallos previos — nada que registrar.
 		return
 	}
 	e.state = breakerClosed
@@ -154,10 +131,9 @@ func (b *channelBreaker) RecordSuccess(channelID string) {
 	e.lastChange = b.clk.Now()
 }
 
-// RecordFailure increments the failure counter (when closed) or
-// re-opens the breaker (when a half-open trial fails). On the
-// closed→open transition the cooldown starts at breakerInitialCooldown;
-// on every half-open→open re-trip it doubles up to breakerMaxCooldown.
+// RecordFailure incrementa fallos (closed) o reabre (half-open).
+// Cooldown inicial en closed→open; se duplica en half-open→open
+// hasta breakerMaxCooldown.
 func (b *channelBreaker) RecordFailure(channelID string) {
 	if channelID == "" {
 		return
@@ -180,7 +156,7 @@ func (b *channelBreaker) RecordFailure(channelID string) {
 			e.lastChange = now
 		}
 	case breakerHalfOpen:
-		// Trial failed — back to open with a longer cooldown.
+		// Trial fallido — volver a open con cooldown más largo.
 		e.state = breakerOpen
 		e.openedAt = now
 		next := e.cooldown * 2
@@ -194,17 +170,13 @@ func (b *channelBreaker) RecordFailure(channelID string) {
 		e.trialInFlight = false
 		e.lastChange = now
 	case breakerOpen:
-		// Already open. The Allow gate normally prevents reaching
-		// here; the rare path is a caller that bypassed Allow (for
-		// instance a test poking RecordFailure directly). Refresh
-		// lastChange so eviction doesn't sweep it as idle.
+		// Ya abierto. Raro llegar aquí (Allow lo previene).
+		// Refrescar lastChange para evitar evicción por idle.
 		e.lastChange = now
 	}
 }
 
-// State returns a human label and the remaining cooldown for the
-// channel. Used by the admin dashboard to show "this channel is in
-// a 25 s cooldown after 5 consecutive upstream failures".
+// State devuelve etiqueta humana y cooldown restante para el dashboard admin.
 func (b *channelBreaker) State(channelID string) (string, time.Duration) {
 	if channelID == "" {
 		return "closed", 0
@@ -230,9 +202,7 @@ func (b *channelBreaker) State(channelID string) (string, time.Duration) {
 	}
 }
 
-// Prune drops closed entries with no recent failures so the map
-// doesn't grow unbounded over weeks of uptime. Idempotent; safe to
-// call from a background ticker.
+// Prune elimina entradas cerradas sin fallos recientes. Idempotente.
 func (b *channelBreaker) Prune() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

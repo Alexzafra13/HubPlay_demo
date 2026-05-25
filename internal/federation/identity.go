@@ -71,26 +71,20 @@ func FingerprintWords(pub ed25519.PublicKey) []string {
 	}
 	sum := sha256First8(pub)
 	out := make([]string, 6)
-	// Usamos los 6 primeros bytes del SHA-256 truncado a 8 (cada uno
-	// mapea a una palabra). Quedan 2 bytes sin usar — la entropía
-	// criptográfica está en la pubkey entera, no en los bytes
-	// individuales, así que truncar más no debilita el protocolo.
+	// 6 primeros bytes del SHA-256 truncado a 8; cada uno mapea a una palabra.
 	for idx := 0; idx < 6; idx++ {
 		out[idx] = phoneticWords[int(sum[idx])%len(phoneticWords)]
 	}
 	return out
 }
 
-// Sign produces a detached Ed25519 signature over msg using this
-// server's private key. The peer verifies with VerifyPeer.
+// Sign firma msg con la privkey de este servidor.
 func (i *Identity) Sign(msg []byte) []byte {
 	return ed25519.Sign(i.PrivateKey, msg)
 }
 
-// VerifyPeer checks an Ed25519 signature against a peer's pinned pubkey.
-// Returns true on success. False covers every failure mode (wrong
-// length, bad encoding, mismatch) — callers don't need to differentiate
-// because the response is the same: reject the request.
+// VerifyPeer verifica firma Ed25519 contra el pubkey pineado del peer.
+// False cubre todo modo de fallo; callers solo necesitan rechazar.
 func VerifyPeer(pub ed25519.PublicKey, msg, sig []byte) bool {
 	if len(pub) != ed25519.PublicKeySize {
 		return false
@@ -101,13 +95,9 @@ func VerifyPeer(pub ed25519.PublicKey, msg, sig []byte) bool {
 	return ed25519.Verify(pub, msg, sig)
 }
 
-// IdentityStore persists this server's Ed25519 identity. Exactly one row
-// in server_identity holds it; the constructor LoadOrCreate guarantees
-// it exists.
-//
-// Concurrency: the in-memory cache is RW-mutex-guarded so identity
-// reads (hot path: every outbound request) take a read lock, and the
-// only writer is initial bootstrap or future Rotate calls.
+// IdentityStore persiste la identidad Ed25519 del servidor. Cache en
+// memoria con RWMutex: lecturas (hot path outbound) con read lock,
+// escrituras solo en bootstrap o Rotate.
 type IdentityStore struct {
 	repo  IdentityRepo
 	clock clock.Clock
@@ -116,25 +106,19 @@ type IdentityStore struct {
 	identity *Identity
 }
 
-// IdentityRepo is the slice of database operations the IdentityStore
-// needs. Declaring it here keeps federation testable with an in-memory
-// fake without dragging in db/sql.
+// IdentityRepo es la interfaz de DB del IdentityStore. Declarada aqui
+// para mantener federation testable con fake in-memory.
 type IdentityRepo interface {
 	GetIdentity(ctx context.Context) (*Identity, error)
 	InsertIdentity(ctx context.Context, id *Identity) error
-	// UpdateIdentityProfile persiste cambios al nombre visible y al color
-	// hex del avatar. La foto se gestiona por separado en SetAvatarPath.
+	// UpdateIdentityProfile persiste nombre visible + color hex del avatar.
 	UpdateIdentityProfile(ctx context.Context, name, avatarColor string) error
-	// SetAvatarPath guarda la ruta relativa al avatar subido (nombre
-	// de fichero dentro de avatarsDir). Cadena vacia significa "sin
-	// avatar"; el frontend cae a iniciales sobre el color.
+	// SetAvatarPath guarda la ruta relativa del avatar. Vacio = sin avatar.
 	SetAvatarPath(ctx context.Context, path string) error
 }
 
-// NewIdentityStore loads the persisted identity into memory.
-// LoadOrCreate must have been called once before in this server's
-// lifetime (typically by main.go startup); after that, NewIdentityStore
-// is just a cache loader.
+// NewIdentityStore carga la identidad persistida en memoria.
+// LoadOrCreate debe haberse llamado antes (tipicamente en main.go).
 func NewIdentityStore(ctx context.Context, repo IdentityRepo, clk clock.Clock) (*IdentityStore, error) {
 	is := &IdentityStore{repo: repo, clock: clk}
 	id, err := repo.GetIdentity(ctx)
@@ -148,8 +132,8 @@ func NewIdentityStore(ctx context.Context, repo IdentityRepo, clk clock.Clock) (
 	return is, nil
 }
 
-// LoadOrCreate returns the persisted identity, generating + persisting a
-// fresh one if none exists. Idempotent and safe to call at every boot.
+// LoadOrCreate devuelve la identidad persistida o genera una nueva.
+// Idempotente, seguro en cada boot.
 func LoadOrCreate(ctx context.Context, repo IdentityRepo, clk clock.Clock, displayName string) (*Identity, error) {
 	existing, err := repo.GetIdentity(ctx)
 	if err != nil {
@@ -168,17 +152,14 @@ func LoadOrCreate(ctx context.Context, repo IdentityRepo, clk clock.Clock, displ
 	return id, nil
 }
 
-// Current returns the in-memory identity. The hot path for every
-// outbound peer request.
+// Current devuelve la identidad en memoria (hot path outbound).
 func (is *IdentityStore) Current() *Identity {
 	is.mu.RLock()
 	defer is.mu.RUnlock()
 	return is.identity
 }
 
-// UpdateProfile persiste el nombre visible + color hex y refresca la
-// cache en memoria. El nombre se valida en el caller (handler) — aqui
-// solo dejamos pasar lo que ya está saneado.
+// UpdateProfile persiste nombre + color hex y refresca cache en memoria.
 func (is *IdentityStore) UpdateProfile(ctx context.Context, name, avatarColor string) error {
 	if name == "" {
 		return errors.New("federation: identity name required")
@@ -197,8 +178,7 @@ func (is *IdentityStore) UpdateProfile(ctx context.Context, name, avatarColor st
 	return nil
 }
 
-// SetAvatarPath actualiza la ruta de la foto del servidor (relativa
-// al avatarsDir) y refresca la cache. Cadena vacia limpia el avatar.
+// SetAvatarPath actualiza la ruta de la foto y refresca cache. Vacio limpia.
 func (is *IdentityStore) SetAvatarPath(ctx context.Context, path string) error {
 	if err := is.repo.SetAvatarPath(ctx, path); err != nil {
 		return fmt.Errorf("federation: set avatar path: %w", err)
@@ -213,8 +193,7 @@ func (is *IdentityStore) SetAvatarPath(ctx context.Context, path string) error {
 	return nil
 }
 
-// newIdentity generates a fresh Ed25519 keypair + UUID. Pure helper;
-// no DB interaction.
+// newIdentity genera keypair Ed25519 + UUID. Sin interaccion con DB.
 func newIdentity(name string, now time.Time) (*Identity, error) {
 	if name == "" {
 		return nil, errors.New("federation: identity name required")

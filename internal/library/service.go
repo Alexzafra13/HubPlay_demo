@@ -17,11 +17,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// validateHTTPURL rejects empty / non-http(s) URLs so we don't persist
-// payloads like `file:///etc/passwd`, `gopher://...` or plain typos.
-// The downstream fetchers (M3U / EPG) already enforce this when they
-// run, but checking at the create boundary turns a deferred preflight
-// error into an immediate 400 the form can render inline.
+// validateHTTPURL rechaza URLs vacías o no-http(s) para evitar persistir
+// payloads como `file:///etc/passwd`. Validar en el boundary de creación
+// convierte un error diferido en un 400 inmediato.
 func validateHTTPURL(raw string) bool {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -40,12 +38,8 @@ func validateHTTPURL(raw string) bool {
 	return true
 }
 
-// normaliseLanguageFilter trims, lower-cases and de-duplicates the
-// language codes coming from a CreateRequest / UpdateRequest payload,
-// then joins them with "," for storage in libraries.language_filter.
-// Non-ISO-shaped tokens (anything other than 2–3 letters) are dropped
-// — keeps the column free of typos and "español" -style human inputs
-// while still accepting the rare 3-letter ISO 639-2 code.
+// normaliseLanguageFilter normaliza códigos de idioma: trim, lowercase,
+// dedup, descarta tokens que no sean 2-3 letras ISO. Devuelve CSV.
 func normaliseLanguageFilter(codes []string) string {
 	if len(codes) == 0 {
 		return ""
@@ -78,28 +72,10 @@ func normaliseLanguageFilter(codes []string) string {
 	return strings.Join(out, ",")
 }
 
-// Service es el facade que ensambla los sub-services tras el cierre
-// del olor Z del audit 2026-05-14 (god-service de 27 métodos en 6
-// responsabilidades). El struct mantiene los fields core que CRUD +
-// scan + lifecycle usan; ACL e item queries se delegan vía embedding
-// a sus sub-services dedicados.
-//
-// Sub-services embedded (method promotion intra-paquete los expone
-// como si fueran métodos del Service, así handlers e interfaces
-// LibraryService consumer-side no cambian):
-//
-//	AccessControl  → ListForUser, UserHasAccess, GrantAccess,
-//	                 RevokeAccess, ListAccessByUser, ReplaceAccess
-//	ItemQueries    → ListItems, ListGenres, GetItem, GetItemChildren,
-//	                 GetItemChildCounts, GetItemStreams,
-//	                 GetItemImages, LatestItems, LatestSeriesByActivity,
-//	                 ItemCount
-//
-// Métodos que se mantienen en el facade directamente (core CRUD +
-// scan + lifecycle):
-//
-//	Create, CreatePersonalIPTV, GetByID, List, Update, Delete,
-//	Scan, ScanSync, IsScanning, ScanAll, Shutdown
+// Service es el facade que ensambla los sub-services de library.
+// CRUD + scan + lifecycle viven aquí directamente; ACL e item queries
+// se delegan via embedding a AccessControl e ItemQueries respectivamente,
+// promoviendo sus métodos sin cambiar la interfaz LibraryService.
 type Service struct {
 	*AccessControl
 	*ItemQueries
@@ -110,15 +86,12 @@ type Service struct {
 	scanner   *scanner.Scanner
 	logger    *slog.Logger
 
-	// Track active scans to prevent concurrent scans of the same library
 	mu       sync.Mutex
 	scanning map[string]bool
 
-	// Background-goroutine lifecycle. bgCtx is cancelled by Shutdown, bgWG
-	// waits for every auto-scan / manual scan goroutine to unwind. Without
-	// this, a goroutine started by Create would keep hitting the (already
-	// closed) DB after the service owner tore down — the exact race the
-	// CI Test Backend was flaking on.
+	// bgCtx/bgWG: ciclo de vida de goroutines background. bgCtx se
+	// cancela en Shutdown; bgWG espera que cada scan termine. Sin esto,
+	// goroutines golpearían la DB ya cerrada.
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 	bgWG     sync.WaitGroup
@@ -151,10 +124,8 @@ func NewService(
 	}
 }
 
-// Shutdown cancels any in-flight background scans and blocks until every
-// goroutine started by this service has returned. Safe to call multiple
-// times. Call from the owning main.go before closing the DB handle, and
-// from tests via t.Cleanup to stop goroutines leaking across tests.
+// Shutdown cancela scans en vuelo y espera que todas las goroutines terminen.
+// Seguro llamar múltiples veces. Llamar antes de cerrar el handle de DB.
 func (s *Service) Shutdown() {
 	s.bgCancel()
 	s.bgWG.Wait()
@@ -166,23 +137,16 @@ type CreateRequest struct {
 	Paths       []string `json:"paths"`
 	ScanMode    string   `json:"scan_mode"` // auto, manual
 
-	// IPTV-only (content_type == "livetv"). `M3UURL` is required for livetv;
-	// `EPGURL` is optional — if omitted, RefreshM3U will try to auto-discover
-	// an XMLTV URL from the playlist's `#EXTM3U url-tvg=...` header.
+	// Solo IPTV (content_type == "livetv"). M3UURL requerido; EPGURL opcional
+	// (RefreshM3U intenta auto-discover desde `#EXTM3U url-tvg=...`).
 	M3UURL string `json:"m3u_url,omitempty"`
 	EPGURL string `json:"epg_url,omitempty"`
 
-	// LanguageFilter is the set of ISO 639-1 lowercase codes (e.g.
-	// ["es", "en"]) the M3U import should keep. Empty / nil means
-	// no filter — every channel imports. See iptv.MatchesLanguageFilter
-	// for the matching rules. Persisted as comma-separated.
+	// LanguageFilter: códigos ISO 639-1 (ej. ["es","en"]) para filtrar canales M3U.
+	// Vacío = sin filtro. Persistido como CSV.
 	LanguageFilter []string `json:"language_filter,omitempty"`
 
-	// TLSInsecure, when true, makes the M3U / EPG fetcher skip TLS
-	// certificate verification for THIS library's HTTPS URLs. Used
-	// for IPTV providers that ship expired Let's Encrypt or self-
-	// signed certs. See librarymodel.Library.TLSInsecure for the security
-	// caveat.
+	// TLSInsecure salta verificación de certificado TLS para URLs de ESTA library.
 	TLSInsecure bool `json:"tls_insecure,omitempty"`
 }
 
@@ -217,13 +181,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.
 
 	s.logger.Info("library created", "id", lib.ID, "name", lib.Name, "type", lib.ContentType)
 
-	// Auto-scan the new library (like Jellyfin does on library creation).
-	// Inherits bgCtx so Shutdown can cancel in-flight scans; the WaitGroup
-	// lets Shutdown wait for the goroutine before returning.
-	//
-	// livetv libraries skip this — there are no filesystem paths to scan.
-	// The admin UI triggers the first `iptv/refresh-m3u` right after creation
-	// to populate channels, so nothing is lost by not scanning here.
+	// Auto-scan la nueva library (como Jellyfin al crear).
+	// livetv se salta — no hay paths filesystem; el admin UI dispara
+	// iptv/refresh-m3u tras la creación para popular canales.
 	if lib.ScanMode != "manual" && lib.ContentType != "livetv" {
 		s.bgWG.Add(1)
 		go func() {
@@ -239,19 +199,10 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.
 	return lib, nil
 }
 
-// CreatePersonalIPTV creates a livetv library AND grants access to
-// `ownerUserID` in one transaction. Used by the admin "personal IPTV
-// list" shortcut so the operator can hand a user their own M3U without
-// the two-step "create library → tick checkbox in users matrix"
-// dance. The library is invisible to every other non-admin user
-// because `library_access` is opt-in (INNER JOIN in ListForUser).
-//
-// Forces `content_type = "livetv"` regardless of what the caller
-// passed; `m3u_url` is still required and validated by the shared
-// validator. `paths` is ignored (livetv has no filesystem paths).
-//
-// `ownerUserID` MUST be a top-level user; the handler resolves
-// profile ids to their parent before reaching here.
+// CreatePersonalIPTV crea una library livetv Y otorga acceso a ownerUserID
+// en una transacción. Atajo admin "IPTV personal" — la library queda
+// invisible para otros users no-admin (library_access es opt-in INNER JOIN).
+// ownerUserID DEBE ser top-level user.
 func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req CreateRequest) (*librarymodel.Library, error) {
 	req.ContentType = "livetv"
 	req.Paths = nil
@@ -292,31 +243,20 @@ func (s *Service) List(ctx context.Context) ([]*librarymodel.Library, error) {
 	return s.libraries.List(ctx)
 }
 
-// (Operaciones ACL — ListForUser, UserHasAccess, GrantAccess,
-// RevokeAccess, ListAccessByUser, ReplaceAccess — viven en
-// access_control.go. El embedding de *AccessControl en Service
-// las promueve para que callers externos las llamen via `s.Method(...)`
-// sin cambios.)
-
 type UpdateRequest struct {
 	Name        string   `json:"name"`
 	ContentType string   `json:"content_type"`
 	Paths       []string `json:"paths"`
 	ScanMode    string   `json:"scan_mode"`
 
-	// IPTV-only. Pointer so "omitted" (leave existing) is distinguishable
-	// from "empty string" (clear the value). json.Decode leaves these nil
-	// when the key isn't in the payload, matching that semantic.
+	// Pointer para distinguir "omitido" (dejar existente) de "vacío" (limpiar).
 	M3UURL *string `json:"m3u_url,omitempty"`
 	EPGURL *string `json:"epg_url,omitempty"`
 
-	// LanguageFilter follows the same "nil = leave as-is, present-and-
-	// empty = clear all" semantic. *[]string lets a PATCH request opt
-	// in or out without forcing the caller to round-trip the existing
-	// value.
+	// nil = dejar como está, presente-y-vacío = limpiar todo.
 	LanguageFilter *[]string `json:"language_filter,omitempty"`
 
-	// TLSInsecure: nil = leave as-is, true / false = explicit toggle.
+	// nil = dejar como está, true/false = toggle explícito.
 	TLSInsecure *bool `json:"tls_insecure,omitempty"`
 }
 
@@ -378,9 +318,8 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Scan triggers an async scan for a library. Returns immediately.
-// If refreshMetadata is true, all items will have their metadata and images
-// re-fetched from providers after the scan completes.
+// Scan dispara un scan asíncrono. Si refreshMetadata es true, re-fetch
+// metadata e imágenes de providers tras el scan.
 func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) error {
 	lib, err := s.libraries.GetByID(ctx, id)
 	if err != nil {
@@ -422,7 +361,7 @@ func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) 
 	return nil
 }
 
-// ScanSync runs a scan synchronously (useful for tests).
+// ScanSync ejecuta un scan síncrono (útil para tests).
 func (s *Service) ScanSync(ctx context.Context, id string) (*scanner.ScanResult, error) {
 	lib, err := s.libraries.GetByID(ctx, id)
 	if err != nil {
@@ -431,20 +370,13 @@ func (s *Service) ScanSync(ctx context.Context, id string) (*scanner.ScanResult,
 	return s.scanner.ScanLibrary(ctx, lib)
 }
 
-// IsScanning returns whether a library is currently being scanned.
 func (s *Service) IsScanning(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.scanning[id]
 }
 
-// (Queries de items — ListItems, ListGenres, GetItem, GetItemChildren,
-// GetItemChildCounts, GetItemStreams, GetItemImages, LatestItems,
-// LatestSeriesByActivity, ItemCount — viven en item_queries.go.
-// El embedding de *ItemQueries en Service las promueve para
-// callers externos.)
-
-// ScanAll triggers an async scan for all libraries with auto scan mode.
+// ScanAll dispara scan asíncrono para todas las libraries en modo auto.
 func (s *Service) ScanAll(ctx context.Context) {
 	libs, err := s.libraries.List(ctx)
 	if err != nil {
@@ -466,10 +398,6 @@ func validateCreateRequest(req CreateRequest) error {
 	if req.Name == "" {
 		fields["name"] = "is required"
 	}
-	// `livetv` is accepted here so the generic Create endpoint can be used
-	// for IPTV libraries (public country playlists via iptv-org or fully
-	// custom M3U URLs). Validation differs: livetv requires `m3u_url`;
-	// everything else requires at least one filesystem path.
 	validTypes := map[string]bool{
 		"movies": true,
 		"shows":  true,

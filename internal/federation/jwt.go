@@ -13,11 +13,9 @@ import (
 	"hubplay/internal/domain"
 )
 
-// PeerClaims is the JWT payload travelling between paired servers. The
-// shape is intentionally minimal — federation auth is not user-scoped
-// at the JWT layer; it's server-scoped (issuer = peer's server_uuid).
-// Per-user attribution for federation streaming travels in the request
-// body of stream-session requests, not in this token.
+// PeerClaims es el payload JWT entre servidores. Scope de servidor
+// (issuer = server_uuid del peer); la atribucion por usuario viaja
+// en el body de stream-session, no en el token.
 type PeerClaims struct {
 	jwt.RegisteredClaims
 	// Nonce is server-issued randomness to defeat replay within the

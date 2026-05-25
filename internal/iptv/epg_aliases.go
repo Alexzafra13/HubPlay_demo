@@ -1,37 +1,15 @@
 package iptv
 
-// Curated alias table for EPG → channel matching. Maps a
-// normalised alias (lowercased, diacritic-folded, whitespace-
-// collapsed) to the canonical form that iptv-org playlists and
-// the davidmuma / epg.pw community feeds converge on.
+// Tabla de aliases EPG → canal. Mapea alias normalizado a la forma
+// canónica que convergen iptv-org y davidmuma/epg.pw.
 //
-// Kept as in-process Go data rather than a DB table because the
-// list is read-only from the operator's perspective (no admin
-// UI to edit aliases, and no per-library tuning yet). When that
-// need appears, promote this to a table with the same
-// alias→canonical schema and layer per-library rows on top of
-// this default set.
-//
-// Rules for adding entries:
-//
-//   - Both sides MUST be already normalised: lowercase, ASCII-
-//     folded (see diacriticFolder), single-spaced, trimmed. The
-//     matcher does not re-normalise before lookup.
-//   - Do NOT add aliases that collide with a different channel's
-//     canonical name. Example: "tv3" is Catalan TV3 in Spain but
-//     a regional station elsewhere — leave ambiguous forms out
-//     rather than guess.
-//   - Add entries for mismatches observed against real XMLTV
-//     feeds (davidmuma, epg.pw). Drive-by entries "just in case"
-//     are discouraged — every alias is a potential false match
-//     for some other channel we haven't seen yet.
-//
-// Applied on both sides of the match: the hub-channel index
-// registers each variant and, where an alias exists, its
-// canonical form; the matcher also alias-folds each programme
-// display-name before lookup.
+// In-process (no tabla DB) porque es read-only. Reglas:
+//   - Ambos lados normalizados: minúsculas, ASCII-folded, trimmed.
+//   - No añadir aliases ambiguos (ej. "tv3" es TV3 en Catalunya
+//     pero otra emisora en otros países).
+//   - Solo entradas para mismatches observados en feeds reales.
 var epgNameAliases = map[string]string{
-	// Spelled-out digits ↔ digit (Spanish free-to-air cadenas).
+	// Dígitos escritos ↔ numeral (cadenas TDT españolas).
 	"la uno":                 "la 1",
 	"la dos":                 "la 2",
 	"cuatro tv":              "cuatro",
@@ -44,7 +22,7 @@ var epgNameAliases = map[string]string{
 	"telecinco hd":           "telecinco",
 	"tele 5":                 "telecinco",
 
-	// TVE family — davidmuma tends to spell these without spaces.
+	// Familia TVE — davidmuma tiende a unir las palabras.
 	"tve 1":                  "la 1",
 	"tve1":                   "la 1",
 	"tve 2":                  "la 2",
@@ -56,7 +34,7 @@ var epgNameAliases = map[string]string{
 	"clan tve":               "clan",
 	"teledeporte":            "tdp",
 
-	// Autonómicas / Catalunya (TV3 group).
+	// Autonómicas / Catalunya (grupo TV3).
 	"tv 3":                   "tv3",
 	"3 cat":                  "3cat",
 	"3cat info":              "3catinfo",
@@ -81,8 +59,7 @@ var epgNameAliases = map[string]string{
 	"canal sur andalucia":    "canal sur",
 	"canal sur 2":            "andalucia tv",
 
-	// Movistar branded bundle (davidmuma uses "laliga" concatenated,
-	// iptv-org uses "la liga" with space).
+	// Movistar — davidmuma usa "laliga" junto, iptv-org "la liga" separado.
 	"movistar laliga":        "movistar la liga",
 	"movistar la liga 1":     "movistar la liga",
 	"movistar liga campeones": "movistar liga de campeones",
