@@ -68,13 +68,13 @@ var epgNameAliases = map[string]string{
 	"m+ la liga":             "movistar la liga",
 	"m+ liga de campeones":   "movistar liga de campeones",
 
-	// DAZN family — consistent across feeds except hyphenation.
+	// DAZN — variantes de separación.
 	"dazn laliga":            "dazn la liga",
 	"dazn f 1":               "dazn f1",
 	"dazn formula 1":         "dazn f1",
 	"dazn motogp":            "dazn moto gp",
 
-	// Common corporate brand normalisations.
+	// Normalizaciones de marca corporativa.
 	"be mad tv":              "bemad",
 	"be mad":                 "bemad",
 	"divinity tv":            "divinity",
@@ -87,7 +87,7 @@ var epgNameAliases = map[string]string{
 	"atreseries tv":          "atreseries",
 	"atres series":           "atreseries",
 
-	// International news — match-friendly forms.
+	// Noticias internacionales.
 	"cnn international":      "cnn int",
 	"cnn intl":               "cnn int",
 	"bbc world news":         "bbc world",
@@ -100,9 +100,7 @@ var epgNameAliases = map[string]string{
 	"dw deutsch":             "dw de",
 }
 
-// canonicalize returns the alias-folded form of v if one exists,
-// otherwise v unchanged. Both input and output are expected to be
-// already normalised (see nameVariants).
+// canonicalize devuelve la forma canónica de v si existe alias, sino v tal cual.
 func canonicalize(v string) string {
 	if c, ok := epgNameAliases[v]; ok {
 		return c

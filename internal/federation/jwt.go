@@ -18,16 +18,13 @@ import (
 // en el body de stream-session, no en el token.
 type PeerClaims struct {
 	jwt.RegisteredClaims
-	// Nonce is server-issued randomness to defeat replay within the
-	// short TTL window. The receiver caches recently-seen nonces for
-	// the token TTL and rejects duplicates.
+	// Nonce: aleatoriedad anti-replay. El receptor cachea nonces recientes
+	// durante el TTL del token y rechaza duplicados.
 	Nonce string `json:"nonce"`
 }
 
-// peerTokenTTL is the maximum lifetime of a peer JWT. Five minutes is
-// short enough that a stolen token has bounded utility (the attacker
-// can replay until expiry) and long enough to absorb mild clock skew
-// between the two servers without reissuance churn.
+// peerTokenTTL: 5 min. Corto para acotar utility de tokens robados,
+// largo para absorber clock skew sin reemision excesiva.
 const peerTokenTTL = 5 * time.Minute
 
 // peerTokenSkew is the clock-skew tolerance when validating expiry.
