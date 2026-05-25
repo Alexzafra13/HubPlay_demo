@@ -17,6 +17,7 @@ import (
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/event"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // MetricsSink is the minimal observability surface the Manager uses. Keeping
@@ -471,42 +472,61 @@ func (m *Manager) StartSession(ctx context.Context, req StartSessionRequest) (*M
 // error, which is the right trade: callers who arrived 50 ms apart
 // for the same key were going to share the result anyway.
 func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSessionRequest) (*ManagedSession, error) {
-	// Unpack a local view del req así que el resto del body (90+
-	// LoC) no tiene que llamar req.X cada vez. Las variables son
-	// puro alias — el behaviour del cuerpo no cambia con el
-	// refactor F14-2-b.
-	userID := req.UserID
-	itemID := req.ItemID
-	profileName := req.ProfileName
-	caps := req.Caps
-	startTime := req.StartTime
-	audioStreamIndex := req.AudioStreamIndex
-	burnSubIndex := req.BurnSubIndex
-	// Re-check after singleflight admission: a previous Do for this
-	// key may have just finished and populated m.sessions in the
-	// brief window between this caller's fast-path miss and its
-	// arrival here. singleflight collapses *concurrent* calls; it
-	// doesn't deduplicate a fresh call against a finished one.
-	m.mu.Lock()
-	if ms, ok := m.sessions[key]; ok {
-		ms.LastAccessed = time.Now()
-		m.mu.Unlock()
+	// Re-check tras singleflight: otra ejecución pudo poblar m.sessions.
+	if ms, ok := m.recheckExistingSession(key); ok {
 		return ms, nil
 	}
 
-	// Global concurrent limit.
-	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
-		active := len(m.sessions)
-		m.mu.Unlock()
-		m.metrics.TranscodeBusy()
-		return nil, domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
+	// Verificar límites globales y por usuario.
+	if err := m.checkSessionLimits(req.UserID); err != nil {
+		return nil, err
 	}
 
-	// Per-user cap. Without this a single user fanning out to many
-	// items / qualities (or repeatedly re-clicking Play during a
-	// flaky network) can soak up the whole global pool. The check
-	// runs while holding the manager mutex so concurrent StartSession
-	// calls from the same user can't both squeeze past it.
+	// Obtener item y streams de la base de datos.
+	item, mediaStreams, err := m.fetchItemAndStreams(ctx, req.ItemID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolver spec de burn-in de subtítulos.
+	burnSub := m.resolveBurnSubtitle(mediaStreams, req.BurnSubIndex, item.Path)
+
+	// Decidir método de playback (DirectPlay / DirectStream / Transcode).
+	decision := m.decidePlayback(ctx, item, mediaStreams, req.Caps, req.ProfileName, burnSub)
+
+	// DirectPlay no necesita sesión de transcode.
+	if decision.Method == MethodDirectPlay {
+		return m.buildDirectPlaySession(key, req.UserID, req.ItemID, decision), nil
+	}
+
+	// Arrancar transcoder, registrar sesión y publicar evento.
+	return m.startTranscodeSession(key, req, item.Path, decision, burnSub)
+}
+
+// recheckExistingSession busca la sesión en el mapa tras entrar en singleflight.
+func (m *Manager) recheckExistingSession(key string) (*ManagedSession, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ms, ok := m.sessions[key]; ok {
+		ms.LastAccessed = time.Now()
+		return ms, true
+	}
+	return nil, false
+}
+
+// checkSessionLimits valida los caps global y per-user bajo m.mu.
+func (m *Manager) checkSessionLimits(userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Límite global de sesiones concurrentes.
+	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
+		active := len(m.sessions)
+		m.metrics.TranscodeBusy()
+		return domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
+	}
+
+	// Límite por usuario para evitar que uno solo acapare el pool.
 	if m.cfg.MaxTranscodeSessionsPerUser > 0 {
 		var userActive int
 		for _, ms := range m.sessions {
@@ -515,112 +535,105 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 			}
 		}
 		if userActive >= m.cfg.MaxTranscodeSessionsPerUser {
-			m.mu.Unlock()
 			m.metrics.TranscodeBusy()
-			return nil, domain.NewTranscodeBusy(userActive, m.cfg.MaxTranscodeSessionsPerUser)
+			return domain.NewTranscodeBusy(userActive, m.cfg.MaxTranscodeSessionsPerUser)
 		}
 	}
-	m.mu.Unlock()
+	return nil
+}
 
-	// Fetch item and its streams
+// fetchItemAndStreams obtiene el item y sus media streams de la DB.
+func (m *Manager) fetchItemAndStreams(ctx context.Context, itemID string) (*librarymodel.Item, []*librarymodel.MediaStream, error) {
 	item, err := m.items.GetByID(ctx, itemID)
 	if err != nil {
 		m.metrics.TranscodeFailed()
-		return nil, fmt.Errorf("get item: %w", err)
+		return nil, nil, fmt.Errorf("get item: %w", err)
 	}
 
 	mediaStreams, err := m.streams.ListByItem(ctx, itemID)
 	if err != nil {
 		m.metrics.TranscodeFailed()
-		return nil, fmt.Errorf("get streams: %w", err)
+		return nil, nil, fmt.Errorf("get streams: %w", err)
 	}
+	return item, mediaStreams, nil
+}
 
-	// Resolve the subtitle-burn-in spec from the requested index.
-	// Find the Nth subtitle stream (per-type ordering, matching the
-	// audio convention) and capture its codec so BuildFFmpegArgs can
-	// choose between filter_complex overlay (bitmap) and the
-	// subtitles= filter (ASS / SSA). Unknown / out-of-range index =
-	// no-op (nil) so a stale client URL doesn't fail the start —
-	// the player just doesn't get its subtitle this time.
-	var burnSub *BurnSubtitleSpec
-	if burnSubIndex >= 0 {
-		var subOrd int
-		for _, s := range mediaStreams {
-			if s.StreamType != "subtitle" {
-				continue
-			}
-			if subOrd == burnSubIndex {
-				if IsBurnableSubtitleCodec(s.Codec) {
-					burnSub = &BurnSubtitleSpec{
-						Index:     burnSubIndex,
-						Codec:     s.Codec,
-						InputPath: item.Path,
-					}
-				}
-				break
-			}
-			subOrd++
+// resolveBurnSubtitle resuelve la spec de burn-in desde el índice pedido.
+func (m *Manager) resolveBurnSubtitle(streams []*librarymodel.MediaStream, burnSubIndex int, inputPath string) *BurnSubtitleSpec {
+	if burnSubIndex < 0 {
+		return nil
+	}
+	var subOrd int
+	for _, s := range streams {
+		if s.StreamType != "subtitle" {
+			continue
 		}
+		if subOrd == burnSubIndex {
+			if IsBurnableSubtitleCodec(s.Codec) {
+				return &BurnSubtitleSpec{
+					Index:     burnSubIndex,
+					Codec:     s.Codec,
+					InputPath: inputPath,
+				}
+			}
+			return nil
+		}
+		subOrd++
 	}
+	return nil
+}
 
+// decidePlayback ejecuta el waterfall de decisión y ajusta por burn-in.
+func (m *Manager) decidePlayback(ctx context.Context, item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *Capabilities, profileName string, burnSub *BurnSubtitleSpec) PlaybackDecision {
 	var decision PlaybackDecision
 	if m.shouldForceDirectPlay(ctx) {
-		decision = DecideForceDirectPlay(item, mediaStreams)
+		decision = DecideForceDirectPlay(item, streams)
 	} else {
-		decision = Decide(item, mediaStreams, caps, profileName)
+		decision = Decide(item, streams, caps, profileName)
 	}
 
-	// Burn-in needs decoded frames to overlay onto. If the waterfall
-	// picked DirectPlay or DirectStream (CopyVideo=true), upgrade to
-	// a full re-encode — same trade-off Plex / Jellyfin make: video
-	// re-encode cost in exchange for the user actually seeing the
-	// subtitle. Audio decision stays untouched.
+	// Burn-in necesita frames decodificados; si el waterfall eligió
+	// DirectPlay o DirectStream, forzar re-encode completo.
 	if burnSub != nil {
 		if decision.Method == MethodDirectPlay {
-			// Forcing DirectStream here would still copy video; jump
-			// straight to Transcode. We keep the streams metadata so
-			// the rest of the path is identical to a regular transcode.
-			decision = Decide(item, mediaStreams, caps, profileName)
+			decision = Decide(item, streams, caps, profileName)
 		}
 		decision.Method = MethodTranscode
 		decision.CopyVideo = false
 	}
+	return decision
+}
 
-	// Direct play doesn't need a transcode session
-	if decision.Method == MethodDirectPlay {
-		ms := &ManagedSession{
-			Session: &Session{
-				ID:        key,
-				ItemID:    itemID,
-				StartedAt: time.Now(),
-			},
-			UserID:       userID,
-			Decision:     decision,
-			LastAccessed: time.Now(),
-		}
-		// No lock needed — direct play sessions are not tracked
-		return ms, nil
+// buildDirectPlaySession construye una ManagedSession para DirectPlay (sin transcoder).
+func (m *Manager) buildDirectPlaySession(key, userID, itemID string, decision PlaybackDecision) *ManagedSession {
+	return &ManagedSession{
+		Session: &Session{
+			ID:        key,
+			ItemID:    itemID,
+			StartedAt: time.Now(),
+		},
+		UserID:       userID,
+		Decision:     decision,
+		LastAccessed: time.Now(),
 	}
+}
 
-	// Start transcode/remux session. Initial run starts at segment
-	// index 0 to match a startTime of 0 (or the seek-from-resume
-	// startTime — at which point segment numbering still begins at
-	// segmentIndex(startTime), but the canonical first-play call
-	// just passes 0 here and lets the synthesized manifest do the
-	// rest).
+// startTranscodeSession arranca ffmpeg y construye la ManagedSession.
+func (m *Manager) startTranscodeSession(key string, req StartSessionRequest, inputPath string, decision PlaybackDecision, burnSub *BurnSubtitleSpec) (*ManagedSession, error) {
 	startSegment := 0
-	if startTime > 0 {
-		startSegment = int(startTime / 6) // matches -hls_time 6
+	if req.StartTime > 0 {
+		startSegment = int(req.StartTime / 6) // coincide con -hls_time 6
 	}
-	session, err := m.transcoder.Start(key, itemID, TranscodeRequest{
-		Input:              item.Path,
+
+	session, err := m.transcoder.Start(key, req.ItemID, TranscodeRequest{
+		Input:              inputPath,
 		Profile:            decision.Profile,
-		StartTime:          startTime,
+		StartTime:          req.StartTime,
 		CopyVideo:          decision.CopyVideo,
 		CopyAudio:          decision.CopyAudio,
 		ToneMap:            decision.ToneMap,
 		StartSegmentNumber: startSegment,
-		AudioStreamIndex:   audioStreamIndex,
+		AudioStreamIndex:   req.AudioStreamIndex,
 		BurnSub:            burnSub,
 	})
 	if err != nil {
@@ -630,9 +643,9 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 
 	ms := &ManagedSession{
 		Session:            session,
-		UserID:             userID,
-		InputPath:          item.Path,
-		AudioStreamIndex:   audioStreamIndex,
+		UserID:             req.UserID,
+		InputPath:          inputPath,
+		AudioStreamIndex:   req.AudioStreamIndex,
 		BurnSubtitle:       burnSub,
 		Decision:           decision,
 		LastAccessed:       time.Now(),
@@ -640,6 +653,12 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		LastRestartTime:    time.Now(),
 	}
 
+	m.registerAndNotify(key, ms, decision)
+	return ms, nil
+}
+
+// registerAndNotify inserta la sesión en el mapa, actualiza métricas y publica evento.
+func (m *Manager) registerAndNotify(key string, ms *ManagedSession, decision PlaybackDecision) {
 	m.mu.Lock()
 	m.sessions[key] = ms
 	active := len(m.sessions)
@@ -652,8 +671,8 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		Type: event.TranscodeStarted,
 		Data: map[string]any{
 			"session_id": key,
-			"user_id":    userID,
-			"item_id":    itemID,
+			"user_id":    ms.UserID,
+			"item_id":    ms.ItemID,
 			"profile":    decision.Profile.Name,
 			"method":     string(decision.Method),
 		},
@@ -664,8 +683,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		"method", decision.Method,
 		"profile", decision.Profile.Name,
 	)
-
-	return ms, nil
 }
 
 // restartCoalesceWindow is the ±N segment range within which a
