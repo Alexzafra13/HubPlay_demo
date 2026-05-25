@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"hubplay/internal/api/apperror"
@@ -27,6 +28,18 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode response", "error", err)
 	}
+}
+
+// requireParam extrae un chi URL param o escribe 400 y devuelve "".
+// El caller comprueba el string vacío para saber si la respuesta ya
+// se escribió. Centraliza el pattern de 4 líneas que se repetía en
+// 55 sites (audit F14-6-b).
+func requireParam(w http.ResponseWriter, r *http.Request, name string) string {
+	v := chi.URLParam(r, name)
+	if v == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing "+name)
+	}
+	return v
 }
 
 func decodeJSON(r *http.Request, v any) error {
