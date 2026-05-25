@@ -10,19 +10,8 @@ func sha256First8(input []byte) []byte {
 	return out
 }
 
-// phoneticWords maps a byte (0-255) to a short pronounceable English
-// word, similar in spirit to the PGP word list. The list is curated for
-// pronounceability and unambiguity over a phone line — no homophones
-// (dear/deer), no easily-confused pairs (sort/short).
-//
-// Source list is shorter than the PGP word list (256 vs 512) because we
-// only use a single-byte index. This costs 1 bit of mnemonic entropy
-// per word vs full PGP, which is acceptable: the underlying security
-// is the SHA-256 truncation, not the encoding.
-// phoneticWords is a slice (not a fixed-size array) so additions to the
-// list don't break compilation. Indexing uses len(phoneticWords) modulo
-// to map a byte (0-255) — distribution is uniform when len = 256, and
-// degrades gracefully if someone trims or extends the list.
+// phoneticWords mapea byte (0-255) a palabras pronunciables estilo PGP.
+// Slice para que adiciones no rompan compilacion; indice modulo len.
 var phoneticWords = []string{
 	"aardvark", "absurd", "accrue", "acme", "adrift", "adult", "afflict", "ahead",
 	"aimless", "Algol", "allow", "alone", "ammo", "ancient", "apple", "artist",

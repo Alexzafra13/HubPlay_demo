@@ -422,17 +422,11 @@ func (c *ChannelOrderOps) ResetChannelOrder(ctx context.Context, userID string) 
 	return c.channelOrder.Reset(ctx, userID)
 }
 
-// ── Channel logo overrides ─────────────────────────────────────────
+// ── Overrides de logo de canal ────────────────────────────────────
 //
-// Admin-only flow para reemplazar el logo de un canal. La row vive en
-// channel_logo_overrides indexada por (library_id, stream_url) — misma
-// invariante que ChannelOverride — para sobrevivir al re-import del M3U
-// (los UUIDs de canales se regeneran en cada refresh).
+// Indexados por (library_id, stream_url) para sobrevivir re-imports M3U.
 
-// SetChannelLogoURL escribe (o reemplaza) un override de URL externa
-// para el canal. El stream_url se resuelve desde la row de channels en
-// el momento de la escritura — si el M3U se ha refrescado entre dos
-// llamadas el nuevo stream_url cuenta a partir de ese instante.
+// SetChannelLogoURL escribe un override de URL externa para el canal.
 func (c *ChannelOrderOps) SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error {
 	if c.logoOverrides == nil {
 		return fmt.Errorf("iptv: channel logo overrides repository not wired")
@@ -447,11 +441,8 @@ func (c *ChannelOrderOps) SetChannelLogoURL(ctx context.Context, channelID, logo
 	return c.logoOverrides.UpsertURL(ctx, ch.LibraryID, ch.StreamURL, logoURL)
 }
 
-// SetChannelLogoFile guarda un override de archivo subido para el
-// canal. Devuelve el basename del archivo PREVIO (si lo había), así el
-// handler que orquesta la subida puede borrar el archivo viejo del
-// disco sin tener que hacer un Get aparte. Devuelve "" cuando no había
-// override previo o el previo era una URL.
+// SetChannelLogoFile guarda un override de archivo subido.
+// Devuelve el basename previo para que el handler borre el viejo.
 func (c *ChannelOrderOps) SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error) {
 	if c.logoOverrides == nil {
 		return "", fmt.Errorf("iptv: channel logo overrides repository not wired")
@@ -477,10 +468,8 @@ func (c *ChannelOrderOps) SetChannelLogoFile(ctx context.Context, channelID, bas
 	return previousFile, nil
 }
 
-// ClearChannelLogo borra el override (URL o file) del canal — el
-// listado vuelve a usar el tvg-logo del M3U a partir del siguiente
-// fetch. Devuelve el basename del archivo previo (si lo había) para
-// que el handler borre el archivo huérfano del disco.
+// ClearChannelLogo borra el override del canal. Devuelve el basename
+// previo para que el handler borre el archivo huérfano.
 func (c *ChannelOrderOps) ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error) {
 	if c.logoOverrides == nil {
 		return "", fmt.Errorf("iptv: channel logo overrides repository not wired")
@@ -503,10 +492,7 @@ func (c *ChannelOrderOps) ClearChannelLogo(ctx context.Context, channelID string
 	return previousFile, nil
 }
 
-// GetChannelLogoOverride devuelve el override actual del canal (URL,
-// archivo, o nil si no hay). El handler GET /channels/{id}/logo lo
-// consulta para decidir entre servir desde disco (file) o pasar por el
-// cache remoto (url o M3U).
+// GetChannelLogoOverride devuelve el override actual (URL, archivo, o nil).
 func (c *ChannelOrderOps) GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error) {
 	if c.logoOverrides == nil {
 		return nil, nil

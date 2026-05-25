@@ -1,9 +1,4 @@
-// Package federation implements server-to-server peering for HubPlay.
-//
-// The package's public surface is the Manager (manager.go); identity.go
-// holds this server's Ed25519 keypair, jwt.go signs and verifies the
-// peer-to-peer JWTs, invite.go mints/parses single-use invite codes,
-// and peer.go declares the Peer domain type.
+// Package federation implementa peering server-a-server para HubPlay.
 package federation
 
 import (
@@ -23,15 +18,9 @@ import (
 	"hubplay/internal/domain"
 )
 
-// Identity holds this server's stable Ed25519 identity. Generated on
-// first boot, persisted, and pinned by every peer who handshakes with
-// us. Rotation is explicit (Phase 2+); for v1, this keypair is held
-// for the life of the server.
-//
-// AvatarColor + AvatarImagePath son personalizacion editable desde
-// el panel admin (PUT /admin/peers/identity y POST .../avatar). Se
-// exponen a peers via /federation/info para que pinten el servidor
-// con su color/foto en lugar de un genérico.
+// Identity es el keypair Ed25519 estable del servidor. Generado en primer
+// boot, pineado por cada peer en handshake. AvatarColor + AvatarImagePath
+// editables desde admin; expuestos via /federation/info.
 type Identity struct {
 	ServerUUID      string
 	Name            string
@@ -43,20 +32,14 @@ type Identity struct {
 	AvatarImagePath string
 }
 
-// Fingerprint renders the Ed25519 public key as four hex groups of four
-// characters (16 chars total, separated by colons) — the SSH-style
-// fingerprint used at handshake time for out-of-band confirmation.
-//
-// We hash the raw pubkey with SHA-256 first and take the leading 8 bytes
-// so the fingerprint is stable across encodings (raw bytes, base64, hex
-// — all produce the same fingerprint) and short enough to read out loud.
+// Fingerprint renderiza el pubkey como 4 grupos hex de 4 chars (estilo SSH).
+// SHA-256 del pubkey truncado a 8 bytes: estable y legible en voz alta.
 func (i *Identity) Fingerprint() string {
 	return Fingerprint(i.PublicKey)
 }
 
-// Fingerprint exposes the same calculation as a free function so the
-// admin UI / handshake code can render fingerprints for peer pubkeys
-// without instantiating an Identity.
+// Fingerprint (free function) para renderizar fingerprints de pubkeys
+// de peers sin instanciar Identity.
 func Fingerprint(pub ed25519.PublicKey) string {
 	if len(pub) == 0 {
 		return ""
