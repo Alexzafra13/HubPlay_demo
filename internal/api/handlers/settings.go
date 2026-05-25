@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"hubplay/internal/config"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/stream"
 )
@@ -28,7 +27,7 @@ import (
 //     app_settings overrides the YAML default; deleting the row reverts
 //     to the YAML default.
 type SettingsHandler struct {
-	settings        *db.SettingsRepository
+	settings        settingsStore
 	baseURLDefault  string
 	hwAccelDefault  config.HWAccelConfig
 	hwAccelDetected []string
@@ -40,6 +39,16 @@ type SettingsHandler struct {
 	// values the running manager is actually using.
 	streamingDefaults StreamingDefaults
 	logger            *slog.Logger
+}
+
+// settingsStore es el contrato estrecho que SettingsHandler usa del
+// repo de app_settings. Aceptarlo como interface (en lugar del
+// `*db.SettingsRepository` concreto) cierra parte del olor H del audit
+// — el contrato queda expresado UNA vez aquí.
+type settingsStore interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string) error
+	Delete(ctx context.Context, key string) error
 }
 
 // StreamingDefaults carries the values the auto-tuner picked for the
@@ -56,7 +65,7 @@ type StreamingDefaults struct {
 // same pattern as SystemHandlerConfig because the wiring sits next to
 // it in the router and we want both to read the same way.
 type SettingsHandlerConfig struct {
-	Settings       *db.SettingsRepository
+	Settings       settingsStore
 	BaseURLDefault string
 	HWAccelDefault config.HWAccelConfig
 	// HWAccelDetected is the list of accelerator backends the boot-time

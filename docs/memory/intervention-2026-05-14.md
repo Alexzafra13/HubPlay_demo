@@ -21,7 +21,7 @@ en este doc (no se edita el audit original).
 | 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
 | 4 | ✅ cerrada | Split de god-handlers/services | P, Z, QQ | Sesión 2026-05-21 tarde (PRs #384, #386+#388, #389) |
 | 5 | ✅ cerrada | Refactor estructural `iptv/` | CC (fase 1 + 2) | Fase 1 sesión tarde-noche (PR #390); fase 2 sesión post-cierre (PR #392) |
-| 6 | ✅ cerrada | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, ~~G~~ (lifecycle ✅ + iptv ✅ + library ✅), **H mountXxx ✅** | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G lifecycle.go en main (#396), G fase iptv cerrada en #417, G fase library cerrada en sesión 2026-05-25 (rama `claude/g-library-module`) — **olor G al 100 %**; H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC) — Dependencies-as-interfaces queda para iteración aparte |
+| 6 | ✅ cerrada | Composition root | ~~V~~, ~~JJ~~, ~~LL~~, ~~G~~ (lifecycle ✅ + iptv ✅ + library ✅), ~~H~~ (mountXxx ✅ + deps-interfaces ✅) | Q ya en sweep M.5; V+JJ+LL mergeados a main vía PR #395 (`61396a3`); G lifecycle.go en main (#396), G fase iptv en #417, G fase library en #418 — **olor G al 100 %**; H router-split cerrado en sesión 2026-05-21 (rama `claude/project-review-1Zrtv`, router.go 1549 → 465 LoC); H deps-interfaces cerrado en #419 — **olor H al 100 %**. Iteración 6 cerrada al 100 % |
 | 7 | 🔄 en curso | Cosmética + schema | D, X, ~~W~~, BB, ~~UUU-mig~~ | W cerrada sesión post-cierre (PR #393, scanner.go 1491 → 332 LoC); D/X/BB pendientes |
 | 8 | 🔄 en curso | Polish de calidad de código | ~~F14-2-a~~ ✅, F14-X, F15-X, F16-X | F14-2-a cerrado sesión 2026-05-21 noche tardía II — `BuildFFmpegArgs` 13 params → `TranscodeRequest` struct |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
@@ -897,13 +897,58 @@ componen la solución completa propuesta en el audit
 2026-05-14:`lc.AddXxx` reemplaza el `runtime` god-struct + cada
 feature module agrupa su wiring.
 
+**✅ H deps-interfaces — 18 `*db.X` en `Dependencies` → interfaces**
+(rama `claude/h-deps-interfaces`)
+
+Segunda mitad del olor H, complementa el mountXxx split de la sesión
+2026-05-21. Nuevo `internal/api/handlers/deps_repos.go` (~218 LoC)
+declara 18 interfaces "broad" — `ItemsRepo`, `MediaStreamsRepo`,
+`ImagesRepo`, `MetadataRepo`, `UserDataRepo`, `ChaptersRepo`,
+`EpisodeSegmentsRepo`, `PeopleRepo`, `StudiosRepo`, `CollectionsRepo`,
+`CollectionImageOverridesRepo`, `UserPreferencesRepoForDeps`,
+`HomeRepo`, `ExternalIDsRepo`, `LibrariesRepo`, `ProvidersConfigRepo`,
+`SettingsRepo`, `ActivityRepo`, `IPTVSchedulesRepo` — que `Dependencies`
+expone en lugar de los 18 `*db.XRepository` concretos.
+
+Sufijo `Repo` distingue las broad de Dependencies de las interfaces
+estrechas que ya existían a nivel handler (`ItemRepository`,
+`ImageRepository`, etc.) — los handlers siguen consumiendo el
+contrato estrecho que ya conocían; sólo el composition root ahora
+ve interfaces. Los `*db.XRepository` concretos satisfacen ambas; el
+wiring `repos.X` en `main.go` no cambia.
+
+4 handlers que aún aceptaban concretos en su firma actualizados:
+
+- `SystemHandlerConfig.Activity *db.ActivityRepository` →
+  `activityRepo` interface local (DailyWatchActivity + TopItems).
+- `SettingsHandlerConfig.Settings *db.SettingsRepository` →
+  `settingsStore` interface local (Get + Set + Delete).
+- `NewAdminStreamsHandler(... items *db.ItemRepository ...)` →
+  `adminStreamsItemLookup` interface local (GetByID).
+- `NewHomeHandler(home *db.HomeRepository, ..., items *db.ItemRepository, ...)` →
+  `homeRepo` (4 rails) + `ItemRepository` (existente, estrecha).
+
+Total impacto:
+
+| Fichero | LoC delta | Cambio |
+|---|---:|---|
+| `internal/api/router.go` | +5/−4 | 18 campos `*db.X` → interfaces broad |
+| `internal/api/handlers/deps_repos.go` (nuevo) | +218 | 18 interfaces broad |
+| `internal/api/handlers/system.go` | +13/−1 | `Activity` → interface |
+| `internal/api/handlers/settings.go` | +15/−4 | `Settings` → interface, import db quitado |
+| `internal/api/handlers/admin_streams.go` | +14/−3 | `items` → interface, import db quitado |
+| `internal/api/handlers/me_home.go` | +20/−3 | `home` + `items` → interfaces |
+
+**Cero tests modificados** — los repos concretos satisfacen
+estructuralmente las nuevas interfaces. `go test ./internal/api/...`
+verde sin cambios (api 7s, handlers 10s).
+
+**Cierra el olor H al 100 %**. Las dos sub-fases (mountXxx split en
+sesión 2026-05-21 → router.go 1549 → 465 LoC; deps-interfaces en
+esta sesión → 18 campos a interfaces) eliminan la "doble expresión
+del contrato" + el god-callback del audit.
+
 ### Pendiente
-
-**⏳ H — `Dependencies` (57 campos, 22 `*db.X` concretos)** + `router.go` (1460 LoC, callback `r.Route("/api/v1", ...)` monolítico de ~1100 LoC). Dos paths posibles según el audit:
-1. **mountXxx helpers** (más simple) — split del callback en `mountAdmin`, `mountIPTV`, `mountFederation`, `mountItems`, etc.
-2. **Interfaces en Dependencies** — los 22 `*db.X` concretos → interfaces. Los handlers ya consumen interfaces locales; el contrato queda doblemente expresado.
-
-router.go es el fichero de **mayor blast-radius del repo** (todo el tráfico HTTP). Sesión propia, alta concentración. Mínimo viable: 3-4 mount helpers grandes (admin/system, iptv, federation) como proof-of-pattern.
 
 ### Aprendizajes operativos
 

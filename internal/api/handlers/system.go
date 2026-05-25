@@ -62,7 +62,7 @@ type LibraryStatsProvider interface {
 //     types that match what the React panel actually consumes.
 type SystemHandler struct {
 	health         db.HealthChecker       // optional — nil makes the DB.OK field stay false without erroring
-	activity       *db.ActivityRepository // optional — nil makes Stream/TopItems return 503
+	activity       activityRepo           // optional — nil makes Stream/TopItems return 503
 	streams        SystemStatsProvider
 	libs           LibraryStatsProvider
 	settings       SettingsReader
@@ -77,6 +77,15 @@ type SystemHandler struct {
 	commit         string
 	buildDate      string
 	logger         *slog.Logger
+}
+
+// activityRepo es el contrato estrecho que SystemHandler usa del repo
+// de activity (TopItems sparkline + watch buckets chart). Interface
+// local (en lugar del `*db.ActivityRepository` concreto) para cerrar
+// la "doble expresión" del contrato — olor H fase 2 del audit.
+type activityRepo interface {
+	DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]db.DailyWatchBucket, error)
+	TopItems(ctx context.Context, cutoff time.Time, limit int) ([]db.TopItemRow, error)
 }
 
 // SettingsReader is the slice of the settings repository system + other
@@ -98,7 +107,7 @@ type SystemHandlerConfig struct {
 	// Activity is the typed repo backing the StreamActivity sparkline
 	// and TopItems chart. Optional — nil makes those endpoints return
 	// 503 "activity unavailable" rather than panic.
-	Activity       *db.ActivityRepository
+	Activity       activityRepo
 	Streams        SystemStatsProvider
 	Libraries      LibraryStatsProvider
 	Settings       SettingsReader
