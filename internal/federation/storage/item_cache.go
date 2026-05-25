@@ -81,10 +81,9 @@ func (r *Repository) UpsertCachedItems(ctx context.Context, peerID, libraryID st
 	return tx.Commit()
 }
 
-// ListCachedItems reads the cache for (peer, library), paginated.
-// Returns items, total (unpaginated count), and the freshest cached_at
-// across rows. Empty result is NOT an error — cache cold.
-func (r *Repository) ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*federation.SharedItem, int, time.Time, error) {
+// ListCachedItems lee la cache para (peer, library), paginado.
+// Resultado vacío NO es error — cache frío.
+func (r *Repository) ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) (federation.CachedItemPage, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -103,7 +102,7 @@ func (r *Repository) ListCachedItems(ctx context.Context, peerID, libraryID stri
 			LibraryID: libraryID,
 		})
 		if herr != nil {
-			return nil, 0, time.Time{}, fmt.Errorf("count cached items: %w", herr)
+			return federation.CachedItemPage{}, fmt.Errorf("count cached items: %w", herr)
 		}
 		total, newestCa = header.Total, header.NewestCachedAt
 	} else {
@@ -112,23 +111,18 @@ func (r *Repository) ListCachedItems(ctx context.Context, peerID, libraryID stri
 			LibraryID: libraryID,
 		})
 		if herr != nil {
-			return nil, 0, time.Time{}, fmt.Errorf("count cached items: %w", herr)
+			return federation.CachedItemPage{}, fmt.Errorf("count cached items: %w", herr)
 		}
 		total, newestCa = header.Total, header.NewestCachedAt
 	}
 	if total == 0 {
-		return []*federation.SharedItem{}, 0, time.Time{}, nil
+		return federation.CachedItemPage{Items: []*federation.SharedItem{}}, nil
 	}
 
-	// Raw SQL mirrors UpsertCachedItems: the sqlc ListCachedItems
-	// query stays on the previously-working column set, and the
-	// two colour columns ride a sibling SELECT here. Same reasoning
-	// as in UpsertCachedItems re: the sqlc 1.31.1 parser bug. The
-	// `COLLATE NOCASE`-style sort is dialect-substituted at
-	// construction time via `caseInsensitiveSort`.
+	// Raw SQL por bug sqlc 1.31.1 con columnas de color + COLLATE NOCASE.
 	rows, err := r.db.QueryContext(ctx, r.listCachedItemsSQL, peerID, libraryID, limit, offset)
 	if err != nil {
-		return nil, 0, time.Time{}, fmt.Errorf("list cached items: %w", err)
+		return federation.CachedItemPage{}, fmt.Errorf("list cached items: %w", err)
 	}
 	defer rows.Close()
 	out := []*federation.SharedItem{}
@@ -139,20 +133,19 @@ func (r *Repository) ListCachedItems(ctx context.Context, peerID, libraryID stri
 			&it.Year, &it.Overview,
 			&it.HasPoster, &it.PosterColor, &it.PosterColorMuted,
 		); err != nil {
-			return nil, 0, time.Time{}, fmt.Errorf("scan cached item: %w", err)
+			return federation.CachedItemPage{}, fmt.Errorf("scan cached item: %w", err)
 		}
 		out = append(out, &it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, time.Time{}, err
+		return federation.CachedItemPage{}, err
 	}
-	// MAX(cached_at) is typed as interface{} by sqlc because the
-	// aggregate could legitimately return NULL; coerce defensively.
+	// MAX(cached_at) puede ser NULL — coerce defensivamente.
 	cachedAt := time.Time{}
 	if t, ok := newestCa.(time.Time); ok {
 		cachedAt = t
 	}
-	return out, int(total), cachedAt, nil
+	return federation.CachedItemPage{Items: out, Total: int(total), CachedAt: cachedAt}, nil
 }
 
 func (r *Repository) PurgeCachedItemsForLibrary(ctx context.Context, peerID, libraryID string) error {

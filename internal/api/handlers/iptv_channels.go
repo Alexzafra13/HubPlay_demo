@@ -11,11 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/iptv"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // ListChannels returns the channels for a library, with the caller's
@@ -26,7 +24,10 @@ import (
 // itself, which needs to show every channel (including the ones the
 // user has hidden) so the toggle remains reachable.
 func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -95,7 +96,10 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 
 // GetChannel returns a single channel.
 func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -146,7 +150,10 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 
 // Groups returns channel group names for a library.
 func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -181,7 +188,10 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -230,7 +240,10 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 			"live transmux is not enabled on this server")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -314,7 +327,10 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "logo cache disabled")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -428,8 +444,14 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 			"live transmux is not enabled on this server")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
-	segment := chi.URLParam(r, "segment")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
+	segment := requireParam(w, r, "segment")
+	if segment == "" {
+		return
+	}
 
 	if !iptv.IsValidSegmentName(segment) {
 		// Path traversal guard: ffmpeg only writes seg-NNNNN.ts and
@@ -459,7 +481,10 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 
 // ProxyURL proxies an HLS segment or sub-playlist for a channel.
 func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		respondError(w, r, http.StatusBadRequest, "MISSING_URL", "url parameter required")
@@ -486,7 +511,10 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 
 // Schedule returns EPG schedule for a channel.
 func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -542,19 +570,19 @@ type bulkScheduleRequest struct {
 // channels are dropped silently (no error) so a single restricted channel
 // doesn't poison a bulk call for an otherwise-authorised user.
 func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
-	channelIDs, from, to, ok := h.parseBulkScheduleRequest(w, r)
+	bq, ok := h.parseBulkScheduleRequest(w, r)
 	if !ok {
 		return
 	}
 
-	allowed := make([]string, 0, len(channelIDs))
-	for _, id := range channelIDs {
+	allowed := make([]string, 0, len(bq.ChannelIDs))
+	for _, id := range bq.ChannelIDs {
 		if id == "" {
 			continue
 		}
 		ch, err := h.svc.GetChannel(r.Context(), id)
 		if err != nil {
-			continue // unknown channel — skip rather than bubble a 500
+			continue // canal desconocido — skip sin 500
 		}
 		if h.canAccessLibrary(r, ch.LibraryID) {
 			allowed = append(allowed, id)
@@ -565,7 +593,7 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	schedules, err := h.svc.GetBulkSchedule(r.Context(), allowed, from, to)
+	schedules, err := h.svc.GetBulkSchedule(r.Context(), allowed, bq.From, bq.To)
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
@@ -583,14 +611,20 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 	respondData(w, http.StatusOK, result)
 }
 
-// parseBulkScheduleRequest normalises the two transports (GET query,
-// POST JSON body) into a single (channelIDs, from, to) tuple. On error
-// it writes the response and returns ok=false; the caller must bail.
-func (h *IPTVHandler) parseBulkScheduleRequest(w http.ResponseWriter, r *http.Request) (ids []string, from, to time.Time, ok bool) {
+// bulkScheduleQuery agrupa los parámetros parseados de una petición
+// de schedule bulk (GET query o POST JSON body).
+type bulkScheduleQuery struct {
+	ChannelIDs []string
+	From       time.Time
+	To         time.Time
+}
+
+// parseBulkScheduleRequest normaliza los dos transportes (GET query,
+// POST JSON body) en un bulkScheduleQuery. En error escribe la
+// respuesta y devuelve ok=false; el caller debe salir.
+func (h *IPTVHandler) parseBulkScheduleRequest(w http.ResponseWriter, r *http.Request) (bulkScheduleQuery, bool) {
 	if r.Method == http.MethodPost {
-		// Cap the body at 1 MiB — more than enough for 5k channel UUIDs
-		// but small enough to stop a malicious client from streaming a
-		// gigabyte into the JSON decoder.
+		// Body cap a 1 MiB — suficiente para 5k UUIDs de canal.
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		defer r.Body.Close() //nolint:errcheck
 
@@ -599,35 +633,35 @@ func (h *IPTVHandler) parseBulkScheduleRequest(w http.ResponseWriter, r *http.Re
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&body); err != nil {
 			respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
-			return nil, time.Time{}, time.Time{}, false
+			return bulkScheduleQuery{}, false
 		}
 		if len(body.Channels) == 0 {
 			respondError(w, r, http.StatusBadRequest, "MISSING_CHANNELS", "channels field required")
-			return nil, time.Time{}, time.Time{}, false
+			return bulkScheduleQuery{}, false
 		}
 		if len(body.Channels) > bulkScheduleMaxChannels {
 			respondError(w, r, http.StatusBadRequest, "TOO_MANY_CHANNELS",
 				fmt.Sprintf("at most %d channels per request", bulkScheduleMaxChannels))
-			return nil, time.Time{}, time.Time{}, false
+			return bulkScheduleQuery{}, false
 		}
-		from, to = parseBulkTimeRange(body.From, body.To)
-		return body.Channels, from, to, true
+		from, to := parseBulkTimeRange(body.From, body.To)
+		return bulkScheduleQuery{ChannelIDs: body.Channels, From: from, To: to}, true
 	}
 
-	// GET fallback — kept for curl / small-list back-compat.
+	// GET fallback para curl / listas pequeñas.
 	raw := r.URL.Query().Get("channels")
 	if raw == "" {
 		respondError(w, r, http.StatusBadRequest, "MISSING_CHANNELS", "channels parameter required")
-		return nil, time.Time{}, time.Time{}, false
+		return bulkScheduleQuery{}, false
 	}
-	ids = strings.Split(raw, ",")
+	ids := strings.Split(raw, ",")
 	if len(ids) > bulkScheduleMaxChannels {
 		respondError(w, r, http.StatusBadRequest, "TOO_MANY_CHANNELS",
 			fmt.Sprintf("at most %d channels per request", bulkScheduleMaxChannels))
-		return nil, time.Time{}, time.Time{}, false
+		return bulkScheduleQuery{}, false
 	}
-	from, to = parseTimeRange(r)
-	return ids, from, to, true
+	from, to := parseTimeRange(r)
+	return bulkScheduleQuery{ChannelIDs: ids, From: from, To: to}, true
 }
 
 func parseTimeRange(r *http.Request) (time.Time, time.Time) {

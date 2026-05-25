@@ -18,8 +18,6 @@ import (
 	"hubplay/internal/domain"
 	"hubplay/internal/provider"
 	"hubplay/internal/stream"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // validSegmentName matches only safe HLS segment filenames (e.g. segment00001.ts, stream.m3u8).
@@ -88,7 +86,10 @@ func (h *StreamHandler) effectiveBaseURL(ctx context.Context) string {
 
 // Info returns playback info for an item (what method will be used, available profiles).
 func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
@@ -137,7 +138,10 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	// Verify item exists
 	if _, err := h.items.GetByID(r.Context(), itemID); err != nil {
@@ -183,8 +187,14 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	itemID := chi.URLParam(r, "itemId")
-	quality := chi.URLParam(r, "quality")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
+	quality := requireParam(w, r, "quality")
+	if quality == "" {
+		return
+	}
 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -327,9 +337,18 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	itemID := chi.URLParam(r, "itemId")
-	quality := chi.URLParam(r, "quality")
-	segmentFile := chi.URLParam(r, "segment")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
+	quality := requireParam(w, r, "quality")
+	if quality == "" {
+		return
+	}
+	segmentFile := requireParam(w, r, "segment")
+	if segmentFile == "" {
+		return
+	}
 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -441,7 +460,10 @@ func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
@@ -463,7 +485,10 @@ func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
 
 // StopSession stops a streaming session.
 func (h *StreamHandler) StopSession(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -523,7 +548,10 @@ func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	mediaStreams, err := h.streams.ListByItem(r.Context(), itemID)
 	if err != nil {
@@ -563,7 +591,10 @@ func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.R
 			"external subtitle providers are not configured")
 		return
 	}
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
@@ -610,11 +641,11 @@ func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.R
 	out := make([]map[string]any, len(results))
 	for i, r := range results {
 		out[i] = map[string]any{
-			"source":    r.Source,
-			"file_id":   r.URL, // OpenSubtitles uses the URL slot for fileID
-			"language":  r.Language,
-			"format":    r.Format,
-			"score":     r.Score,
+			"source":   r.Source,
+			"file_id":  r.URL, // OpenSubtitles uses the URL slot for fileID
+			"language": r.Language,
+			"format":   r.Format,
+			"score":    r.Score,
 		}
 	}
 	respondData(w, http.StatusOK, out)
@@ -639,7 +670,10 @@ func (h *StreamHandler) DownloadExternalSubtitle(w http.ResponseWriter, r *http.
 		return
 	}
 	source := r.URL.Query().Get("source")
-	fileID := chi.URLParam(r, "fileId")
+	fileID := requireParam(w, r, "fileId")
+	if fileID == "" {
+		return
+	}
 	if source == "" || fileID == "" {
 		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST",
 			"source query param and file_id path param are required")
@@ -684,8 +718,15 @@ func (h *StreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	itemID := chi.URLParam(r, "itemId")
-	trackIndex, _ := strconv.Atoi(chi.URLParam(r, "trackIndex"))
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
+	trackRaw := requireParam(w, r, "trackIndex")
+	if trackRaw == "" {
+		return
+	}
+	trackIndex, _ := strconv.Atoi(trackRaw)
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {

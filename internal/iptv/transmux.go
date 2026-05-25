@@ -1,55 +1,19 @@
 package iptv
 
-// HLS transmux session manager for live IPTV streams that the browser
-// cannot consume directly (raw MPEG-TS over HTTP, the format Xtream
-// Codes M3U_PLUS feeds typically serve).
+// Gestor de sesiones de transmux HLS para streams IPTV que el browser
+// no consume directamente (MPEG-TS raw sobre HTTP).
 //
-// Why this exists
-// ───────────────
-// The plain proxy (proxy.go) handles two upstream shapes:
-//  1. HLS playlists (`*.m3u8`) — rewritten and forwarded as HLS, which
-//     hls.js + native Safari + every modern player consumes.
-//  2. Anything else — raw bytes piped through.
+// El proxy (proxy.go) maneja HLS upstream y raw bytes. Raw MPEG-TS no
+// funciona en <video> — este fichero añade la ruta MPEG-TS → ffmpeg
+// `-c copy -f hls` → superficie HLS. CPU casi cero (sin re-encode).
 //
-// Case (2) breaks for browsers because raw MPEG-TS over HTTP is not a
-// format any current `<video>` engine plays. The user sees "200 OK,
-// transferred N MB" in our logs and a stuck spinner in the player.
-//
-// This file adds case (3): MPEG-TS upstream → ffmpeg `-c copy -f hls`
-// transmux → HLS surface. CPU is near-zero because we don't re-encode;
-// we just repackage the existing H.264/AAC ES streams into HLS
-// segments. If the codec doesn't survive copy (rare in IPTV) we fall
-// through to the same error UI as today.
-//
-// Design choices that matter
-// ──────────────────────────
-//  * **One session per channel, shared across viewers.** N users
-//    watching the same channel = 1 ffmpeg process, 1 upstream
-//    connection. Indexed by channel ID, not user ID. This is critical:
-//    a 5-user household watching the same news channel must not pull
-//    5× upstream bandwidth from the provider, and most providers will
-//    rate-limit or kick concurrent connections from the same account.
-//
-//  * **Lazy spawn, idle reap.** Sessions start on first manifest
-//    request and self-destruct after `idleTimeout` with no segment
-//    requests. The reaper runs on a separate goroutine so requests
-//    don't pay teardown cost.
-//
-//  * **Bounded concurrency.** `maxSessions` caps simultaneous ffmpeg
-//    processes. Without this, a user opening 50 tabs each on a
-//    different channel would fork-bomb the server.
-//
-//  * **Ready signal.** The first manifest read after spawn must wait
-//    for ffmpeg to write at least one segment + the playlist file.
-//    The Session exposes `Ready()` (chan closed when first segment
-//    appears) so the handler can block briefly with a timeout instead
-//    of guessing or polling.
-//
-//  * **Failure isolation.** ffmpeg crash (bad codec, dead upstream)
-//    marks the session failed and removes it from the map. Next
-//    request restarts. We don't loop the failure: if `Start()` fails
-//    twice in `failureCooldown` we surface the error and let the
-//    higher-level circuit breaker (proxy.go) take over.
+// Decisiones de diseño clave:
+//   - Una sesión por canal, compartida entre viewers (1 ffmpeg, 1 upstream).
+//   - Spawn lazy, reap por idle timeout.
+//   - Concurrencia acotada por maxSessions.
+//   - Ready signal (chan cerrado cuando aparece el primer segmento).
+//   - Aislamiento de fallos: crash de ffmpeg marca la sesión failed y la
+//     elimina; el circuit breaker de proxy.go toma el control.
 
 import (
 	"context"
@@ -65,16 +29,13 @@ import (
 	"time"
 )
 
-// ErrTooManySessions is returned by GetOrStart when the manager is at
-// capacity. The handler turns this into HTTP 503 so clients can retry
-// after the reap window clears an idle slot.
+// ErrTooManySessions se devuelve cuando el manager está al límite.
+// El handler lo convierte en 503 para que el cliente reintente.
 var ErrTooManySessions = errors.New("iptv-transmux: max sessions reached")
 
-// ErrTooManyReencodeSessions is returned when the per-mode cap on
-// reencode sessions is full but the global cap still has room.
-// Distinct from ErrTooManySessions so the handler can map it to the
-// same 503 + Retry-After while the metrics layer counts it
-// separately ("reencode_busy" outcome).
+// ErrTooManyReencodeSessions se devuelve cuando el cap de re-encode
+// está lleno pero el global aún tiene hueco. Distinto de
+// ErrTooManySessions para métricas separadas ("reencode_busy").
 var ErrTooManyReencodeSessions = errors.New("iptv-transmux: max reencode sessions reached")
 
 // ErrSessionNotFound is returned by Touch / SegmentPath when no live
@@ -192,28 +153,20 @@ type TransmuxManagerConfig struct {
 	// be much smaller than IdleTimeout. Default 5 s.
 	ReaperInterval time.Duration
 
-	// UserAgent is sent to upstream by ffmpeg's HTTP demuxer. Empty
-	// means use defaultTransmuxUserAgent. Override only when a
-	// specific provider needs a different fingerprint.
+	// UserAgent enviado al upstream por el demuxer HTTP de ffmpeg.
+	// Vacío usa defaultTransmuxUserAgent.
 	UserAgent string
 
-	// Gate is the optional per-channel circuit breaker. When set, the
-	// manager refuses GetOrStart with a wrapped CircuitOpenError if
-	// Allow returns false, and records success/failure of each spawn
-	// so the breaker state stays in sync with the proxy plane.
+	// Gate es el circuit breaker per-channel opcional. Si Allow
+	// devuelve false, GetOrStart rechaza con CircuitOpenError.
 	Gate ChannelGate
 
-	// Reporter is the optional channel-health sink. Mirrors what the
-	// stream proxy does: success when the session reaches first
-	// segment, failure when ffmpeg exits before producing one. Lets a
-	// transmux-only failure show up as "unhealthy" in the admin UI
-	// without the prober having to discover it on its next pass.
+	// Reporter es el sink de salud de canal opcional. Registra
+	// success/failure del transmux para el panel admin.
 	Reporter ChannelHealthReporter
 
-	// Metrics is the optional Prometheus sink. When set, the manager
-	// counts spawn outcomes and decode-mode picks so dashboards can
-	// show "channel X has been re-encoding for 3 hours" without
-	// scraping the DB. Nil-safe.
+	// Metrics es el sink Prometheus opcional. Cuenta spawn outcomes
+	// y decode-mode picks. Nil-safe.
 	Metrics TransmuxMetrics
 
 	// EnableReencodeFallback toggles the auto-promotion to reencode

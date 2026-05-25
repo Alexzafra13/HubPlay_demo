@@ -8,8 +8,6 @@ import (
 
 	"hubplay/internal/domain"
 	"hubplay/internal/provider"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // ProviderHandler handles provider management and metadata/image/subtitle lookups.
@@ -61,15 +59,18 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProviderRequest struct {
-	Status   *string            `json:"status"`
-	APIKey   *string            `json:"api_key"`
-	Priority *int               `json:"priority"`
-	Config   map[string]string  `json:"config"`
+	Status   *string           `json:"status"`
+	APIKey   *string           `json:"api_key"`
+	Priority *int              `json:"priority"`
+	Config   map[string]string `json:"config"`
 }
 
 // Update modifies a provider's configuration (API key, status, priority).
 func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+	name := requireParam(w, r, "name")
+	if name == "" {
+		return
+	}
 
 	var req updateProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -159,7 +160,10 @@ func (h *ProviderHandler) SearchMetadata(w http.ResponseWriter, r *http.Request)
 
 // GetMetadata fetches full metadata for a specific external ID.
 func (h *ProviderHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
-	externalID := chi.URLParam(r, "externalId")
+	externalID := requireParam(w, r, "externalId")
+	if externalID == "" {
+		return
+	}
 	itemType := provider.ItemType(r.URL.Query().Get("type"))
 	if itemType == "" {
 		itemType = provider.ItemMovie

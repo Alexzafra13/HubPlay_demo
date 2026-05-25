@@ -17,10 +17,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
-	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // EPGCatalog returns the curated EPG provider list.
@@ -44,7 +42,10 @@ func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
 // Gated by the library ACL — the EPG source list leaks URL info we'd
 // rather keep library-private.
 func (h *IPTVHandler) ListEPGSources(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -64,7 +65,10 @@ type addEPGSourceRequest struct {
 
 // AddEPGSource attaches a new provider. Admin-only at the route level.
 func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -101,8 +105,14 @@ func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 
 // RemoveEPGSource deletes one provider from the library.
 func (h *IPTVHandler) RemoveEPGSource(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
-	sourceID := chi.URLParam(r, "sourceId")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
+	sourceID := requireParam(w, r, "sourceId")
+	if sourceID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return
@@ -121,7 +131,10 @@ type reorderEPGSourcesRequest struct {
 // ReorderEPGSources rewrites every source's priority. Body is the
 // full ordered id list.
 func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) {
-	libraryID := chi.URLParam(r, "id")
+	libraryID := requireParam(w, r, "id")
+	if libraryID == "" {
+		return
+	}
 	if !h.canAccessLibrary(r, libraryID) {
 		h.denyForbidden(w, r)
 		return

@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
-	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/config"
 	"hubplay/internal/domain"
 )
@@ -97,9 +95,9 @@ func (h *AuthHandler) auditEmit() AuditEmitter {
 
 type noopAudit struct{}
 
-func (noopAudit) LogAuthLogin(_ context.Context, _ *http.Request, _, _ string)             {}
-func (noopAudit) LogAuthLoginFailed(_ context.Context, _ *http.Request, _, _ string)        {}
-func (noopAudit) LogAuthLogout(_ context.Context, _ *http.Request, _, _ string)             {}
+func (noopAudit) LogAuthLogin(_ context.Context, _ *http.Request, _, _ string)       {}
+func (noopAudit) LogAuthLoginFailed(_ context.Context, _ *http.Request, _, _ string) {}
+func (noopAudit) LogAuthLogout(_ context.Context, _ *http.Request, _, _ string)      {}
 func (noopAudit) LogPermissionChanged(_ context.Context, _ *http.Request, _ string, _ map[string]bool) {
 }
 func (noopAudit) LogRoleChanged(_ context.Context, _ *http.Request, _, _, _ string)         {}
@@ -410,9 +408,8 @@ func (h *AuthHandler) SetContentRating(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	var req setContentRatingRequest
@@ -447,9 +444,8 @@ func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 
@@ -812,9 +808,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 // once. The legacy /api/v1/users router gates this with RequireAdmin so
 // the handler can trust the caller already has admin role.
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 	plain, err := h.auth.ResetPassword(r.Context(), id)
@@ -984,7 +979,6 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	respondData(w, http.StatusCreated, resp)
 }
 
-
 // ─── Active sessions (user-facing) ──────────────────────────────────
 
 // ListMySessions returns the caller's active auth sessions (one row
@@ -1048,9 +1042,8 @@ func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	sessionID := chi.URLParam(r, "id")
+	sessionID := requireParam(w, r, "id")
 	if sessionID == "" {
-		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "session id is required")
 		return
 	}
 

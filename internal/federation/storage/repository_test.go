@@ -280,15 +280,15 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, total, _, err := fedRepo.ListCachedItems(ctx, "peer-1", "lib-1", 0, 100)
+		page, err := fedRepo.ListCachedItems(ctx, "peer-1", "lib-1", 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if total != 2 {
-			t.Fatalf("total: got %d want 2", total)
+		if page.Total != 2 {
+			t.Fatalf("total: got %d want 2", page.Total)
 		}
 		byID := map[string]*federation.SharedItem{}
-		for _, it := range out {
+		for _, it := range page.Items {
 			byID[it.ID] = it
 		}
 		c := byID["remote-c"]

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
 )
@@ -83,9 +81,8 @@ func (h *IPTVHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Reques
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_CHANNEL_ID", "channelId required")
 		return
 	}
 	var req meIPTVVisibilityRequest

@@ -29,6 +29,13 @@ import (
 	"hubplay/internal/event"
 )
 
+// CachedItemPage agrupa el resultado paginado de ListCachedItems.
+type CachedItemPage struct {
+	Items    []*SharedItem
+	Total    int
+	CachedAt time.Time
+}
+
 // Repo is the database surface the Manager needs. Declaring it here
 // keeps the federation package testable with an in-memory fake.
 type Repo interface {
@@ -61,7 +68,7 @@ type Repo interface {
 
 	// Catalog cache (Phase 4+).
 	UpsertCachedItems(ctx context.Context, peerID, libraryID string, items []*SharedItem, at time.Time) error
-	ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, time.Time, error)
+	ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) (CachedItemPage, error)
 	PurgeCachedItemsForLibrary(ctx context.Context, peerID, libraryID string) error
 
 	// Cross-peer playback state (Phase 5 follow-up, migration 028).

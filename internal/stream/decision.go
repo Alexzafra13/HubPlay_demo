@@ -2,53 +2,37 @@ package stream
 
 import librarymodel "hubplay/internal/library/model"
 
-// PlaybackMethod describes how the server will deliver a media item.
+// PlaybackMethod describe cómo el servidor entrega un media item.
 type PlaybackMethod string
 
 const (
-	MethodDirectPlay   PlaybackMethod = "DirectPlay"   // client plays file as-is
-	MethodDirectStream PlaybackMethod = "DirectStream"  // remux into compatible container
-	MethodTranscode    PlaybackMethod = "Transcode"      // full transcode
+	MethodDirectPlay   PlaybackMethod = "DirectPlay"   // cliente reproduce el fichero tal cual
+	MethodDirectStream PlaybackMethod = "DirectStream"  // remux a container compatible
+	MethodTranscode    PlaybackMethod = "Transcode"      // transcode completo
 )
 
-// PlaybackDecision is the result of analyzing an item's streams against client capabilities.
+// PlaybackDecision es el resultado de analizar los streams del item
+// contra las capabilities del cliente.
 //
-// CopyVideo / CopyAudio describe what ffmpeg should do per stream when
-// the chosen Method requires a session (DirectStream or Transcode):
+// CopyVideo/CopyAudio controlan qué hace ffmpeg por stream:
+//   - true  → `-c:v/a copy` (sin re-encode)
+//   - false → re-encode con el encoder configurado
 //
-//   - CopyVideo=true  → `-c:v copy` (no re-encode, ~5% of full-encode cost)
-//   - CopyVideo=false → re-encode with the configured encoder
-//   - CopyAudio=true  → `-c:a copy` (works only when the codec is in client caps)
-//   - CopyAudio=false → re-encode to AAC stereo (the universal fallback)
-//
-// The flags exist so a common case — "h264 mkv with AC3 / DTS audio
-// the browser can't decode" — can copy the (expensive) video stream
-// untouched and only re-encode the cheap audio. Before this change,
-// that path full-transcoded the video for no reason.
-//
-// ToneMap is set when the source carries an HDR transfer (HDR10 / HLG
-// / Dolby Vision) and the client did NOT declare matching HDR support.
-// It always implies CopyVideo=false (you can't tonemap a stream-copy)
-// and instructs BuildFFmpegArgs to insert a zscale+tonemap filter
-// chain before the regular scale. Without this, an HDR file played on
-// an SDR client looks washed out and grey because the browser pipes
-// the PQ-coded luma straight to the SDR display.
+// ToneMap se activa cuando la fuente es HDR y el cliente no la soporta;
+// implica CopyVideo=false e inserta cadena zscale+tonemap.
 type PlaybackDecision struct {
 	Method     PlaybackMethod
 	VideoCodec string
 	AudioCodec string
 	Container  string
-	Profile    Profile // transcoding profile if Method == Transcode
+	Profile    Profile // perfil de transcoding si Method == Transcode
 	CopyVideo  bool
 	CopyAudio  bool
 	ToneMap    bool
 }
 
-// remuxableContainers lists source containers that ffmpeg can repackage
-// into a web-friendly mp4 without re-encoding. The intersection with
-// the *client's* container caps is the one that matters for DirectPlay
-// (we'd send the file as-is), but DirectStream still needs the source
-// to be remuxable on our side.
+// remuxableContainers lista containers fuente que ffmpeg puede
+// reempaquetar en mp4 sin re-encode.
 var remuxableContainers = map[string]bool{
 	"matroska": true,
 	"mkv":      true,
@@ -56,23 +40,9 @@ var remuxableContainers = map[string]bool{
 	"mpegts":   true,
 }
 
-// DecideForceDirectPlay short-circuits the capability waterfall and
-// returns a DirectPlay decision regardless of what the client said it
-// can decode. This is the policy hook for an admin who has flipped
-// `playback.force_direct_play` on — they're vouching that every client
-// they care about can decode every file in the library, and they'd
-// rather see a broken playback than have the server burn CPU on a
-// transcode they think is unnecessary.
-//
-// We still pull the file's actual video / audio / container metadata
-// so the response shape mirrors what Decide() returns on the
-// happy-path DirectPlay branch — the player UI's pill ("Reproducción
-// directa") shows the codecs the file ships with, not "unknown".
-//
-// Caller is expected to have verified item != nil already; the helper
-// returns a zero-value DirectPlay decision when streams are empty,
-// which the player will then attempt to play with whatever the
-// browser can do.
+// DecideForceDirectPlay cortocircuita el waterfall y devuelve DirectPlay
+// sin importar las capabilities del cliente. Hook de política para el
+// flag admin `playback.force_direct_play`.
 func DecideForceDirectPlay(item *librarymodel.Item, streams []*librarymodel.MediaStream) PlaybackDecision {
 	var videoStream, audioStream *librarymodel.MediaStream
 	for _, s := range streams {
@@ -99,14 +69,9 @@ func DecideForceDirectPlay(item *librarymodel.Item, streams []*librarymodel.Medi
 	}
 }
 
-// Decide analyzes the item's media streams and returns a playback decision.
-// It follows the waterfall: DirectPlay → DirectStream → Transcode.
-//
-// `caps` carries the client's declared capabilities (parsed from the
-// X-Hubplay-Client-Capabilities header). Pass nil for "unknown client" —
-// the function falls back to DefaultWebCapabilities, matching the
-// behaviour the original hard-coded version had so legacy web clients
-// see no change.
+// Decide analiza los media streams del item y devuelve una decisión de
+// playback. Waterfall: DirectPlay → DirectStream → Transcode.
+// `caps` nil = "cliente desconocido" → fallback a DefaultWebCapabilities.
 func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *Capabilities, requestedProfile string) PlaybackDecision {
 	var videoStream, audioStream *librarymodel.MediaStream
 	for _, s := range streams {
@@ -122,7 +87,7 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 		}
 	}
 
-	// No video stream — can't play
+	// Sin video stream — no se puede reproducir
 	if videoStream == nil {
 		return PlaybackDecision{Method: MethodTranscode, Profile: DefaultProfile()}
 	}
@@ -132,18 +97,12 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 	audioOK := audioStream == nil || eff.AudioCodecs[audioStream.Codec]
 	containerOK := containerInSet(item.Container, eff.Containers)
 
-	// HDR gate: a source with an HDR transfer (PQ / HLG / Dolby Vision)
-	// can only ride the DirectPlay or DirectStream paths if the client
-	// declared support for that exact HDR format. Otherwise the browser
-	// receives PQ-coded luma but renders it as if it were sRGB and the
-	// picture comes out grey and desaturated. When this gate fires we
-	// fall through to Transcode with ToneMap=true; the encoder side
-	// inserts a zscale chain that maps the HDR signal down to BT.709.
+	// Gate HDR: fuente con transfer HDR solo puede ir DirectPlay/DirectStream
+	// si el cliente declaró soporte para ese formato exacto. Si no, se
+	// fuerza Transcode con ToneMap=true → zscale a BT.709.
 	hdrOK := videoStream.HDRType == "" || hdrFormatInSet(videoStream.HDRType, eff.HDRFormats)
 
-	// Profile selection used for any path that touches ffmpeg. For
-	// stream-copy paths the profile only carries HLS-segmenting knobs
-	// (the bitrate / scale fields are ignored when -c:v copy is set).
+	// Selección de profile para cualquier path que toque ffmpeg.
 	profile := DefaultProfile()
 	if requestedProfile != "" {
 		if p, ok := Profiles[requestedProfile]; ok {
@@ -151,7 +110,7 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 		}
 	}
 
-	// DirectPlay: everything is compatible — no ffmpeg session at all.
+	// DirectPlay: todo compatible — sin sesión ffmpeg.
 	if videoOK && audioOK && containerOK && hdrOK {
 		return PlaybackDecision{
 			Method:     MethodDirectPlay,
@@ -161,31 +120,10 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 		}
 	}
 
-	// DirectStream when the *video* stream is already compatible. This
-	// covers two distinct sub-cases:
-	//
-	//   a) video + audio OK, only the container needs remuxing
-	//      (the classic h264 + AAC + mkv → mp4/HLS case).
-	//   b) video OK, audio NOT OK (AC3 / DTS / TrueHD ripped from
-	//      BluRay), container is one we can remux into HLS.
-	//
-	// Both promote out of the full-transcode path: ffmpeg copies the
-	// video bytes (`-c:v copy`) and only touches audio when the codec
-	// is incompatible. The video stream is by far the most expensive
-	// to re-encode, so this is the difference between "burns a CPU
-	// core for the duration of playback" and "costs essentially
-	// nothing on top of disk I/O".
-	//
-	// `item.Container` is what ffprobe returned for the file's
-	// format_name field, which for mkv arrives as `"matroska,webm"`
-	// — a comma-separated list. `containerInSet` is the same helper
-	// used for the client-caps check above; it splits on `,` and
-	// matches per-part so we recognise the file as remuxable
-	// regardless of the exact label ffprobe used.
-	// DirectStream stream-copies the video, which is incompatible with
-	// any HDR→SDR fix-up (no decode = nothing to tonemap). Gate it on
-	// hdrOK so HDR sources for SDR clients fall through to the full
-	// transcode below and get the zscale chain applied.
+	// DirectStream: video compatible, solo container o audio necesitan
+	// trabajo. Copia el video (`-c:v copy`) y solo toca audio si el
+	// codec es incompatible. Mucho más barato que transcode completo.
+	// Requiere hdrOK porque stream-copy no permite tonemap.
 	if videoOK && hdrOK && containerInSet(item.Container, remuxableContainers) {
 		return PlaybackDecision{
 			Method:     MethodDirectStream,
@@ -198,10 +136,8 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 		}
 	}
 
-	// Transcode: video codec isn't compatible (HEVC, VP9 on a client
-	// without VP9, …) OR the source is HDR and the client can't render
-	// it. Re-encode everything to the safe defaults; ToneMap propagates
-	// to BuildFFmpegArgs, which inserts the zscale+tonemap chain.
+	// Transcode: codec de video incompatible o fuente HDR sin soporte
+	// en el cliente. Re-encode completo a H.264 + AAC.
 	return PlaybackDecision{
 		Method:     MethodTranscode,
 		VideoCodec: "h264",
@@ -214,11 +150,8 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 	}
 }
 
-// hdrFormatInSet matches the source's HDR transfer label (the strings
-// emitted by probe.detectHDR — "HDR10", "HLG", "DolbyVision") against
-// the client-declared set, which uses lowercase aliases the wire
-// header carries ("hdr10", "hlg", "dovi" / "dolbyvision"). Both sides
-// are lowercased here so the parser doesn't have to memorize casing.
+// hdrFormatInSet compara el label HDR de la fuente (HDR10/HLG/DolbyVision)
+// contra el set declarado por el cliente (lowercase aliases).
 func hdrFormatInSet(hdrType string, set map[string]bool) bool {
 	if hdrType == "" || len(set) == 0 {
 		return false
@@ -236,9 +169,7 @@ func hdrFormatInSet(hdrType string, set map[string]bool) bool {
 }
 
 func containerInSet(container string, set map[string]bool) bool {
-	// ffprobe may return comma-separated format names like
-	// "mov,mp4,m4a,3gp,3g2,mj2" — accept the item if ANY of those
-	// matches a name the client said it supports.
+	// ffprobe puede devolver nombres separados por coma (ej. "mov,mp4,m4a").
 	for _, part := range splitContainer(container) {
 		if set[part] {
 			return true

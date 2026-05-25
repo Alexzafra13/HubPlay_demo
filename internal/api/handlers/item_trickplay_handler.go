@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"hubplay/internal/imaging"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // TrickplayHandler aísla la generación y serving de sprite-sheets de
@@ -72,7 +70,10 @@ func (h *TrickplayHandler) TrickplayManifest(w http.ResponseWriter, r *http.Requ
 			"trickplay generation is not configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	itemDir, err := h.ensureTrickplay(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, errTrickplayPending) {
@@ -101,7 +102,10 @@ func (h *TrickplayHandler) TrickplaySprite(w http.ResponseWriter, r *http.Reques
 			"trickplay generation is not configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	itemDir, err := h.ensureTrickplay(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, errTrickplayPending) {

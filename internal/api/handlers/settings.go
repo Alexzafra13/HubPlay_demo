@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -169,13 +167,13 @@ func (h *SettingsHandler) allowedHWAccelChoices(currentEffective string) []strin
 // indicates whether the change applies immediately or requires a
 // container restart (HWAccel is detected once at boot, so it does).
 type settingDescriptor struct {
-	Key            string `json:"key"`
-	Default        string `json:"default"`
-	Effective      string `json:"effective"`
-	Override       bool   `json:"override"` // true if app_settings has a row for this key
-	RestartNeeded  bool   `json:"restart_needed"`
-	Hint           string `json:"hint"`
-	AllowedValues  []string `json:"allowed_values,omitempty"`
+	Key           string   `json:"key"`
+	Default       string   `json:"default"`
+	Effective     string   `json:"effective"`
+	Override      bool     `json:"override"` // true if app_settings has a row for this key
+	RestartNeeded bool     `json:"restart_needed"`
+	Hint          string   `json:"hint"`
+	AllowedValues []string `json:"allowed_values,omitempty"`
 }
 
 // settingsResponse is the GET payload — every whitelisted key, with
@@ -213,7 +211,7 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// without locking us out of future runtime-editable settings that
 	// might carry a small JSON blob — e.g. an enrichment provider order.
 	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
-	defer r.Body.Close()                          //nolint:errcheck
+	defer r.Body.Close() //nolint:errcheck
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
@@ -253,7 +251,10 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 // the YAML default. This is the explicit way to undo a UI edit
 // without having to guess what the YAML value was.
 func (h *SettingsHandler) Reset(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
+	key := requireParam(w, r, "key")
+	if key == "" {
+		return
+	}
 	if !isAllowedSettingKey(key) {
 		respondError(w, r, http.StatusBadRequest, "UNKNOWN_KEY",
 			"setting key is not editable from the UI")

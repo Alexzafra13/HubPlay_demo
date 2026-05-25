@@ -8,10 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
 )
@@ -138,9 +136,8 @@ func (h *AdminStreamsHandler) KillSession(w http.ResponseWriter, r *http.Request
 	// "user%3Aitem%3Aprofile" string, miss the map lookup, and 204
 	// without actually killing anything (StopSession is idempotent).
 	// Same shape of bug as /collections/{id}; same fix.
-	rawID := chi.URLParam(r, "id")
+	rawID := requireParam(w, r, "id")
 	if rawID == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_ID", "session id required")
 		return
 	}
 	id := rawID

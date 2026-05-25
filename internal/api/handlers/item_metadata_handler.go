@@ -12,8 +12,6 @@ import (
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
 	"hubplay/internal/scanner"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // MetadataIdentifier orquesta el rematch de un item contra un metadata
@@ -73,7 +71,10 @@ func (h *MetadataHandler) IdentifyCandidates(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	query := r.URL.Query().Get("query")
 	year := 0
 	if v := r.URL.Query().Get("year"); v != "" {
@@ -136,7 +137,10 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 
 	var req identifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -197,7 +201,10 @@ func (h *MetadataHandler) UpdateItemMetadata(w http.ResponseWriter, r *http.Requ
 		respondError(w, r, http.StatusServiceUnavailable, "NO_EDITOR", "metadata editor not configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 
 	var req patchMetadataRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -256,7 +263,10 @@ func (h *MetadataHandler) SetMetadataLock(w http.ResponseWriter, r *http.Request
 		respondError(w, r, http.StatusServiceUnavailable, "NO_EDITOR", "metadata editor not configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	var req setMetadataLockRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
@@ -284,7 +294,10 @@ func (h *MetadataHandler) RefreshItemMetadata(w http.ResponseWriter, r *http.Req
 		respondError(w, r, http.StatusServiceUnavailable, "NO_REFRESH", "metadata refresh not configured")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	if err := h.identifier.RefreshItemMetadata(r.Context(), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			respondAppError(w, r.Context(), domain.NewNotFound("item"))

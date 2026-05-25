@@ -5,28 +5,17 @@ import (
 	"strings"
 )
 
-// GenerateMasterPlaylist creates an HLS master playlist (M3U8) offering
-// multiple quality levels for adaptive bitrate streaming.
+// GenerateMasterPlaylist crea un playlist HLS master (M3U8) con
+// múltiples niveles de calidad para streaming adaptativo.
 //
-// `audioStreamIndex` < 0 → omit the ?audio= query string entirely so
-// the per-quality endpoint falls back to ffmpeg's default audio
-// pick (current behaviour for users without a preferred-language
-// preference). >= 0 → embed it in every variant URL the master
-// playlist emits so hls.js's per-quality switches keep the same dub
-// instead of falling back to the file default mid-play.
-//
-// `burnSubIndex` follows the same convention. >= 0 carries a
-// subtitle burn-in choice (PGS / DVDSUB / ASS) into every variant
-// URL so an ABR switch doesn't drop the burned subtitle. < 0 means
-// no burn-in; the player either has no sub picked or is consuming a
-// native HLS sub track instead.
+// `audioStreamIndex` >= 0 → embed en cada variant URL para mantener
+// el dub al cambiar de calidad. `burnSubIndex` >= 0 → lleva la
+// elección de subtítulo quemado a cada variant URL.
 func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStreamIndex, burnSubIndex int) string {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
 
-	// Build the query suffix once. Order is stable (audio first,
-	// subtitle second) so cache keys + test assertions stay
-	// deterministic.
+	// Construye el sufijo query una vez. Orden estable para cache keys.
 	params := make([]string, 0, 2)
 	if audioStreamIndex >= 0 {
 		params = append(params, fmt.Sprintf("audio=%d", audioStreamIndex))
@@ -55,27 +44,14 @@ func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStre
 	return b.String()
 }
 
-// SynthesizeVODManifest builds a complete HLS playlist for a transcode
-// session up-front, listing every segment from 0 to N-1 where N =
-// ceil(durationSeconds / segmentDuration). The manifest declares
-// `#EXT-X-PLAYLIST-TYPE:VOD` and closes with `#EXT-X-ENDLIST`, which
-// is what tells hls.js it can seek freely across the whole timeline
-// — without these the player treats the stream as live and clamps
-// the seek bar to the buffered window.
+// SynthesizeVODManifest construye un playlist HLS VOD completo,
+// listando todos los segmentos de 0 a N-1 donde N = ceil(duración/segmento).
+// Declara `#EXT-X-PLAYLIST-TYPE:VOD` + `#EXT-X-ENDLIST` para que hls.js
+// permita seek libre en toda la timeline.
 //
-// Segment files do NOT have to exist on disk yet; the segment handler
-// is responsible for spinning up ffmpeg at the right offset when an
-// unencoded segment is requested. The trade-off is one ffmpeg
-// restart per "far seek" (cheap with -c:v copy, ~1-2 s to first
-// segment) instead of "seek bar locked to the encoded prefix".
-//
-// `segmentURLPath` is the per-quality URL the segment handler
-// answers — typically the same path that already serves `.ts` files
-// today (e.g. `/api/v1/stream/{itemId}/{quality}/segment%05d.ts`).
-//
-// `durationSeconds` should be > 0; the caller is responsible for
-// falling back to the ffmpeg-written manifest when the item's
-// duration is unknown (stream-only sources, scan-in-progress).
+// Los ficheros de segmento no necesitan existir en disco aún; el handler
+// arranca ffmpeg al offset correcto cuando se solicita un segmento
+// no codificado.
 func SynthesizeVODManifest(durationSeconds, segmentDuration float64, segmentURLTemplate string) string {
 	if durationSeconds <= 0 || segmentDuration <= 0 {
 		return ""
@@ -89,9 +65,7 @@ func SynthesizeVODManifest(durationSeconds, segmentDuration float64, segmentURLT
 		lastSegmentDuration = segmentDuration
 	}
 
-	// `#EXT-X-TARGETDURATION` MUST be >= every segment duration; we
-	// round up to be safe (an off-by-one rounding error would have
-	// some players reject the manifest).
+	// `#EXT-X-TARGETDURATION` DEBE ser >= toda duración de segmento.
 	target := int(segmentDuration)
 	if float64(target) < segmentDuration {
 		target++
@@ -118,13 +92,12 @@ func SynthesizeVODManifest(durationSeconds, segmentDuration float64, segmentURLT
 	return b.String()
 }
 
-// ParseBitrate converts a string like "4000k" or "2M" to bits per
-// second. Exported because the federation streaming handler needs to
-// compute BANDWIDTH= for its peer-flavoured HLS master playlist
-// without re-implementing the same parser.
+// ParseBitrate convierte un string como "4000k" o "2M" a bits por segundo.
+// Exportado porque el handler de streaming federado lo necesita para
+// calcular BANDWIDTH= en su master playlist.
 func ParseBitrate(s string) int { return parseBitrate(s) }
 
-// parseBitrate converts a string like "4000k" to bits per second.
+// parseBitrate convierte un string como "4000k" a bits por segundo.
 func parseBitrate(s string) int {
 	if s == "" {
 		return 0

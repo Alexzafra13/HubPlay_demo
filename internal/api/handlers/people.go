@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/go-chi/chi/v5"
-
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // PeopleRepository is the subset of db.PeopleRepository the handler
@@ -40,7 +38,10 @@ func NewPeopleHandler(people PeopleRepository, imageDir string, logger *slog.Log
 // the client can fall back to its initial-letter placeholder via
 // onError.
 func (h *PeopleHandler) Thumb(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	person, err := h.people.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -92,7 +93,10 @@ func (h *PeopleHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 // frontend falls back to an initial-letter placeholder via the same
 // path it uses on cast strips.
 func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
+	if id == "" {
+		return
+	}
 	person, err := h.people.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -130,10 +134,10 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	entries := make([]map[string]any, 0, len(credits))
 	for _, c := range credits {
 		entry := map[string]any{
-			"item_id":   c.ItemID,
-			"type":      c.Type,
-			"title":     c.Title,
-			"role":      c.Role,
+			"item_id":    c.ItemID,
+			"type":       c.Type,
+			"title":      c.Title,
+			"role":       c.Role,
 			"sort_order": c.SortOrder,
 		}
 		if c.Year > 0 {

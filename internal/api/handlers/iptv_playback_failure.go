@@ -31,12 +31,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 )
-
 
 const (
 	// playbackBeaconCooldown is the per-(user,channel) minimum gap
@@ -69,11 +66,11 @@ var (
 // Locked to a small enum so a misbehaving client can't stuff arbitrary
 // strings into the DB error column.
 var allowedPlaybackKinds = map[string]struct{}{
-	"manifest":  {}, // ERROR_MANIFEST_LOAD_ERROR / parse error
-	"network":   {}, // segment fetch failed
-	"media":     {}, // codec / decoder error
-	"timeout":   {}, // hls.js fragLoadTimeOut
-	"unknown":   {}, // catch-all so the client doesn't have to classify
+	"manifest": {}, // ERROR_MANIFEST_LOAD_ERROR / parse error
+	"network":  {}, // segment fetch failed
+	"media":    {}, // codec / decoder error
+	"timeout":  {}, // hls.js fragLoadTimeOut
+	"unknown":  {}, // catch-all so the client doesn't have to classify
 }
 
 type playbackFailureRequest struct {
@@ -92,7 +89,10 @@ func (h *IPTVHandler) RecordPlaybackFailure(w http.ResponseWriter, r *http.Reque
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "auth required")
 		return
 	}
-	channelID := chi.URLParam(r, "channelId")
+	channelID := requireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {

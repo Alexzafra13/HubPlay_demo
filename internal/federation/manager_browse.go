@@ -74,53 +74,48 @@ func (m *Manager) BrowseAllPeerLibraries(ctx context.Context) ([]*SharedLibraryW
 	return out, nil
 }
 
-// BrowsePeerItems returns paginated items for a peer's library with
-// a read-through cache. Strategy:
-//
-//   1. Check cache age. If fresh (< staleThreshold), serve from cache.
-//   2. If stale or empty, attempt live fetch. On success, write to
-//      cache then serve.
-//   3. If live fetch fails AND we have any cache, serve stale cache
-//      with a "stale" indicator so the user sees content rather than
-//      a broken page when the peer is offline.
-//
-// Returns items, total, and a fromCache flag the API layer can pass
-// through so the UI shows the right freshness badge.
-func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, bool, error) {
-	cached, cachedTotal, cachedAt, cacheErr := m.repo.ListCachedItems(ctx, peerID, libraryID, offset, limit)
+// BrowseResult agrupa el resultado de BrowsePeerItems.
+type BrowseResult struct {
+	Items     []*SharedItem
+	Total     int
+	FromCache bool
+}
+
+// BrowsePeerItems devuelve items paginados de la biblioteca de un peer
+// con read-through cache. Estrategia: cache fresco → live → stale cache.
+func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) (BrowseResult, error) {
+	cachedPage, cacheErr := m.repo.ListCachedItems(ctx, peerID, libraryID, offset, limit)
 	if cacheErr != nil {
 		m.logger.Warn("cache read failed, falling back to live",
 			"peer_id", peerID, "err", cacheErr)
 	}
 
 	now := m.clock.Now()
-	cacheFresh := cacheErr == nil && len(cached) > 0 && now.Sub(cachedAt) < cacheStaleThreshold
+	cacheFresh := cacheErr == nil && len(cachedPage.Items) > 0 && now.Sub(cachedPage.CachedAt) < cacheStaleThreshold
 
 	if cacheFresh {
-		return cached, cachedTotal, true, nil
+		return BrowseResult{Items: cachedPage.Items, Total: cachedPage.Total, FromCache: true}, nil
 	}
 
 	live, liveTotal, liveErr := m.FetchPeerItems(ctx, peerID, libraryID, offset, limit)
 	if liveErr == nil {
-		// Persist to cache only when offset=0 so the cached snapshot
-		// is a coherent first-page view. Phase 7+ extends this to a
-		// background full-catalog walk.
+		// Persistir a cache solo con offset=0 para snapshot coherente.
 		if offset == 0 && len(live) > 0 {
 			if err := m.repo.UpsertCachedItems(ctx, peerID, libraryID, live, now); err != nil {
 				m.logger.Warn("cache write failed", "peer_id", peerID, "err", err)
 			}
 		}
-		return live, liveTotal, false, nil
+		return BrowseResult{Items: live, Total: liveTotal, FromCache: false}, nil
 	}
 
-	// Live failed — serve stale cache if any.
-	if cacheErr == nil && len(cached) > 0 {
+	// Live falló — servir cache stale si existe.
+	if cacheErr == nil && len(cachedPage.Items) > 0 {
 		m.logger.Info("serving stale cache (peer offline)",
-			"peer_id", peerID, "age", now.Sub(cachedAt), "live_err", liveErr)
-		return cached, cachedTotal, true, nil
+			"peer_id", peerID, "age", now.Sub(cachedPage.CachedAt), "live_err", liveErr)
+		return BrowseResult{Items: cachedPage.Items, Total: cachedPage.Total, FromCache: true}, nil
 	}
 
-	return nil, 0, false, liveErr
+	return BrowseResult{}, liveErr
 }
 
 // PurgeCache clears cached items for (peer, library) — wired to the

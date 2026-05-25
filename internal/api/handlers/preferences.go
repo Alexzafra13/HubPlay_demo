@@ -8,8 +8,6 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // PreferencesHandler exposes the per-user key/value preference store
@@ -73,8 +71,11 @@ func (h *PreferencesHandler) SetMine(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 		return
 	}
-	key := chi.URLParam(r, "key")
-	if key == "" || len(key) > 128 {
+	key := requireParam(w, r, "key")
+	if key == "" {
+		return
+	}
+	if len(key) > 128 {
 		respondError(w, r, http.StatusBadRequest, "INVALID_KEY", "key must be 1-128 chars")
 		return
 	}
@@ -110,9 +111,8 @@ func (h *PreferencesHandler) DeleteMine(w http.ResponseWriter, r *http.Request) 
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 		return
 	}
-	key := chi.URLParam(r, "key")
+	key := requireParam(w, r, "key")
 	if key == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_KEY", "key required")
 		return
 	}
 	if err := h.repo.Delete(r.Context(), claims.UserID, key); err != nil {
