@@ -228,71 +228,58 @@ func (r *ItemRepository) List(ctx context.Context, filter librarymodel.ItemFilte
 		filter.SortOrder = "asc"
 	}
 
-	where := "WHERE 1=1"
+	conds := []string{"1=1"}
 	args := []any{}
 
 	if filter.LibraryID != "" {
-		where += " AND library_id = ?"
+		conds = append(conds, "library_id = ?")
 		args = append(args, filter.LibraryID)
 	}
 	if filter.ParentID != "" {
-		where += " AND parent_id = ?"
+		conds = append(conds, "parent_id = ?")
 		args = append(args, filter.ParentID)
 	} else if filter.Type == "" {
-		where += " AND parent_id IS NULL"
+		conds = append(conds, "parent_id IS NULL")
 	}
 	if filter.Type != "" {
-		where += " AND type = ?"
+		conds = append(conds, "type = ?")
 		args = append(args, filter.Type)
 	}
 
-	// Full-text search clause — different physical mechanism per
-	// dialect: SQLite uses the FTS5 virtual table `items_fts`,
-	// Postgres uses the tsvector column `search_vector` populated
-	// by the trigger from migrations/postgres/002_fts_search.sql.
 	if filter.Query != "" {
 		if r.useSQLite() {
-			where += " AND rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)"
+			conds = append(conds, "rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)")
 			args = append(args, filter.Query+"*")
 		} else {
-			where += " AND search_vector @@ to_tsquery('simple', ?)"
+			conds = append(conds, "search_vector @@ to_tsquery('simple', ?)")
 			args = append(args, toTSQueryPrefix(filter.Query))
 		}
 	}
 
-	// Normalized genre lookup: the synthetic value id ("genre:<lower>")
-	// lets us filter with a single equality + indexed map join, no
-	// JSON scan over `metadata.genres_json`.
 	if filter.Genre != "" {
-		where += " AND id IN (SELECT item_id FROM item_value_map WHERE value_id = ?)"
+		conds = append(conds, "id IN (SELECT item_id FROM item_value_map WHERE value_id = ?)")
 		args = append(args, GenreValueID(filter.Genre))
 	}
-	// Year range — items without a year (year IS NULL) bypass these
-	// constraints intentionally, matching the previous client-side
-	// behaviour where unrated/unyear'd items don't get hidden.
 	if filter.YearFrom > 0 {
-		where += " AND year IS NOT NULL AND year >= ?"
+		conds = append(conds, "year IS NOT NULL AND year >= ?")
 		args = append(args, filter.YearFrom)
 	}
 	if filter.YearTo > 0 {
-		where += " AND year IS NOT NULL AND year <= ?"
+		conds = append(conds, "year IS NOT NULL AND year <= ?")
 		args = append(args, filter.YearTo)
 	}
 	if filter.MinRating > 0 {
-		where += " AND community_rating IS NOT NULL AND community_rating >= ?"
+		conds = append(conds, "community_rating IS NOT NULL AND community_rating >= ?")
 		args = append(args, filter.MinRating)
 	}
 	if len(filter.AllowedContentRatings) > 0 {
-		// IN (?,?,?) over the allow-list. Items with NULL/empty
-		// content_rating are excluded — when a caller passes a
-		// non-empty allow-list it always means "the caller has a
-		// cap set" and we deny unrated items the same way the
-		// AllowedRating helper does for symmetry.
-		where += " AND content_rating IS NOT NULL AND content_rating IN (" + sqlPlaceholders(len(filter.AllowedContentRatings)) + ")"
+		conds = append(conds, "content_rating IS NOT NULL AND content_rating IN ("+sqlPlaceholders(len(filter.AllowedContentRatings))+")")
 		for _, v := range filter.AllowedContentRatings {
 			args = append(args, v)
 		}
 	}
+
+	where := "WHERE " + strings.Join(conds, " AND ")
 
 	driver := r.driver()
 
@@ -522,25 +509,23 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	// `is_available` (no `= 1`) — truthy in both SQLite (BOOLEAN
 	// stored as INTEGER) and Postgres (real BOOLEAN), avoids the
 	// `integer = boolean` mismatch the explicit literal would trip.
-	where := "WHERE is_available"
+	conds := []string{"is_available"}
 	args := []any{}
 	if libraryID != "" {
-		where += " AND library_id = ?"
+		conds = append(conds, "library_id = ?")
 		args = append(args, libraryID)
 	}
 	if itemType != "" {
-		where += " AND type = ?"
+		conds = append(conds, "type = ?")
 		args = append(args, itemType)
 	}
 	if len(allowedRatings) > 0 {
-		// Same content_rating IN (...) gate as List() above; the
-		// "+ Nuevos" / "Reciente en X" rails honour the caller
-		// profile's content cap.
-		where += " AND content_rating IS NOT NULL AND content_rating IN (" + sqlPlaceholders(len(allowedRatings)) + ")"
+		conds = append(conds, "content_rating IS NOT NULL AND content_rating IN ("+sqlPlaceholders(len(allowedRatings))+")")
 		for _, v := range allowedRatings {
 			args = append(args, v)
 		}
 	}
+	where := "WHERE " + strings.Join(conds, " AND ")
 	args = append(args, limit)
 
 	query := rewritePlaceholders(r.driver(), fmt.Sprintf(
