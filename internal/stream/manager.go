@@ -19,9 +19,7 @@ import (
 	"hubplay/internal/event"
 )
 
-// MetricsSink is the minimal observability surface the Manager uses. Keeping
-// it local (instead of importing an observability package) avoids a package
-// cycle and lets tests pass a nil-safe sink without Prometheus in the mix.
+// MetricsSink interfaz local de observability para evitar ciclo de paquetes.
 type MetricsSink interface {
 	TranscodeStarted()
 	TranscodeBusy()
@@ -29,9 +27,6 @@ type MetricsSink interface {
 	SetActiveSessions(n int)
 }
 
-// noopSink is the default implementation used when no metrics are wired in.
-// Using a value type with empty methods lets the Manager call metrics.* on
-// every hot path without nil checks.
 type noopSink struct{}
 
 func (noopSink) TranscodeStarted()       {}
@@ -39,29 +34,10 @@ func (noopSink) TranscodeBusy()          {}
 func (noopSink) TranscodeFailed()        {}
 func (noopSink) SetActiveSessions(n int) {}
 
-// Manager orchestrates streaming sessions (direct play, remux, and
-// transcode).
-//
-// Responsabilidad respecto a `Transcoder` (cierra parcialmente el olor
-// LL del audit 2026-05-14, "doble session tracking"):
-//
-//   - **Manager.sessions** mapa keyed por `sessionKey(userID, itemID,
-//     profile, audioIdx, subIdx)` — clave compuesta de la sesión
-//     LÓGICA del usuario. El valor es `*ManagedSession`, que envuelve
-//     un `*Session` raw y añade contexto de usuario, decisión de
-//     playback, mutex de restart por-sesión y trickle de
-//     LastAccessed. Es la API pública: handlers cliente entran aquí.
-//
-//   - **Transcoder.sessions** mapa keyed por `sessionID` bare — clave
-//     del proceso ffmpeg físico. El valor es `*Session` con cmd,
-//     cancel, done — control del proceso. Es interno al paquete.
-//
-// Los dos mapas apuntan al MISMO `*Session` por debajo (ManagedSession
-// embed un puntero a Session) — no hay duplicación de estado, sólo dos
-// vistas con propósitos distintos. La auditoría sugirió hacer el
-// Transcoder stateless (tracking solo en Manager) pero eso implica
-// migrar cmd/cancel/done a ManagedSession + reescribir Start +
-// RestartSessionAt + StopSession, deferred como sesión propia.
+// Manager orquesta sesiones de streaming (direct play, remux, transcode).
+// Manager.sessions es la vista lógica (clave compuesta user+item+profile+audio+sub);
+// Transcoder.sessions es la vista del proceso ffmpeg. Ambos mapas apuntan
+// al mismo *Session — no hay duplicación, solo dos perspectivas.
 type Manager struct {
 	mu         sync.Mutex
 	sessions   map[string]*ManagedSession
@@ -71,152 +47,61 @@ type Manager struct {
 	cfg        config.StreamingConfig
 	logger     *slog.Logger
 	stopClean  chan struct{}
-	metrics    MetricsSink
-	bus        *event.Bus // optional; nil-safe
-	// startGroup serialises StartSession's slow path per session
-	// key. Two parallel callers for the same userID:itemID:profile
-	// (player init + an immediate auth-retry burst, a double-clicked
-	// Play, hls.js requesting the manifest while the page is still
-	// mounting, etc.) used to BOTH miss the m.sessions fast-path
-	// lookup and BOTH reach transcoder.Start, leaving two ffmpegs
-	// alive simultaneously and writing segments to the same cache
-	// dir. singleflight collapses the racers onto a single execution;
-	// late joiners receive the same ManagedSession the winner built.
+	metrics MetricsSink
+	bus     *event.Bus // nil-safe
+	// startGroup: singleflight por session key para colapsar inicios concurrentes.
 	startGroup singleflight.Group
-	// hwAccel is the snapshot of accelerator detection done at startup.
-	// Cached here so the admin /system/stats endpoint can read it without
-	// re-running ffmpeg on every poll. Zero value means "no detection
-	// performed" (HWAccel.Enabled = false in config).
+	// hwAccel: snapshot de detección al arranque; leído por admin stats.
 	hwAccel HWAccelResult
-	// forceDirectPlayLookup is the optional hook into runtime settings
-	// for `playback.force_direct_play`. When set and the lookup
-	// returns true, the manager skips the capability waterfall and
-	// returns a DirectPlay decision — the admin has vouched that
-	// every client can decode every file. Nil-safe: when the hook
-	// isn't wired (tests, deployments without runtime settings) the
-	// normal Decide() path runs unchanged.
+	// forceDirectPlayLookup: hook a runtime settings para el toggle admin
+	// playback.force_direct_play. Nil-safe.
 	forceDirectPlayLookup func(context.Context) bool
 }
 
-// ManagedSession wraps a transcoding session with access tracking.
+// ManagedSession envuelve una Session con tracking de acceso y contexto de usuario.
 type ManagedSession struct {
 	*Session
-	UserID string
-	// InputPath is the absolute file path of the source media. We
-	// cache it here so RestartSessionAt doesn't have to re-query the
-	// items repository every time the user seeks to an unencoded
-	// region — the path is immutable for the life of the session.
-	InputPath string
-	// AudioStreamIndex is the per-type audio track ffmpeg should
-	// pick (0-based, mapped from the user's preferred-language /
-	// in-player switcher). -1 = let ffmpeg auto-pick the file's
-	// default audio. Cached on the session so RestartSessionAt
-	// keeps the same dub across seeks.
-	AudioStreamIndex int
-	// BurnSubtitle is the subtitle stream burned into the encoded
-	// video frames (PGS / DVDSUB / ASS). Nil = no burn-in, the
-	// player either has no sub or relies on a native HLS sub track.
-	// Cached on the session so RestartSessionAt keeps the chosen
-	// subtitle across seeks — without this, a seek would restart
-	// ffmpeg without the filter graph and the next segments would
-	// drop the burned subtitle silently.
-	BurnSubtitle *BurnSubtitleSpec
-	Decision     PlaybackDecision
-	LastAccessed time.Time
+	UserID           string
+	InputPath        string             // ruta fuente; cacheada para evitar re-query en seeks
+	AudioStreamIndex int                // per-type index de audio; -1 = auto-pick
+	BurnSubtitle     *BurnSubtitleSpec  // nil = sin burn-in
+	Decision         PlaybackDecision
+	LastAccessed     time.Time
 
-	// restartMu serialises RestartSessionAt for THIS session. The
-	// outer m.mu only guards the sessions map; the actual ffmpeg
-	// cancel + spawn is per-session work that can take ~2 s, so
-	// holding m.mu through it would freeze every other StreamManager
-	// caller (StartSession, segment handler, the cleanup loop) for
-	// the duration. A per-session mutex isolates the cost while
-	// still preventing the racing-restart bug where hls.js fires
-	// several parallel segment requests after a seek and each one
-	// triggers its own restart, orphaning ffmpegs.
-	restartMu sync.Mutex
-	// LastRestartSegment is the segment index of the most recent
-	// successful Start / RestartAt for this session — i.e. the
-	// `-start_number` value the currently-running ffmpeg was given.
-	// Paired with LastRestartTime by the coalesce check.
-	LastRestartSegment int
-	// LastRestartTime is the wall-clock moment of the most recent
-	// successful Start / RestartAt. The coalesce window in
-	// RestartSessionAt requires BOTH (a) recent in time AND
-	// (b) nearby in segment number — so a parallel-fanout burst
-	// from hls.js (3 adjacent segment requests fired within 100 ms
-	// of each other) collapses onto one ffmpeg, but a SECOND human
-	// click 5 s later that happens to land near the first still
-	// gets its own restart instead of waiting for ffmpeg to encode
-	// linearly through the gap.
-	LastRestartTime time.Time
-	// restartWindowStart / restartWindowCount form a per-session
-	// sliding-window rate limiter for RestartSessionAt. Defense in
-	// depth against a frontend regression that fires seek events
-	// the user did not request — observed 2026-05-07 with a
-	// +366-segment cadence in the server logs for one user click.
-	// The pointerup-commit fix in the SeekBar should keep this from
-	// triggering under normal use; if it does, it's a signal of a
-	// new client bug and we'd rather refuse the restart than melt
-	// the transcoder.
+	// restartMu: mutex por-sesión para serializar restarts sin bloquear m.mu.
+	restartMu          sync.Mutex
+	LastRestartSegment int       // -start_number del ffmpeg actual
+	LastRestartTime    time.Time // para la ventana de coalescencia
+	// Rate limiter sliding-window contra seeks descontrolados del frontend.
 	restartWindowStart time.Time
 	restartWindowCount int
 }
 
-// ErrRestartRateLimited is returned by RestartSessionAt when a
-// session exceeds the per-minute cap. The handler maps it to 429
-// so the client backs off; under healthy use this never fires.
 var ErrRestartRateLimited = errors.New("stream: restart rate limit exceeded")
-
-// ErrSessionNotFound is returned by RestartSessionAt / TouchSession
-// when the caller references a key that has no live session. The
-// handler converts this into a 404 so the client falls back to a
-// fresh StartSession instead of looping on a dead key.
 var ErrSessionNotFound = errors.New("stream: session not found")
 
-// Deps agrupa las dependencias de `NewManager`. Los 4 primeros campos
-// son obligatorios (Items, Streams, Config, Logger); los 3 restantes
-// (Metrics, EventBus, ForceDirectPlayLookup) son opcionales y reemplazan
-// a los antiguos setters `SetMetrics` / `SetEventBus` /
-// `SetForceDirectPlayLookup` que el composition root encadenaba. Los
-// setters siguen existiendo para tests (swap de stub a runtime, ver
-// `manager_test.go::TestManager_SetMetrics_*`) pero la wiring de
-// producción usa Deps — un único call site, sin Builder Pattern
-// accidental. Cierra olor JJ del audit 2026-05-14.
+// Deps agrupa las dependencias de NewManager. Los 4 primeros son
+// obligatorios; Metrics, EventBus y ForceDirectPlayLookup son opcionales
+// (nil deja defaults). Los setters siguen existiendo para tests.
 type Deps struct {
 	Items   *db.ItemRepository
 	Streams *db.MediaStreamRepository
 	Config  config.StreamingConfig
 	Logger  *slog.Logger
 
-	// Metrics — sink de observability. Nil deja el noopSink por defecto.
-	Metrics MetricsSink
-	// EventBus — publish de eventos de ciclo de vida del transcoder
-	// (TranscodeStarted / TranscodeCompleted). Nil deshabilita.
-	EventBus *event.Bus
-	// ForceDirectPlayLookup — hook a app_settings para el toggle
-	// admin `playback.force_direct_play`. El closure se llama en
-	// cada `StartSession`, así que el flag es mutable runtime sin
-	// reiniciar. Nil deja la decisión 100% en el algoritmo estándar.
-	ForceDirectPlayLookup func(context.Context) bool
+	Metrics               MetricsSink              // nil = noopSink
+	EventBus              *event.Bus               // nil = sin eventos
+	ForceDirectPlayLookup func(context.Context) bool // nil = algoritmo estándar
 }
 
-// NewManager creates a streaming manager.
+// NewManager crea un streaming manager. Detecta HW accel y aplica auto-tune.
 func NewManager(deps Deps) *Manager {
 	items := deps.Items
 	streams := deps.Streams
 	cfg := deps.Config
 	logger := deps.Logger
-	// Single source of truth for the cache directory — preflight checks
-	// use the same helper so "the cache dir" means the same thing in both
-	// places.
 	cacheDir := cfg.EffectiveCacheDir()
 
-	// Detect hardware acceleration once at construction. Detection is
-	// fast (< 50 ms on a warm system) and the result is read on every
-	// transcode session, so doing it inline here keeps the wiring at
-	// a single point. When `Enabled = false` we skip detection
-	// entirely and fall back to libx264 — matches a deliberately-
-	// configured "force software" deployment.
 	hwAccel := HWAccelNone
 	encoder := "libx264"
 	hwResult := HWAccelResult{Selected: HWAccelNone, Encoder: "libx264"}
@@ -226,16 +111,7 @@ func NewManager(deps Deps) *Manager {
 		encoder = hwResult.Encoder
 	}
 
-	// Auto-tune zero/empty knobs in cfg with hardware-aware defaults.
-	// Runs AFTER detection so the recommendation is matched to the
-	// accelerator that's actually going to do the work; runs AFTER
-	// the caller has applied YAML + app_settings overrides so any
-	// explicit operator value (in cfg already) survives unchanged.
-	//
-	// runtime.NumCPU() reads the cgroup-aware CPU limit on Linux
-	// (Go 1.18+), so a container with --cpus=2 sees 2 here even on
-	// a 32-core host — auto-tune scales to the budget the operator
-	// gave the process, not the underlying hardware.
+	// Auto-tune: runtime.NumCPU() es cgroup-aware en Linux (Go 1.18+).
 	tuned := AutoTuneStreaming(cfg, hwAccel, runtime.NumCPU())
 	logger.Info("streaming auto-tune applied",
 		"hw_accel", hwAccel,
@@ -265,16 +141,8 @@ func NewManager(deps Deps) *Manager {
 		hwAccel:    hwResult,
 	}
 
-	// Wiring atómico de los hooks opcionales — sustituye a los 3
-	// setters post-construcción que main.go encadenaba (olor JJ del
-	// audit). Los setters siguen existiendo para tests; producción
-	// pasa todo en Deps y NewManager devuelve un Manager listo para
-	// servir sin call sites adicionales.
 	if deps.Metrics != nil {
 		m.metrics = deps.Metrics
-		// Mirror del contrato documentado en SetMetrics: el sink ve
-		// el gauge inicial (0 al arrancar) en vez de tener que esperar
-		// al primer StartSession para emitir un valor.
 		m.metrics.SetActiveSessions(0)
 	}
 	m.bus = deps.EventBus
@@ -284,9 +152,7 @@ func NewManager(deps Deps) *Manager {
 	return m
 }
 
-// SetMetrics wires an observability sink into the manager. Passing nil is a
-// no-op (the default noopSink stays in place) so callers never have to
-// short-circuit in production code.
+// SetMetrics conecta un sink de métricas. Nil = no-op.
 func (m *Manager) SetMetrics(sink MetricsSink) {
 	if sink == nil {
 		return
@@ -297,17 +163,13 @@ func (m *Manager) SetMetrics(sink MetricsSink) {
 	m.metrics.SetActiveSessions(len(m.sessions))
 }
 
-// SetEventBus wires an event bus so the manager can publish lifecycle events
-// (TranscodeStarted / TranscodeCompleted). Passing nil disables publishing.
-// Follows the SetMetrics pattern so the constructor signature stays stable.
+// SetEventBus conecta un bus de eventos. Nil deshabilita publicación.
 func (m *Manager) SetEventBus(bus *event.Bus) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.bus = bus
 }
 
-// publish sends an event if a bus is wired. Reads m.bus under the mutex to
-// stay race-free with SetEventBus.
 func (m *Manager) publish(e event.Event) {
 	m.mu.Lock()
 	bus := m.bus
@@ -317,47 +179,28 @@ func (m *Manager) publish(e event.Event) {
 	}
 }
 
-// sessionKey builds a unique key for a user+item+profile+audio+sub
-// combo. Index fields are part of the key so a mid-playback switch
-// (audio dub or burned-in subtitle) creates a fresh session instead
-// of the manager handing back the previous transcode unchanged.
-// -1 on either index collapses to "default" so cache hits for
-// callers that don't care about that dimension stay intact.
-//
-// Why subtitle index belongs in the key: burned-in subtitles are
-// baked into the encoded segments, so toggling the subtitle later
-// MUST produce a different transcode. Without this, the manager
-// would return the old session and the player would see frames
-// with the previous subtitle still rendered on them.
+// sessionKey: clave compuesta user+item+profile+audio+sub. Los índices
+// forman parte de la clave porque un cambio de audio o subtitle quemado
+// requiere una sesión de transcode distinta.
 func sessionKey(userID, itemID, profile string, audioStreamIndex, burnSubIndex int) string {
 	return userID + ":" + itemID + ":" + profile +
 		":" + strconv.Itoa(audioStreamIndex) +
 		":" + strconv.Itoa(burnSubIndex)
 }
 
-// SessionKey is the exported canonical key builder. Handlers must use
-// this rather than concatenating fields by hand — the format includes
-// the audio stream index AND the burn-in subtitle index, and a
-// hand-rolled "user:item:profile" key silently misses every session
-// the manager actually registered (404 on every segment fetch).
+// SessionKey es el constructor canónico exportado de clave de sesión.
 func SessionKey(userID, itemID, profile string, audioStreamIndex, burnSubIndex int) string {
 	return sessionKey(userID, itemID, profile, audioStreamIndex, burnSubIndex)
 }
 
-// SetForceDirectPlayLookup wires the runtime-settings hook for the
-// `playback.force_direct_play` admin toggle. main.go calls this
-// after both the Manager and the Settings repo are constructed.
-// Nil-safe and idempotent — call again to swap implementations
-// (e.g. swapping a test stub for the real settings repo).
+// SetForceDirectPlayLookup conecta el hook de runtime settings para
+// playback.force_direct_play. Nil-safe e idempotente.
 func (m *Manager) SetForceDirectPlayLookup(fn func(context.Context) bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.forceDirectPlayLookup = fn
 }
 
-// shouldForceDirectPlay returns the runtime value of the
-// `playback.force_direct_play` admin toggle. Falls through to false
-// when no lookup is wired.
 func (m *Manager) shouldForceDirectPlay(ctx context.Context) bool {
 	m.mu.Lock()
 	fn := m.forceDirectPlayLookup
@@ -368,60 +211,8 @@ func (m *Manager) shouldForceDirectPlay(ctx context.Context) bool {
 	return fn(ctx)
 }
 
-// StartSession creates or returns an existing session for the given item.
-//
-// `caps` is the client's declared codec/container capabilities (parsed
-// from the X-Hubplay-Client-Capabilities header). Pass nil for unknown
-// clients — the playback Decide() falls back to web-browser defaults.
-// The capabilities affect the DirectPlay/DirectStream/Transcode
-// waterfall: a Kotlin TV app declaring HEVC + EAC3 + MKV gets
-// DirectPlay where today's hard-coded defaults forced a Transcode.
-//
-// Concurrent calls for the same key collapse onto a single ffmpeg
-// spawn via `m.startGroup` (singleflight). Without this, the gap
-// between releasing m.mu (after the cap checks) and writing the
-// completed session back into m.sessions was large enough — items
-// fetch + streams fetch + transcoder.Start, hundreds of milliseconds
-// in production — that two HTTP requests landing within the same
-// player init burst could both miss the fast-path lookup and both
-// drive the slow path to completion. transcoder.Start serialises on
-// its own mutex but its existing-session check uses the same map,
-// so the second caller's existing.Stop() race-killed the first
-// caller's just-spawned ffmpeg. The visible symptom was two ffmpegs
-// at 99% CPU writing segments to the same cache dir, fighting over
-// segmentNNNNN.ts. singleflight makes the slow path single-flight
-// per key; late joiners receive the same ManagedSession the winner
-// produced.
-// StartSession's burnSubtitleIndex argument:
-//   - < 0 → no burn-in. The player either has no subtitle picked or
-//     is consuming an HLS-native sub track (text format, sidecar).
-//   - >= 0 → burn the subtitle at this per-type index. The manager
-//     resolves the codec from the item's MediaStream rows and decides
-//     between the overlay (bitmap) and the subtitles= (ASS/SSA)
-//     filter strategy at ffmpeg-arg time.
-//
-// Burn-in forces a Transcode decision regardless of what the
-// capability waterfall would have picked — there's no decoded frame
-// to composite onto in DirectPlay / DirectStream paths.
-
-// StartSessionRequest agrupa los parámetros de `Manager.StartSession`
-// y `Manager.startSessionSlow`. Cierra el olor F14-2-b del audit
-// 2026-05-14 (firmas de 8 y 9 params posicionales). Permite añadir/
-// renombrar params sin tocar callers ni la `StreamManagerService`
-// interface que consumen los handlers.
-//
-// `BurnSubIndex`:
-//   - < 0 → no burn-in. El player o no tiene sub seleccionado o
-//     está consumiendo una HLS-native sub track (text format,
-//     sidecar).
-//   - >= 0 → burn-in del subtítulo en este per-type index. El
-//     manager resuelve el codec desde las MediaStream rows del item
-//     y decide entre overlay (bitmap) o subtitles= (ASS/SSA) en
-//     ffmpeg-arg time.
-//
-// Burn-in fuerza una decision Transcode independientemente de lo
-// que el capability waterfall haya elegido — no hay decoded frame
-// que componer en los paths DirectPlay/DirectStream.
+// StartSessionRequest agrupa los parámetros de StartSession.
+// BurnSubIndex >=0 fuerza Transcode con burn-in; <0 = sin burn-in.
 type StartSessionRequest struct {
 	UserID           string
 	ItemID           string
@@ -432,21 +223,16 @@ type StartSessionRequest struct {
 	BurnSubIndex     int
 }
 
-// sessionKey deriva la clave canónica de la sesión desde los campos
-// identitarios del request (sin StartTime ni Caps, que no son
-// identidad). Centralizar la derivación garantiza que el fast-path
-// lookup y el singleflight admission usen el mismo string.
 func (r StartSessionRequest) sessionKey() string {
 	return sessionKey(r.UserID, r.ItemID, r.ProfileName, r.AudioStreamIndex, r.BurnSubIndex)
 }
 
+// StartSession crea o reutiliza una sesión existente. Llamadas
+// concurrentes para la misma clave colapsan vía singleflight.
 func (m *Manager) StartSession(ctx context.Context, req StartSessionRequest) (*ManagedSession, error) {
 	key := req.sessionKey()
 
-	// Fast path: already-running session bypasses the singleflight
-	// and the slow-path setup entirely. This is the >99% case once
-	// the player is past its init burst — every subsequent segment
-	// request for the session.
+	// Fast path: sesión ya activa.
 	m.mu.Lock()
 	if ms, ok := m.sessions[key]; ok {
 		ms.LastAccessed = time.Now()
@@ -464,17 +250,7 @@ func (m *Manager) StartSession(ctx context.Context, req StartSessionRequest) (*M
 	return v.(*ManagedSession), nil
 }
 
-// startSessionSlow runs the actual fetch + decide + ffmpeg spawn.
-// Wrapped by `m.startGroup.Do` so concurrent callers for the same
-// `key` collapse onto one execution. The first caller's `ctx` drives
-// the work — if it cancels mid-fetch, late joiners get the same
-// error, which is the right trade: callers who arrived 50 ms apart
-// for the same key were going to share the result anyway.
 func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSessionRequest) (*ManagedSession, error) {
-	// Unpack a local view del req así que el resto del body (90+
-	// LoC) no tiene que llamar req.X cada vez. Las variables son
-	// puro alias — el behaviour del cuerpo no cambia con el
-	// refactor F14-2-b.
 	userID := req.UserID
 	itemID := req.ItemID
 	profileName := req.ProfileName
@@ -482,11 +258,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 	startTime := req.StartTime
 	audioStreamIndex := req.AudioStreamIndex
 	burnSubIndex := req.BurnSubIndex
-	// Re-check after singleflight admission: a previous Do for this
-	// key may have just finished and populated m.sessions in the
-	// brief window between this caller's fast-path miss and its
-	// arrival here. singleflight collapses *concurrent* calls; it
-	// doesn't deduplicate a fresh call against a finished one.
+	// Re-check: un Do previo pudo completar entre el fast-path miss y aquí.
 	m.mu.Lock()
 	if ms, ok := m.sessions[key]; ok {
 		ms.LastAccessed = time.Now()
@@ -494,7 +266,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return ms, nil
 	}
 
-	// Global concurrent limit.
 	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
 		active := len(m.sessions)
 		m.mu.Unlock()
@@ -502,11 +273,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return nil, domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
 	}
 
-	// Per-user cap. Without this a single user fanning out to many
-	// items / qualities (or repeatedly re-clicking Play during a
-	// flaky network) can soak up the whole global pool. The check
-	// runs while holding the manager mutex so concurrent StartSession
-	// calls from the same user can't both squeeze past it.
 	if m.cfg.MaxTranscodeSessionsPerUser > 0 {
 		var userActive int
 		for _, ms := range m.sessions {
@@ -522,7 +288,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 	}
 	m.mu.Unlock()
 
-	// Fetch item and its streams
 	item, err := m.items.GetByID(ctx, itemID)
 	if err != nil {
 		m.metrics.TranscodeFailed()
@@ -535,13 +300,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
-	// Resolve the subtitle-burn-in spec from the requested index.
-	// Find the Nth subtitle stream (per-type ordering, matching the
-	// audio convention) and capture its codec so BuildFFmpegArgs can
-	// choose between filter_complex overlay (bitmap) and the
-	// subtitles= filter (ASS / SSA). Unknown / out-of-range index =
-	// no-op (nil) so a stale client URL doesn't fail the start —
-	// the player just doesn't get its subtitle this time.
+	// Resolver spec de burn-in. Index fuera de rango = nil (sin burn-in).
 	var burnSub *BurnSubtitleSpec
 	if burnSubIndex >= 0 {
 		var subOrd int
@@ -570,23 +329,16 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		decision = Decide(item, mediaStreams, caps, profileName)
 	}
 
-	// Burn-in needs decoded frames to overlay onto. If the waterfall
-	// picked DirectPlay or DirectStream (CopyVideo=true), upgrade to
-	// a full re-encode — same trade-off Plex / Jellyfin make: video
-	// re-encode cost in exchange for the user actually seeing the
-	// subtitle. Audio decision stays untouched.
+	// Burn-in necesita decoded frames → forzar Transcode si la waterfall
+	// eligió DirectPlay/DirectStream.
 	if burnSub != nil {
 		if decision.Method == MethodDirectPlay {
-			// Forcing DirectStream here would still copy video; jump
-			// straight to Transcode. We keep the streams metadata so
-			// the rest of the path is identical to a regular transcode.
 			decision = Decide(item, mediaStreams, caps, profileName)
 		}
 		decision.Method = MethodTranscode
 		decision.CopyVideo = false
 	}
 
-	// Direct play doesn't need a transcode session
 	if decision.Method == MethodDirectPlay {
 		ms := &ManagedSession{
 			Session: &Session{
@@ -598,7 +350,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 			Decision:     decision,
 			LastAccessed: time.Now(),
 		}
-		// No lock needed — direct play sessions are not tracked
 		return ms, nil
 	}
 
