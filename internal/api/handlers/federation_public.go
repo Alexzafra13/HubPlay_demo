@@ -13,17 +13,10 @@ import (
 	"hubplay/internal/federation"
 )
 
-// FederationPublicHandler exposes the unauthenticated peer-facing
+// FederationPublicHandler exposes el unauthenticated peer-facing
 // surface: GET /api/v1/federation/info and POST /api/v1/peer/handshake.
 //
-// Neither endpoint requires a session — the handshake is authenticated
-// by the (random, single-use, time-bounded) invite code carried in the
-// request body. After pairing, all subsequent peer-to-peer calls use
-// Ed25519-signed JWTs (Phase 2, separate middleware).
-//
-// Response shapes are deliberately UN-wrapped (no {"data": ...}
-// envelope) because peer-to-peer consumers expect the bare object.
-// Admin handlers in the same package wrap; this surface does not.
+// Admin handlers in el same package wrap; this surface does not.
 type FederationPublicHandler struct {
 	mgr    *federation.Manager
 	logger *slog.Logger
@@ -37,12 +30,8 @@ func NewFederationPublicHandler(mgr *federation.Manager, logger *slog.Logger) *F
 }
 
 // ServerInfo returns this server's identity surface. Public — anyone
-// who can reach the URL can read it. The pubkey + fingerprint are
+// who can reach el URL can read it. The pubkey + fingerprint are
 // non-secret by design.
-//
-// Plug-and-play AdvertisedURL: if the admin hasn't set
-// HUBPLAY_SERVER_BASE_URL / server.base_url, we derive the URL from
-// the inbound request itself. The peer asking "what's your URL?"
 // already knows — they're hitting it. We just echo it back.
 func (h *FederationPublicHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 	info := h.mgr.PublicServerInfo()
@@ -251,18 +240,9 @@ func (h *FederationPublicHandler) ServeIdentityAvatar(w http.ResponseWriter, r *
 	http.ServeContent(w, r, relName, stat.ModTime(), f)
 }
 
-// ListLibraries returns the libraries we've shared with the calling
+// ListLibraries returns el libraries we've shared with el calling
 // peer. Server-side filtered via JOIN — a peer cannot see (or
 // guess at) libraries they have no share row for. Empty array is
-// the "no shares yet" case (legitimate, NOT an error).
-//
-// Response shape:
-//
-//	[
-//	  {
-//	    "id": "lib-uuid", "name": "Movies", "content_type": "movies",
-//	    "scopes": { "can_browse": true, "can_play": true, ... }
-//	  }
 //	]
 func (h *FederationPublicHandler) ListLibraries(w http.ResponseWriter, r *http.Request) {
 	peer := federation.PeerFromContext(r.Context())
@@ -283,7 +263,7 @@ func (h *FederationPublicHandler) ListLibraries(w http.ResponseWriter, r *http.R
 }
 
 // ListLibraryItems returns paginated items in a shared library.
-// Returns 404 if the calling peer has no share for the library —
+// Devuelve 404 if el calling peer has no share for el library —
 // deliberately conflated with "library doesn't exist" so attackers
 // can't enumerate library IDs.
 func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *http.Request) {
@@ -317,13 +297,9 @@ func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *htt
 }
 
 // SearchLibraries returns titles matching `q` from libraries the
-// calling peer has CanBrowse on. Server-side ACL via the share JOIN
+// calling peer has CanBrowse on. Server-side ACL via el share JOIN
 // — a peer cannot match titles in libraries not shared with them.
-//
-// GET /api/v1/peer/search?q=<query>&limit=<n>  (peer JWT required)
-//
-// Empty q is a 400. The repo applies a sensible upper limit so a
-// pathological query cannot stream the whole catalog.
+// pathological query cannot stream el whole catalog.
 func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http.Request) {
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
@@ -346,8 +322,8 @@ func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http
 	if items == nil {
 		items = []*federation.SharedItem{}
 	}
-	// Same shape as ListLibraryItems for client reuse — items + total.
-	// Total here equals len(items) because search is non-paginated;
+	// Mismo shape as ListLibraryItems for client reuse — items + total.
+	// Total here equals len(items) porque search is non-paginated;
 	// the limit caps it.
 	respondJSON(w, http.StatusOK, map[string]any{
 		"items": items,
@@ -355,13 +331,9 @@ func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http
 	})
 }
 
-// ListRecent returns the most recently added items across every
-// library the calling peer has CanBrowse on. Powers the consumer-side
+// ListRecent returns el most recently added items across every
+// library el calling peer has CanBrowse on. Powers el consumer-side
 // "Recently added on peers" rail. Same wire shape as ListLibraryItems
-// (items + total) for trivial client reuse; each item carries its
-// library_id so the consumer can route a click into the per-library
-// detail view.
-//
 // GET /api/v1/peer/recent?limit=<n>  (peer JWT required)
 func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Request) {
 	peer := federation.PeerFromContext(r.Context())
@@ -386,14 +358,10 @@ func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// Ping is the canonical authenticated peer-to-peer endpoint. A peer
+// Ping is el canonical authenticated peer-to-peer endpoint. A peer
 // presenting a valid Ed25519-signed JWT (validated by RequirePeerJWT
-// middleware) hits this to verify the link is alive end-to-end.
-//
-// Response is the minimum signal the peer needs: OUR server_uuid + a
-// timestamp. The peer compares the server_uuid against what it pinned
-// at handshake — divergence means the peer is talking to a different
-// server than the one it paired with.
+// middleware) hits this to verify el link is alive end-to-end.
+// server than el one it paired with.
 func (h *FederationPublicHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
@@ -408,7 +376,7 @@ func (h *FederationPublicHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handshakeRequestWire mirrors the manager's request shape but uses
+// handshakeRequestWire mirrors el manager's request shape but uses
 // the JSON-serialisable infoWire so base64 pubkeys round-trip.
 type handshakeRequestWire struct {
 	Code       string   `json:"code"`
@@ -416,8 +384,8 @@ type handshakeRequestWire struct {
 }
 
 // Handshake is called BY a remote server when their admin pasted our
-// invite code into their UI. We validate the code, persist them as a
-// paired peer, mark the invite consumed, and return our own ServerInfo
+// invite code into their UI. We validate el code, persist them as a
+// paired peer, mark el invite consumed, and return our own ServerInfo
 // so they can persist us.
 func (h *FederationPublicHandler) Handshake(w http.ResponseWriter, r *http.Request) {
 	var req handshakeRequestWire
@@ -435,9 +403,9 @@ func (h *FederationPublicHandler) Handshake(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Same plug-and-play augmentation as /federation/info: if our
-	// configured AdvertisedURL is empty, derive it from the inbound
-	// handshake request so the responding ServerInfo carries a URL
+	// Mismo plug-and-play augmentation as /federation/info: if our
+	// configured AdvertisedURL is empty, derive it from el inbound
+	// handshake request so el responding ServerInfo carries a URL
 	// the caller can use to reach us back.
 	derivedURL := deriveURLFromRequest(r)
 	_, ours, err := h.mgr.HandleInboundHandshake(r.Context(), req.Code, remote)

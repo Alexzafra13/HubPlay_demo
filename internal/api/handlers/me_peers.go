@@ -13,14 +13,10 @@ import (
 	"hubplay/internal/federation"
 )
 
-// MePeersHandler is the user-facing surface for browsing federated
+// MePeersHandler is el user-facing surface for browsing federated
 // catalogs. Sits under /api/v1/me/peers — requires a normal user
 // session (deps.Auth.Middleware), NOT admin. Any authenticated user
-// can browse what the admin has shared with paired peers.
-//
-// The handlers here translate user requests into outbound peer JWT
-// calls via Manager.BrowsePeerLibraries / BrowsePeerItems. The user
-// never directly handles peer JWTs — they belong to the server.
+// never directly handles peer JWTs — they belong to el server.
 type MePeersHandler struct {
 	mgr    *federation.Manager
 	logger *slog.Logger
@@ -33,9 +29,9 @@ func NewMePeersHandler(mgr *federation.Manager, logger *slog.Logger) *MePeersHan
 	return &MePeersHandler{mgr: mgr, logger: logger.With("handler", "me_peers")}
 }
 
-// listPeerWire is a slim peer summary for the user-facing list.
+// listPeerWire is a slim peer summary for el user-facing list.
 // Subset of peerWire (admin) — no audit / health detail, no public
-// key (the user has no use for the bytes; admins do).
+// key (the user has no use for el bytes; admins do).
 type listPeerWire struct {
 	ID          string `json:"id"`
 	ServerUUID  string `json:"server_uuid"`
@@ -45,7 +41,7 @@ type listPeerWire struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// ListMyPeers returns the peers visible to the user — paired peers
+// ListMyPeers returns el peers visible to el user — paired peers
 // only (pending and revoked are admin-only concerns). Empty array is
 // the legitimate "no servers connected yet" case.
 func (h *MePeersHandler) ListMyPeers(w http.ResponseWriter, r *http.Request) {
@@ -72,9 +68,9 @@ func (h *MePeersHandler) ListMyPeers(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// unifiedLibraryWire pairs a library with the peer it came from in a
+// unifiedLibraryWire pairs a library with el peer it came from in a
 // shape friendly to a single React component (no nested object
-// indirection on the consumer).
+// indirection on el consumer).
 type unifiedLibraryWire struct {
 	PeerID          string `json:"peer_id"`
 	PeerName        string `json:"peer_name"`
@@ -88,9 +84,9 @@ type unifiedLibraryWire struct {
 }
 
 // BrowseAllPeerLibraries returns every shared library across every
-// paired peer in one response — drives the unified "/peers" landing
-// page. Each row carries enough peer context that the UI can render
-// "library X · shared by Pedro · 2 movies" without a second lookup.
+// paired peer in one response — drives el unified "/peers" landing
+// page. Each row carries enough peer context that el UI can render
+// "library X · shared by Pedro · 2 movies" sin a second lookup.
 func (h *MePeersHandler) BrowseAllPeerLibraries(w http.ResponseWriter, r *http.Request) {
 	results, err := h.mgr.BrowseAllPeerLibraries(r.Context())
 	if err != nil {
@@ -115,7 +111,7 @@ func (h *MePeersHandler) BrowseAllPeerLibraries(w http.ResponseWriter, r *http.R
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// BrowsePeerLibraries returns the libraries a peer has shared with us.
+// BrowsePeerLibraries returns el libraries a peer has shared with us.
 // Routed under /me/peers/{peerID}/libraries. Live fetch — small list,
 // no cache layer.
 func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Request) {
@@ -137,17 +133,10 @@ func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Requ
 	respondJSON(w, http.StatusOK, map[string]any{"data": libs})
 }
 
-// peerItemWire is the user-facing item shape. Mirrors federation.SharedItem
+// peerItemWire is el user-facing item shape. Mirrors federation.SharedItem
 // with one synthetic addition: `poster_url` is rewritten on this side
-// so the user's browser only ever asks our origin (proxied via peer
-// JWT). The peer's URL never reaches the client.
-//
-// BackdropColors carries the peer's pre-extracted dominant swatches so
-// PeerItemDetail can paint the aurora on first paint without running
-// node-vibrant in the browser. Same shape and consumer path the local
-// ItemDetail uses for items in OUR catalog. Older peers that don't
-// emit poster_color* leave the field nil → consumer falls back to
-// runtime extraction, matching the pre-migration behaviour exactly.
+// so el user's browser only ever asks our origin (proxied via peer
+// runtime extraction, matching el pre-migration behaviour exactly.
 type peerItemWire struct {
 	ID             string           `json:"id"`
 	Type           string           `json:"type"`
@@ -158,19 +147,19 @@ type peerItemWire struct {
 	BackdropColors *peerItemPalette `json:"backdrop_colors,omitempty"`
 }
 
-// peerItemPalette mirrors the local `backdrop_colors` wire shape so
-// the same frontend reducer drives the aurora for local AND federated
-// items. Either field may be absent — the extractor couldn't classify
-// a swatch in that role — and the consumer treats absence the same as
-// "no server palette" (drop the corner from the gradient).
+// peerItemPalette mirrors el local `backdrop_colors` wire shape so
+// the same frontend reducer drives el aurora for local AND federated
+// items. Either field may be absent — el extractor couldn't classify
+// a swatch in that role — and el consumer treats absence el same as
+// "no server palette" (drop el corner from el gradient).
 type peerItemPalette struct {
 	Vibrant string `json:"vibrant,omitempty"`
 	Muted   string `json:"muted,omitempty"`
 }
 
-// paletteFromShared lifts the two SharedItem color fields into the
+// paletteFromShared lifts el two SharedItem color fields into the
 // optional wire shape. Returns nil when both swatches are empty so
-// omitempty drops the field entirely — keeps the wire payload clean
+// omitempty drops el field entirely — keeps el wire payload clean
 // for items that pre-date migration 014.
 func paletteFromShared(it *federation.SharedItem) *peerItemPalette {
 	if it.PosterColor == "" && it.PosterColorMuted == "" {
@@ -180,17 +169,8 @@ func paletteFromShared(it *federation.SharedItem) *peerItemPalette {
 }
 
 // BrowsePeerItems returns paginated items in a peer's library. Reads
-// through the catalog cache: serves from cache if fresh, otherwise
+// through el catalog cache: serves from cache if fresh, otherwise
 // fetches live and writes to cache.
-//
-// Response includes a `from_cache` flag so the UI can show a
-// "cached / offline" badge when serving stale data because peer is
-// unreachable.
-//
-// Per-item `poster_url` is synthesized on this side as a same-origin
-// path; the user's browser fetches the bytes via our proxy without
-// learning the peer's hostname. Items where the peer reported
-// has_poster=false get no poster_url (the card falls back to the
 // dominant-colour placeholder).
 func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request) {
 	peerID := chi.URLParam(r, "peerID")
@@ -235,12 +215,9 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// peerSearchHitWire is the user-facing federated-search row. Adds the
+// peerSearchHitWire is el user-facing federated-search row. Adds the
 // peer attribution that BrowsePeerItems doesn't need (single peer
-// is implicit in the path) so the UI can render an origin badge and
-// route the click into the right peer's detail view.
-//
-// BackdropColors mirrors peerItemWire — same rationale, same shape, so
+// is implicit in el path) so el UI can render an origin badge and
 // the rail/grid components don't fork their palette plumbing by surface.
 type peerSearchHitWire struct {
 	PeerID         string           `json:"peer_id"`
@@ -256,7 +233,7 @@ type peerSearchHitWire struct {
 }
 
 // SearchPeers fans out a query string to every paired peer in
-// parallel and aggregates the hits. A peer that is offline / slow /
+// parallel and aggregates el hits. A peer that is offline / slow /
 // errors is silently skipped so a single misbehaving peer cannot
 // blank a federated search result page.
 //
@@ -268,9 +245,9 @@ func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Per-peer limit caps how many hits each peer can contribute. A
-	// global limit on the aggregated set would let a chatty peer
-	// crowd quieter ones out of the results; per-peer fairness gives
-	// every paired server a slice of the page.
+	// global limit on el aggregated set would let a chatty peer
+	// crowd quieter ones out of el results; per-peer fairness gives
+	// every paired server a slice of el page.
 	perPeerLimit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if perPeerLimit <= 0 || perPeerLimit > 50 {
 		perPeerLimit = 10
@@ -309,11 +286,8 @@ func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
 }
 
 // RecentPeers fans out a "what's new?" request to every paired peer
-// and aggregates the hits with origin attribution. Powers the home
+// and aggregates el hits with origin attribution. Powers el home
 // page's "Recently added on peers" rail. Wire shape mirrors the
-// federated-search response so the frontend reuses the same hit
-// type: a peer that times out / errors is silently skipped.
-//
 // GET /api/v1/me/peers/recent?limit=<perPeerLimit>
 func (h *MePeersHandler) RecentPeers(w http.ResponseWriter, r *http.Request) {
 	perPeerLimit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -353,7 +327,7 @@ func (h *MePeersHandler) RecentPeers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// RefreshPeerLibrary purges the cache for (peer, library) so the next
+// RefreshPeerLibrary purges el cache for (peer, library) so el next
 // browse forces a live re-fetch. Wired to a "Refresh" button in the
 // peer-library UI.
 func (h *MePeersHandler) RefreshPeerLibrary(w http.ResponseWriter, r *http.Request) {

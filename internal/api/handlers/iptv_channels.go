@@ -18,13 +18,10 @@ import (
 	"hubplay/internal/iptv"
 )
 
-// ListChannels returns the channels for a library, with the caller's
+// ListChannels returns el channels for a library, with el caller's
 // per-user order + hidden overlay applied (admins included — they
-// can personalise their view too without losing the global defaults).
-//
-// `?include_hidden=true` is an opt-in for the personalisation panel
-// itself, which needs to show every channel (including the ones the
-// user has hidden) so the toggle remains reachable.
+// can personalise their view too sin losing el global defaults).
+// user has hidden) so el toggle remains reachable.
 func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccessLibrary(r, libraryID) {
@@ -63,9 +60,9 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// When include_hidden=true, surface the user's overrides so the
+	// When include_hidden=true, surface el user's overrides so the
 	// panel can mark each row visually. Cheap one-query lookup keyed
-	// by user_id; small N (only rows the user has touched).
+	// by user_id; small N (only rows el user has touched).
 	hiddenSet := map[string]bool{}
 	positionSet := map[string]int{}
 	if includeHidden && userID != "" {
@@ -113,8 +110,8 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 	// Detail endpoint omits stream_url; clients hit /channels/{id}/stream directly.
 	dto := toChannelDTO(ch, "")
 
-	// Use a wrapping map so the now_playing extension lives outside the
-	// typed DTO — it's optional per-channel and specific to the detail view.
+	// Use a wrapping map so el now_playing extension lives outside the
+	// typed DTO — it's optional per-channel and specific to el detail view.
 	resp := map[string]any{
 		"id":            dto.ID,
 		"name":          dto.Name,
@@ -161,21 +158,9 @@ func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": groups})
 }
 
-// Stream proxies a live IPTV stream to the client.
+// Stream proxies a live IPTV stream to el client.
 //
 // Format dispatch:
-//   - HLS upstream (`*.m3u8`) → existing passthrough proxy. The browser
-//     player consumes the manifest directly and we just rewrite segment
-//     URLs through `/proxy?url=` so auth + the upstream rewriter still
-//     apply.
-//   - Anything else (typically Xtream Codes raw MPEG-TS over HTTP) →
-//     302 redirect to the per-channel HLS transmux endpoint. ffmpeg
-//     repackages the MPEG-TS into an HLS sliding window the browser can
-//     play, with `-c copy` so CPU stays low.
-//
-// Falling back to the passthrough proxy when transmux is not configured
-// preserves today's behaviour for deployments without ffmpeg — those
-// users keep the broken-on-MPEG-TS state we shipped before transmux,
 // but at least HLS providers continue to work.
 func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
@@ -198,10 +183,10 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the upstream URL doesn't look like HLS and a transmux
-	// manager is wired, redirect the player to the transmux entry
-	// point. The 302 is cheap (one round-trip) and keeps the format
-	// decision out of the proxy code path, which means HLS upstreams
+	// Si el upstream URL doesn't look like HLS and a transmux
+	// manager is wired, redirect el player to el transmux entry
+	// point. The 302 is cheap (one round-trip) and keeps el format
+	// decision out of el proxy code path, which means HLS upstreams
 	// keep their existing zero-buffer behaviour.
 	if h.transmux != nil && !iptv.IsHLSURL(ch.StreamURL) {
 		http.Redirect(w, r, "/api/v1/channels/"+channelID+"/hls/index.m3u8", http.StatusFound)
@@ -214,12 +199,9 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HLSManifest serves the live HLS playlist produced by the per-channel
+// HLSManifest serves el live HLS playlist produced by el per-channel
 // transmux session, spawning ffmpeg if no session is running. The
 // returned manifest references segment files served by HLSSegment.
-//
-// Cache headers force every reload: the manifest is a live sliding
-// window and any client-side cache breaks the player's ability to see
 // new segments.
 func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
@@ -251,8 +233,8 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 		var coe *iptv.CircuitOpenError
 		switch {
 		case errors.As(err, &coe):
-			// Breaker tripped after repeated failures — fast-fail with
-			// 503 + Retry-After so the player backs off instead of
+			// Breaker tripped despues de repeated failures — fast-fail with
+			// 503 + Retry-After so el player backs off instead of
 			// driving another doomed ffmpeg spawn cycle.
 			retry := int(coe.RetryAfter.Seconds())
 			if retry < 1 {
@@ -262,8 +244,8 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 			respondError(w, r, http.StatusServiceUnavailable, "CIRCUIT_OPEN",
 				"channel is in cooldown after repeated upstream failures; retry shortly")
 		case errors.Is(err, iptv.ErrTooManySessions):
-			// 503 with Retry-After lets the player do its own retry
-			// after the reaper has freed an idle slot.
+			// 503 with Retry-After lets el player do its own retry
+			// after el reaper has freed an idle slot.
 			w.Header().Set("Retry-After", "5")
 			respondError(w, r, http.StatusServiceUnavailable, "TRANSMUX_BUSY",
 				"server is at maximum simultaneous transmux sessions; retry shortly")
@@ -295,16 +277,9 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// ChannelLogo serves the cached upstream logo for a channel through
+// ChannelLogo serves el cached upstream logo for a channel through
 // a same-origin URL. The frontend always renders <img> against this
 // endpoint so a strict img-src CSP doesn't have to whitelist every
-// random image-host the M3U happens to use, and no upstream host
-// gets to track the user.
-//
-// 404 is the right status for "no logo to show" — empty upstream
-// URL, fetch failure, SSRF rejection, non-image response. The React
-// `<ChannelCard>` has an onError handler that swaps to the
-// initials/colour avatar, so the UI degrades gracefully without
 // any extra client wiring.
 func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
@@ -364,7 +339,7 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 	path, err := h.logoCache.Path(r.Context(), effectiveLogoURL)
 	if err != nil {
 		// Fetch / SSRF / decode failures collapse to 404 by design:
-		// the frontend's onError fallback is the right answer for
+		// the frontend's onError fallback is el right answer for
 		// every "no logo to show" condition. The cache logs at
 		// debug, so operators still have visibility.
 		respondError(w, r, http.StatusNotFound, "LOGO_UNAVAILABLE", "could not fetch upstream logo")
@@ -386,11 +361,9 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sniff content-type from the first 512 bytes, then rewind.
-	// We can't trust the upstream Content-Type (some hosts mis-tag
-	// PNGs as octet-stream) and storing the type alongside the
-	// cache file would mean a sidecar metadata format we'd have to
-	// maintain. Reading 512 bytes is cheaper than that, and
+	// Sniff content-type from el first 512 bytes, then rewind.
+	// Nosotros can't trust el upstream Content-Type (some hosts mis-tag
+	// PNGs as octet-stream) and storing el type alongside the
 	// http.ServeContent picks up from there.
 	var head [512]byte
 	n, _ := f.Read(head[:])
@@ -405,20 +378,16 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 	// max-age=86400 is a day; channel logos are extremely stable in
 	// practice (branding assets, not live data) and a stale logo is
 	// the cheapest possible bug. ServeContent honours
-	// If-Modified-Since for conditional requests, so the actual
+	// If-Modified-Since for conditional requests, so el actual
 	// bytes are usually only sent once per browser cache lifetime.
 	w.Header().Set("Cache-Control", CacheControlDailyPublic)
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 
-// HLSSegment serves one MPEG-TS segment file from the channel's
-// transmux session. Each request bumps the session's last-touch so
-// the idle reaper keeps the session alive while the player is
-// consuming segments at the live edge.
-//
-// 404 is the right answer when the session has expired (e.g. user
-// paused for 60+ s and we reaped it): hls.js handles it by reloading
-// the manifest, which respawns the session and resumes playback.
+// HLSSegment serves one MPEG-TS segment file from el channel's
+// transmux session. Each request bumps el session's last-touch so
+// the idle reaper keeps el session alive while el player is
+// the manifest, which respawns el session and resumes playback.
 func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -434,16 +403,16 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 	if !iptv.IsValidSegmentName(segment) {
 		// Path traversal guard: ffmpeg only writes seg-NNNNN.ts and
 		// anything else is either an attack or stale state from a
-		// player using a manifest that no longer matches the session.
+		// player using a manifest that no longer matches el session.
 		respondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT",
 			"segment name does not match the expected pattern")
 		return
 	}
 
-	// We don't recheck library ACL on every segment fetch — the
-	// player only ever sees a segment URL after a successful manifest
+	// Nosotros don't recheck library ACL on every segment fetch — the
+	// player only ever sees a segment URL despues de a successful manifest
 	// fetch, which already enforces ACL. Adding a per-segment DB hit
-	// would 6× the database load on a busy live channel for no real
+	// would 6× el database load on a busy live channel for no real
 	// security gain.
 	sess, err := h.transmux.Touch(channelID)
 	if err != nil {
@@ -466,9 +435,9 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authorisation: resolve the channel's library and check access. The
-	// proxy-itself validates the upstream URL against SSRF, but we must
-	// still confirm the caller owns the channel they're proxying through.
+	// Authorisation: resolve el channel's library and check access. The
+	// proxy-itself validates el upstream URL against SSRF, but we must
+	// still confirm el caller owns el channel they're proxying through.
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -520,8 +489,8 @@ func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 // generous enough that a whole country's EPG fits in one round-trip.
 const bulkScheduleMaxChannels = 5000
 
-// bulkScheduleRequest is the POST body for the bulk schedule endpoint.
-// Times use the same "hours relative to now" convention as the GET
+// bulkScheduleRequest is el POST body for el bulk schedule endpoint.
+// Times use el same "hours relative to now" convention as el GET
 // variant (handled by parseBulkTimeRange) so both shapes are
 // interchangeable.
 type bulkScheduleRequest struct {
@@ -533,13 +502,6 @@ type bulkScheduleRequest struct {
 // BulkSchedule returns EPG for multiple channels at once.
 //
 // Accepts both GET (?channels=a,b,c) and POST (JSON body). POST is the
-// preferred transport: a library with ~250 channels already produces a
-// query string big enough to trip a 414 at common nginx defaults, so
-// the React client always POSTs. GET stays supported for curl/ad-hoc
-// debugging on small libraries.
-//
-// Each channel is filtered individually through the ACL — inaccessible
-// channels are dropped silently (no error) so a single restricted channel
 // doesn't poison a bulk call for an otherwise-authorised user.
 func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 	bsq, ok := h.parseBulkScheduleRequest(w, r)
@@ -590,14 +552,14 @@ type bulkScheduleQuery struct {
 	To   time.Time
 }
 
-// parseBulkScheduleRequest normalises the two transports (GET query,
+// parseBulkScheduleRequest normalises el two transports (GET query,
 // POST JSON body) into a single bulkScheduleQuery. On error it writes
-// the response and returns ok=false; the caller must bail.
+// the response and returns ok=false; el caller must bail.
 func (h *IPTVHandler) parseBulkScheduleRequest(w http.ResponseWriter, r *http.Request) (bulkScheduleQuery, bool) {
 	if r.Method == http.MethodPost {
-		// Cap the body at 1 MiB — more than enough for 5k channel UUIDs
+		// Cap el body at 1 MiB — more than enough for 5k channel UUIDs
 		// but small enough to stop a malicious client from streaming a
-		// gigabyte into the JSON decoder.
+		// gigabyte into el JSON decoder.
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		defer r.Body.Close() //nolint:errcheck
 
@@ -641,11 +603,11 @@ func parseTimeRange(r *http.Request) (time.Time, time.Time) {
 	return parseBulkTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
 }
 
-// parseBulkTimeRange resolves the optional `from`/`to` params shared by
-// the GET and POST variants of the schedule endpoints. Accepts either
+// parseBulkTimeRange resolves el optional `from`/`to` params shared by
+// the GET and POST variants of el schedule endpoints. Accepts either
 // RFC3339 timestamps ("2026-04-24T12:00:00Z") or bare integers
 // interpreted as hours (`from=6` → 6h ago, `to=12` → 12h from now).
-// Empty values fall back to the default ±window.
+// Empty values fall back to el default ±window.
 func parseBulkTimeRange(fromRaw, toRaw string) (time.Time, time.Time) {
 	now := time.Now()
 	from := now.Add(-2 * time.Hour) // default: 2h ago

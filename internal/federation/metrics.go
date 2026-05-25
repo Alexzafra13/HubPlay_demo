@@ -9,29 +9,20 @@ package federation
 // the other way around — the existing project anti-cycle pattern, see
 // internal/stream/manager.go::MetricsSink for the prior art.
 type MetricsSink interface {
-	// HandshakeDuration records one outbound or inbound handshake
-	// attempt. direction is "outbound" (we initiated AcceptInvite) or
-	// "inbound" (peer hit our /peer/handshake). outcome is "ok" or
-	// "error".
+	// HandshakeDuration registra un intento de handshake.
 	HandshakeDuration(direction, outcome string, seconds float64)
 
-	// OutboundRequest counts one server-to-server peer call. kind is
-	// the call category ("libraries", "items", "stream_session",
-	// "stream_proxy"). outcome is "ok", "4xx", "5xx", or
-	// "transport_error".
+	// OutboundRequest cuenta una llamada server-to-server.
 	OutboundRequest(kind, outcome string)
 }
 
-// noopMetricsSink is the default when no metrics are wired (tests,
-// federation-disabled startup). Every method is a no-op so the
-// Manager doesn't need nil checks at every call site.
+// noopMetricsSink: default sin metricas. No-op en cada metodo.
 type noopMetricsSink struct{}
 
 func (noopMetricsSink) HandshakeDuration(string, string, float64) {}
 func (noopMetricsSink) OutboundRequest(string, string)            {}
 
-// SetMetricsSink swaps in a real sink. Safe to call once at startup;
-// not concurrent with traffic. Passing nil restores the no-op sink.
+// SetMetricsSink inyecta un sink real. Una vez en startup.
 func (m *Manager) SetMetricsSink(s MetricsSink) {
 	if s == nil {
 		m.metrics = noopMetricsSink{}
@@ -51,25 +42,21 @@ type Stats struct {
 	NonceCacheSize     int
 }
 
-// PairedPeers reports the number of currently paired peers (in-memory
-// cache size). Backs the hubplay_federation_paired_peers gauge.
+// PairedPeers: numero de peers paired (tamano de cache in-memory).
 func (m *Manager) PairedPeers() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.peerCache)
 }
 
-// PeerStreamSessions reports the number of active inbound peer stream
-// sessions tracked by this server. Backs the
-// hubplay_federation_peer_stream_sessions gauge.
+// PeerStreamSessions: sesiones de streaming inbound activas.
 func (m *Manager) PeerStreamSessions() int {
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	return len(m.streamSessions)
 }
 
-// NonceCacheSize reports replay-protection nonces currently held in
-// memory. Backs the hubplay_federation_nonce_cache_size gauge.
+// NonceCacheSize: nonces anti-replay en memoria.
 func (m *Manager) NonceCacheSize() int {
 	if m.nonces == nil {
 		return 0
@@ -77,9 +64,7 @@ func (m *Manager) NonceCacheSize() int {
 	return m.nonces.size()
 }
 
-// Stats returns the current observability snapshot. Reads each of the
-// manager's internal collections under their respective locks; never
-// blocks federation traffic for more than a microsecond.
+// Stats devuelve el snapshot de observabilidad actual.
 func (m *Manager) Stats() Stats {
 	out := Stats{}
 	m.mu.RLock()

@@ -1,17 +1,7 @@
 package federation
 
-// Manager is the federation orchestration core: identity, persistent
-// state, lifecycle, and the small set of helpers every other manager_*
-// file delegates to. The split is mechanical (one file per concern;
-// no API change) so a reader navigating the federation surface can
-// jump straight to the file whose name matches the concern:
-//
-//   manager.go            this file — types, ctor, lifecycle, helpers
-//   manager_handshake.go  ProbePeer / AcceptInvite / HandleInbound
-//   manager_shares.go     ShareLibrary / Unshare / list / get
-//   manager_browse.go     BrowsePeer{Libraries,Items} + cache
-//   manager_search.go     Search/Recent local + AllPeers fan-out
-//   manager_progress.go   RecordProgress / GetProgress / ContinueWatching
+// Manager es el nucleo de orquestacion de federation: identidad, estado,
+// ciclo de vida y helpers. Un fichero por concern (manager_*.go).
 
 import (
 	"context"
@@ -29,8 +19,8 @@ import (
 	"hubplay/internal/event"
 )
 
-// Repo is the database surface the Manager needs. Declaring it here
-// keeps the federation package testable with an in-memory fake.
+// Repo es la superficie de DB que el Manager necesita. Interfaz local
+// para mantener federation testable con fake in-memory.
 type Repo interface {
 	IdentityRepo
 	AuditRepo
@@ -49,7 +39,7 @@ type Repo interface {
 	GetPeerByServerUUID(ctx context.Context, serverUUID string) (*Peer, error)
 	ListPeers(ctx context.Context) ([]*Peer, error)
 
-	// Library shares (Phase 3+).
+	// Library shares.
 	UpsertLibraryShare(ctx context.Context, share *LibraryShare) error
 	DeleteLibraryShare(ctx context.Context, peerID, shareID string) error
 	GetLibraryShare(ctx context.Context, peerID, libraryID string) (*LibraryShare, error)
@@ -59,12 +49,12 @@ type Repo interface {
 	SearchSharedItems(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error)
 	ListRecentSharedItems(ctx context.Context, peerID string, limit int) ([]*SharedItem, error)
 
-	// Catalog cache (Phase 4+).
+	// Cache de catalogo.
 	UpsertCachedItems(ctx context.Context, peerID, libraryID string, items []*SharedItem, at time.Time) error
 	ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) (CachedItemPage, error)
 	PurgeCachedItemsForLibrary(ctx context.Context, peerID, libraryID string) error
 
-	// Cross-peer playback state (Phase 5 follow-up, migration 028).
+	// Estado de reproduccion cross-peer (migration 028).
 	UpsertProgress(ctx context.Context, p *Progress) error
 	GetProgress(ctx context.Context, userID, peerID, remoteItemID string) (*Progress, error)
 	DeleteProgress(ctx context.Context, userID, peerID, remoteItemID string) error
@@ -80,25 +70,18 @@ type Repo interface {
 	CountUnreadIncomingPendingRequests(ctx context.Context) (int, error)
 }
 
-// SettingsReader es el slice del settings repo que la Manager
-// necesita para leer toggles persistentes (e.g. "aceptar peticiones
-// entrantes"). Interface estrecha local para no atar federation a
-// internal/db.
+// SettingsReader: interfaz estrecha para leer toggles persistentes.
 type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key, value string) error
 }
 
-// EventBus is the slice of internal/event the Manager publishes to.
-// nil bus is a valid no-op so test rigs and bare-bones startup don't
-// have to wire one.
+// EventBus: slice de event que el Manager publica. nil = no-op valido.
 type EventBus interface {
 	Publish(event.Event)
 }
 
-// Federation events. The wire format mirrors existing event types
-// (Type + Data map[string]any) so downstream subscribers (admin SSE,
-// audit log, metrics) consume them with no special-casing.
+// Eventos de federation. Formato wire compatible con event.Event estandar.
 const (
 	EventPeerLinked   event.Type = "federation.peer_linked"
 	EventPeerRevoked  event.Type = "federation.peer_revoked"
@@ -109,48 +92,34 @@ const (
 	EventShareRemoved event.Type = "federation.share_removed"
 )
 
-// Config bundles the Manager's static per-instance settings.
+// Config agrupa settings estaticos por instancia del Manager.
 type Config struct {
-	// AdvertisedURL is the externally-reachable URL another peer would
-	// hit to connect to us. May differ from the proxy host (Tailscale,
-	// Cloudflare Tunnel) — set explicitly in admin settings.
+	// AdvertisedURL: URL externa a la que peers conectan.
 	AdvertisedURL string
-	// AdminContact is optional; renders in our /federation/info for
-	// the receiving admin's pre-confirmation context.
+	// AdminContact: opcional, se muestra en /federation/info.
 	AdminContact string
-	// Version is reported in /federation/info so peers can decline
-	// scopes the older side does not implement.
+	// Version: reportada en /federation/info.
 	Version string
-	// SupportedScopes advertises this server's capabilities.
+	// SupportedScopes: capacidades anunciadas.
 	SupportedScopes []string
-	// InviteTTL bounds how long an invite remains valid.
+	// InviteTTL: ventana de validez de invitaciones.
 	InviteTTL time.Duration
-	// HTTPTimeout caps outbound peer calls (probe + handshake). Short
-	// — peers should respond quickly or be considered offline.
+	// HTTPTimeout: techo para llamadas outbound a peers.
 	HTTPTimeout time.Duration
-	// PeerRequestsPerMinute is the per-peer rate-limit ceiling for
-	// inbound peer-authenticated requests. Defaults to 60.
+	// PeerRequestsPerMinute: rate-limit por peer para requests inbound. Default 60.
 	PeerRequestsPerMinute int
-	// PeerBurst is the bucket ceiling above the steady rate. Defaults to 30.
+	// PeerBurst: techo del bucket sobre la tasa sostenida. Default 30.
 	PeerBurst int
-	// AvatarsDir es el directorio donde se persiste la foto del
-	// servidor (subida por el admin desde el panel federation).
-	// Compartido con el avatarsDir de usuarios para reutilizar
-	// volumen docker; los nombres tienen prefijo "server-" para
-	// no colisionar con los UUIDs de usuario. Vacío = uploads
-	// del servidor deshabilitados (handler 503).
+	// AvatarsDir: directorio de la foto del servidor. Prefijo "server-"
+	// para no colisionar con UUIDs de usuario. Vacio = uploads deshabilitados.
 	AvatarsDir string
-	// MaxIncomingPendingRequests es el cap defensivo de filas
-	// pending en federation_pending_requests con direction=incoming.
-	// Si se alcanza, nuevas peticiones se rechazan con 429. Default
-	// 100 (suficiente para uso legitimo - el admin no va a tener
-	// 100 amigos pidiendo emparejarse a la vez - pero corta de raiz
-	// un flood). 0 = sin cap (NO recomendado en prod abierto).
+	// MaxIncomingPendingRequests: cap defensivo de pending incoming.
+	// Default 100. 0 = sin cap (no recomendado en prod abierto).
 	MaxIncomingPendingRequests int
 }
 
-// DefaultConfig returns sensible defaults for new deployments. Caller
-// overrides whatever they want from hubplay.yaml.
+// DefaultConfig devuelve defaults razonables. El caller sobreescribe
+// desde hubplay.yaml.
 func DefaultConfig() Config {
 	return Config{
 		AdvertisedURL:         "",
@@ -164,9 +133,8 @@ func DefaultConfig() Config {
 	}
 }
 
-// Manager is the federation feature's orchestration layer. It holds
-// identity, persistent state, and outbound HTTP behaviour; HTTP
-// handlers and the JWT validator both go through it.
+// Manager es la capa de orquestacion de federation. Mantiene identidad,
+// estado persistente y comportamiento HTTP outbound.
 type Manager struct {
 	cfg       Config
 	repo      Repo
@@ -180,42 +148,30 @@ type Manager struct {
 	nonces    *nonceCache
 	metrics   MetricsSink
 
-	// peerCache caches paired peers by server_uuid for the JWT
-	// validation hot path. Refreshed on each peer mutation.
+	// peerCache: cache de peers paired por server_uuid para hot path JWT.
 	mu        sync.RWMutex
 	peerCache map[string]*Peer
 
-	// streamSessions maps peer-stream session UUIDs to their bookkeeping
-	// entry. See stream.go. Separate mutex from peerCache because the
-	// streaming hot path doesn't need the peer-cache reader, and
-	// holding peerCache's RWMutex during a stream sweep would block
-	// JWT validation.
+	// streamSessions: sesiones de streaming activas. Mutex separado de
+	// peerCache para no bloquear validacion JWT durante sweep.
 	streamMu       sync.Mutex
 	streamSessions map[string]*PeerStreamSession
 
-	// sweeper goroutine state. cancel stops the ticker; done is closed
-	// when the goroutine has returned, so Close can wait on it.
+	// Estado del sweeper goroutine.
 	sweepCancel context.CancelFunc
 	sweepDone   chan struct{}
 
-	// avatarsDir donde se guarda la foto del servidor. Vacío =
-	// uploads deshabilitados; el handler responde 503.
+	// avatarsDir: foto del servidor. Vacio = uploads deshabilitados.
 	avatarsDir string
 
-	// settings es el slice del SettingsRepository inyectado en
-	// composition root. Nil-safe: si no lo wireamos, los toggles
-	// usan su default.
+	// settings: inyectado en composition root. Nil-safe.
 	settings SettingsReader
 }
 
-// streamSweepInterval is how often we scan streamSessions for entries
-// past peerStreamSessionTTL. Comfortably tighter than the TTL itself
-// so a stale session lingers at most ~one interval beyond TTL.
+// streamSweepInterval: cada cuanto se barren sesiones expiradas.
 const streamSweepInterval = time.Minute
 
-// NewManager wires a Manager. Callers must have already invoked
-// LoadOrCreate on this server's identity (typically at startup) so
-// the IdentityStore has something to load.
+// NewManager construye un Manager. LoadOrCreate debe haberse llamado antes.
 func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, logger *slog.Logger, bus EventBus) (*Manager, error) {
 	is, err := NewIdentityStore(ctx, repo, clk)
 	if err != nil {
@@ -240,8 +196,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		avatarsDir:     cfg.AvatarsDir,
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
-		// Tear down the auditor we just spawned so we don't leak the
-		// background goroutine when the constructor fails.
+		// Limpiar auditor para no filtrar goroutine si el constructor falla.
 		m.auditor.Close()
 		return nil, err
 	}
@@ -249,11 +204,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 	return m, nil
 }
 
-// startStreamSweeper launches the background goroutine that periodically
-// reclaims peer stream sessions idle past peerStreamSessionTTL. Without
-// this, RegisterPeerStreamSession would accumulate entries forever for
-// any peer that opened a session and never came back to play it (the
-// JWT expires upstream, but the in-memory mapping does not).
+// startStreamSweeper lanza goroutine que reclama sesiones idle pasado TTL.
 func (m *Manager) startStreamSweeper() {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sweepCancel = cancel
@@ -273,10 +224,8 @@ func (m *Manager) startStreamSweeper() {
 	}()
 }
 
-// Close releases background resources (audit queue, stream sweeper,
-// idle HTTP connections). Idempotent. Wired into main.go's graceful
-// shutdown so the audit queue flushes and outbound peer sockets are
-// closed before the process exits.
+// Close libera recursos de fondo (audit, sweeper, conexiones idle).
+// Idempotente. Conectado al graceful shutdown de main.go.
 func (m *Manager) Close() {
 	if m == nil {
 		return
@@ -287,61 +236,45 @@ func (m *Manager) Close() {
 		m.sweepCancel = nil
 	}
 	if m.httpClt != nil {
-		// CloseIdleConnections is best-effort: in-flight requests are
-		// not interrupted (they finish on their own context), but TCP
-		// keepalives held in the transport's idle pool are released
-		// immediately so SIGTERM doesn't wait HTTPTimeout for them.
+		// Best-effort: libera keepalives idle sin interrumpir in-flight.
 		m.httpClt.CloseIdleConnections()
 	}
 	m.auditor.Close()
 }
 
-// recordAudit forwards to the manager's auditor; safe to call when the
-// auditor is nil (test rigs that don't care about audit). Public via
-// internal helpers in middleware.go.
+// recordAudit reenvia al auditor. Nil-safe para tests.
 func (m *Manager) recordAudit(entry AuditEntry) {
 	m.auditor.Record(entry)
 }
 
-// NowUTC returns the manager's clock in UTC. Lets handlers use the
-// same clock the manager does (testable + deterministic) without
-// having to pass clock around separately.
+// NowUTC devuelve el reloj del manager en UTC.
 func (m *Manager) NowUTC() time.Time {
 	return m.clock.Now().UTC()
 }
 
-// SetSettings inyecta el reader de settings persistentes para que
-// el manager pueda leer toggles admin (e.g. accept_pairing_requests).
-// Llamada en composition root tras construir el manager (la API
-// principal no la usa - mantenemos NewManager sin nuevas deps).
+// SetSettings inyecta el reader de settings persistentes.
 func (m *Manager) SetSettings(s SettingsReader) {
 	m.settings = s
 }
 
-// SettingAcceptPairingRequests es la key del toggle admin
-// "aceptar peticiones de emparejamiento entrantes". Valor: "true"
-// o "false". Default ausente = true (puerta abierta).
+// SettingAcceptPairingRequests: key del toggle "aceptar peticiones
+// entrantes". Default ausente = true.
 const SettingAcceptPairingRequests = "federation.accept_pairing_requests"
 
-// AcceptingPairingRequests reporta si el endpoint publico debe
-// admitir nuevas peticiones entrantes. Default true cuando no hay
-// settings configurado o el toggle no esta puesto. Lo consulta el
-// manager.HandleIncomingPairingRequest antes de persistir.
+// AcceptingPairingRequests reporta si se admiten nuevas peticiones. Default true.
 func (m *Manager) AcceptingPairingRequests(ctx context.Context) bool {
 	if m.settings == nil {
 		return true
 	}
 	v, err := m.settings.Get(ctx, SettingAcceptPairingRequests)
 	if err != nil {
-		// ErrNotFound = key sin setear, asumimos default "true".
+		// Key sin setear = default "true".
 		return true
 	}
 	return v != "false"
 }
 
-// SetAcceptingPairingRequests persiste el toggle. El admin lo
-// alterna desde el panel cuando quiere bloquear nuevas peticiones
-// (anti-harassment / migracion / mantenimiento).
+// SetAcceptingPairingRequests persiste el toggle admin.
 func (m *Manager) SetAcceptingPairingRequests(ctx context.Context, enabled bool) error {
 	if m.settings == nil {
 		return fmt.Errorf("federation: settings not configured")
@@ -353,32 +286,16 @@ func (m *Manager) SetAcceptingPairingRequests(ctx context.Context, enabled bool)
 	return m.settings.Set(ctx, SettingAcceptPairingRequests, value)
 }
 
-// SetAdvertisedURL updates the URL this server advertises in its
-// public ServerInfo. Called from the admin settings flow when the
-// operator changes their domain (or moves behind a Tailscale endpoint),
-// and also at startup once the bind address is known. Concurrency-safe
-// because PublicServerInfo() reads cfg fields under the manager mutex
-// — but cfg writes are intentionally serialised at process boot, so
-// dynamic updates are admin-driven and rare.
+// SetAdvertisedURL actualiza la URL anunciada. Llamada desde admin
+// settings o al arrancar cuando se conoce el bind address.
 func (m *Manager) SetAdvertisedURL(url string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cfg.AdvertisedURL = url
 }
 
-// IssuePeerToken mints a fresh outbound peer JWT from THIS server to
-// the named audience peer. Used by Phase 3+ outbound clients (catalog
-// browse, stream session start, etc.) to authenticate themselves on
-// the remote.
-//
-// Takes the request's ctx so a cancellation upstream (user closed the
-// tab, request deadline tripped) cancels the underlying DB lookup.
-// Without it, a stuck SQLite write would block the request indefinitely
-// even after the caller had walked away.
-//
-// Returns ErrPeerNotFound if `audiencePeerID` isn't a paired peer in
-// our registry, so callers can short-circuit before bothering with
-// the HTTP roundtrip.
+// IssuePeerToken genera JWT outbound para el peer audience.
+// Devuelve ErrPeerNotFound si no esta paired.
 func (m *Manager) IssuePeerToken(ctx context.Context, audiencePeerID string) (string, error) {
 	peer, err := m.repo.GetPeerByID(ctx, audiencePeerID)
 	if err != nil {
@@ -391,14 +308,8 @@ func (m *Manager) IssuePeerToken(ctx context.Context, audiencePeerID string) (st
 	return IssuePeerToken(m.clock, id.PrivateKey, id.ServerUUID, peer.ServerUUID)
 }
 
-// PublicServerInfo renders the ServerInfo this server advertises on
-// GET /federation/info. Called frequently — the result is read-only
-// and cheap to assemble.
-//
-// AvatarImageURL se compone con AdvertisedURL + path serving público
-// para que el peer la pinte directamente. El sufijo "?v=<filename>"
-// actúa de cache-buster: cada upload reemplaza el nombre y el peer
-// refetchea sin negociar ETag.
+// PublicServerInfo renderiza el ServerInfo que publicamos en /federation/info.
+// AvatarImageURL incluye cache-buster via sufijo ?v=<filename>.
 func (m *Manager) PublicServerInfo() *ServerInfo {
 	id := m.identity.Current()
 	info := &ServerInfo{
@@ -420,23 +331,17 @@ func (m *Manager) PublicServerInfo() *ServerInfo {
 	return info
 }
 
-// UpdateIdentityProfile cambia el nombre visible y el color hex del
-// avatar del servidor. Pasa por el IdentityStore para que la cache
-// en memoria + la DB queden consistentes en una sola operación.
+// UpdateIdentityProfile cambia nombre + color hex via IdentityStore.
 func (m *Manager) UpdateIdentityProfile(ctx context.Context, name, avatarColor string) error {
 	return m.identity.UpdateProfile(ctx, name, avatarColor)
 }
 
-// SetIdentityAvatarPath registra (o limpia, con cadena vacía) la
-// ruta relativa del avatar subido. El handler escribe primero el
-// fichero a disco y luego llama aquí para persistir el nombre.
+// SetIdentityAvatarPath registra o limpia la ruta del avatar subido.
 func (m *Manager) SetIdentityAvatarPath(ctx context.Context, path string) error {
 	return m.identity.SetAvatarPath(ctx, path)
 }
 
-// IdentityAvatarPath devuelve la ruta relativa del avatar actual o
-// cadena vacía si no hay. Útil para que el servidor sirva el binario
-// público y para que el admin lo previsualice.
+// IdentityAvatarPath devuelve la ruta del avatar actual o vacio.
 func (m *Manager) IdentityAvatarPath() string {
 	id := m.identity.Current()
 	if id == nil {
@@ -449,9 +354,7 @@ func (m *Manager) IdentityAvatarPath() string {
 // Invite lifecycle
 // ────────────────────────────────────────────────────────────────────
 
-// GenerateInvite mints a single-use code that the local admin shares
-// with a remote admin out-of-band. Persists immediately so a crash
-// after generation doesn't lose the code that the admin already copied.
+// GenerateInvite genera un codigo de un solo uso. Persiste inmediatamente.
 func (m *Manager) GenerateInvite(ctx context.Context, userID string) (*Invite, error) {
 	inv, err := NewInvite(m.clock, userID, m.cfg.InviteTTL)
 	if err != nil {
@@ -468,8 +371,7 @@ func (m *Manager) GenerateInvite(ctx context.Context, userID string) (*Invite, e
 	return inv, nil
 }
 
-// ListActiveInvites returns codes that are still usable (not expired,
-// not consumed). Intended for the admin UI listing.
+// ListActiveInvites devuelve invitaciones aun usables.
 func (m *Manager) ListActiveInvites(ctx context.Context) ([]*Invite, error) {
 	return m.repo.ListActiveInvites(ctx)
 }
@@ -478,19 +380,17 @@ func (m *Manager) ListActiveInvites(ctx context.Context) ([]*Invite, error) {
 // Peer CRUD
 // ────────────────────────────────────────────────────────────────────
 
-// ListPeers returns every peer the admin has on record (including
-// revoked, for audit).
+// ListPeers devuelve todos los peers (incluidos revocados, para audit).
 func (m *Manager) ListPeers(ctx context.Context) ([]*Peer, error) {
 	return m.repo.ListPeers(ctx)
 }
 
-// GetPeer fetches a single peer by local UUID.
+// GetPeer obtiene un peer por UUID local.
 func (m *Manager) GetPeer(ctx context.Context, id string) (*Peer, error) {
 	return m.repo.GetPeerByID(ctx, id)
 }
 
-// LookupByServerUUID implements PeerLookup so jwt.go can resolve an
-// inbound JWT issuer to the matching pinned pubkey.
+// LookupByServerUUID implementa PeerLookup para resolver JWT inbound.
 func (m *Manager) LookupByServerUUID(serverUUID string) (*Peer, error) {
 	m.mu.RLock()
 	p, ok := m.peerCache[serverUUID]
@@ -501,15 +401,8 @@ func (m *Manager) LookupByServerUUID(serverUUID string) (*Peer, error) {
 	return p, nil
 }
 
-// CheckAndStoreNonce records a nonce as seen and returns whether it was
-// fresh. Returns false on replay (the same nonce was used before within
-// its parent token's TTL window). Called by the peer-JWT middleware
-// after signature/audience/expiry checks pass — replay is the *only*
-// thing left to verify before the request is honoured.
-//
-// `exp` is the JWT's expiry; the cache evicts entries past that point
-// because at that moment the token is rejected upstream by
-// ValidatePeerToken anyway, so the nonce no longer needs tracking.
+// CheckAndStoreNonce registra un nonce y devuelve si era fresco.
+// False = replay (nonce ya visto dentro del TTL del token).
 func (m *Manager) CheckAndStoreNonce(nonce string, exp time.Time) bool {
 	if m == nil || m.nonces == nil {
 		return true
@@ -521,23 +414,9 @@ func (m *Manager) CheckAndStoreNonce(nonce string, exp time.Time) bool {
 // Peer revocation
 // ────────────────────────────────────────────────────────────────────
 
-// RevokePeer terminates a peer relationship. The row remains for
-// audit (terminal state); all future JWTs from the peer are rejected
-// by ValidatePeerToken because PeerRevoked != PeerPaired.
-//
-// Atomicity note: the DB write (UpdatePeerRevoked) happens BEFORE the
-// in-memory peerCache refresh, so there is a sub-millisecond window
-// where a request that already passed LookupByServerUUID continues
-// to completion under the OLD cached *Peer. The window is bounded
-// by the time refreshPeerCache holds its write lock (microseconds in
-// practice), and any in-flight request was going to finish within
-// the JWT TTL anyway. New requests issued after the cache refresh
-// see PeerRevoked and fail at the auth gate.
-//
-// Stricter atomicity (DB + cache in one critical section) would
-// require holding the cache write lock during a SQLite roundtrip,
-// which we explicitly do not want — it would block every concurrent
-// JWT validation on every peer.
+// RevokePeer termina la relacion con un peer. La fila queda para audit.
+// La DB se actualiza ANTES del cache refresh; hay una ventana sub-ms
+// donde requests in-flight ven el Peer viejo (acotada por el write lock).
 func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	now := m.clock.Now()
 	if err := m.repo.UpdatePeerRevoked(ctx, peerID, now); err != nil {
@@ -546,9 +425,7 @@ func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	if err := m.refreshPeerCache(ctx); err != nil {
 		m.logger.Warn("federation: peer cache refresh after revoke failed", "err", err)
 	}
-	// Drop any in-memory rate-limit state for this peer so a future
-	// re-pairing starts with a clean bucket instead of inheriting
-	// residual tokens from a previously hostile session.
+	// Limpiar state de rate-limit para que un re-pair arranque limpio.
 	if m.ratelimit != nil {
 		m.ratelimit.Reset(peerID)
 	}
@@ -562,11 +439,8 @@ func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 // Internal helpers
 // ────────────────────────────────────────────────────────────────────
 
-// RefreshPeerCache repopulates the in-memory paired-peers cache from
-// the repository. Exposed for tests that insert peer rows directly
-// (bypassing the handshake flow) so JWT validation can find them.
-// Production callers go through ProbePeer / AcceptInvite / RevokePeer
-// which all refresh the cache themselves.
+// RefreshPeerCache repobla la cache de peers desde el repo.
+// Expuesto para tests que insertan filas directamente.
 func (m *Manager) RefreshPeerCache(ctx context.Context) error {
 	return m.refreshPeerCache(ctx)
 }
@@ -595,9 +469,7 @@ func (m *Manager) publish(t event.Type, data map[string]any) {
 	m.bus.Publish(event.Event{Type: t, Data: data})
 }
 
-// joinBaseURL appends a path to a base URL with idempotent slash
-// handling. Rejects an empty base or non-http(s) scheme so a typo
-// doesn't end up making us POST to a file:// URL.
+// joinBaseURL concatena path a base URL. Rechaza base vacia o scheme no http(s).
 func joinBaseURL(base, path string) (string, error) {
 	if base == "" {
 		return "", errors.New("base URL is empty")
@@ -612,14 +484,12 @@ func joinBaseURL(base, path string) (string, error) {
 	return base + path, nil
 }
 
-// EncodePublicKey renders a public key as base64 for JSON transport.
-// Used by callers that need to display or log a pubkey.
+// EncodePublicKey codifica un pubkey en base64 para transporte JSON.
 func EncodePublicKey(pub []byte) string {
 	return base64.StdEncoding.EncodeToString(pub)
 }
 
-// DecodePublicKey reverses EncodePublicKey. Returns ErrInvalidToken on
-// any decoding failure so the caller can map straight to 400.
+// DecodePublicKey decodifica base64. Devuelve ErrInvalidToken si falla.
 func DecodePublicKey(s string) ([]byte, error) {
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {

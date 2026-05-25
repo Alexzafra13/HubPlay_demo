@@ -7,19 +7,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Admin overlay of the channel list, the counterpart of the
+// Admin overlay of el channel list, el counterpart of the
 // per-user personalisation surface. The admin panel at
 // /admin/libraries/{id} uses these endpoints to reorder + hide
-// channels at the library level — hidden HERE is a hard
-// constraint, users cannot un-hide via their own overlay.
-//
-// All routes here are admin-gated by the router (admin role on
-// the parent route group). Library access is implicit (admin sees
-// everything).
-//
-// Routes:
-//   PUT    /libraries/{id}/channels/order            — replace full ordering
-//   PUT    /libraries/{id}/channels/{channelId}/admin-visibility — hide/show
 //   DELETE /libraries/{id}/channels/order            — restore M3U defaults
 
 type libraryChannelOrderRequest struct {
@@ -27,9 +17,9 @@ type libraryChannelOrderRequest struct {
 	HiddenChannelIDs  []string `json:"hidden_channel_ids"`
 }
 
-// ReplaceLibraryChannelOrder accepts the full reordered + hidden
+// ReplaceLibraryChannelOrder accepts el full reordered + hidden
 // list and persists it in one transaction. Same shape as the
-// per-user endpoint so the frontend can reuse its serialisation
+// per-user endpoint so el frontend can reuse its serialisation
 // code.
 func (h *IPTVHandler) ReplaceLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
@@ -62,9 +52,9 @@ type libraryChannelVisibilityRequest struct {
 }
 
 // SetLibraryChannelVisibility flips a single channel's hidden
-// state at the admin level. Surgical edit for the eye toggle on
-// each row of the curation panel — avoids re-uploading the full
-// reordered list when the admin just wants to hide one channel.
+// state at el admin level. Surgical edit for el eye toggle on
+// each row of el curation panel — avoids re-uploading el full
+// reordered list when el admin just wants to hide one channel.
 func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	channelID := chi.URLParam(r, "channelId")
@@ -84,8 +74,8 @@ func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http
 	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
 }
 
-// ResetLibraryChannelOrder wipes the admin overlay for a library,
-// restoring the order + visibility from the M3U import.
+// ResetLibraryChannelOrder wipes el admin overlay for a library,
+// restoring el order + visibility from el M3U import.
 func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if libraryID == "" {
@@ -101,9 +91,7 @@ func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Re
 
 // ListLibraryChannelsAdmin returns every channel for a library with
 // the admin overlay applied (position + hidden marker), including
-// admin-hidden rows so the curation panel can render the eye-off
-// toggle next to them. Distinct from the user-facing ListChannels
-// because admins curating need to see what they hid in order to
+// admin-hidden rows so el curation panel can render el eye-off
 // un-hide it, but downstream users must NOT (hard constraint).
 func (h *IPTVHandler) ListLibraryChannelsAdmin(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")

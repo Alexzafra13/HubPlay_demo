@@ -1,11 +1,9 @@
 package iptv
 
-// WatchHistoryOps aísla el surface de watch-history del olor CC del
-// audit 2026-05-14. Recibe el beacon del player con un channel id y
-// alimenta la rail "Continue Watching" del Discover. La traducción
-// channel-id ↔ stream-url (la DB key sobre stream-url para sobrevivir
-// re-imports de M3U) es interna a este sub-service — ver migración
-// 012 para el contexto.
+// WatchHistoryOps gestiona el historial de visualización. Recibe
+// beacons del player y alimenta la rail "Continue Watching".
+// La traducción channel-id ↔ stream-url (clave DB que sobrevive
+// re-imports M3U) es interna a este sub-service.
 
 import (
 	"context"
@@ -17,8 +15,7 @@ import (
 	iptvmodel "hubplay/internal/iptv/model"
 )
 
-// WatchHistoryOps necesita el `channels` repo además del propio
-// watchHistory porque RecordWatch tiene que mappear channelID →
+// WatchHistoryOps necesita channels repo para mapear channelID →
 // stream_url antes de persistir.
 type WatchHistoryOps struct {
 	channels     *db.ChannelRepository

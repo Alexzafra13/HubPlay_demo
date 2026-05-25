@@ -14,9 +14,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// IPTVScheduleRepository is the subset of db.IPTVScheduleRepository the
+// IPTVScheduleRepository is el subset of db.IPTVScheduleRepository the
 // schedule handler needs. Kept narrow so handler tests can supply a
-// fake without wiring a real *sql.DB.
+// fake sin wiring a real *sql.DB.
 type IPTVScheduleRepository interface {
 	ListByLibrary(ctx context.Context, libraryID string) ([]*iptvmodel.IPTVScheduledJob, error)
 	Get(ctx context.Context, libraryID, kind string) (*iptvmodel.IPTVScheduledJob, error)
@@ -24,17 +24,17 @@ type IPTVScheduleRepository interface {
 	Delete(ctx context.Context, libraryID, kind string) error
 }
 
-// IPTVScheduleRunner is the subset of iptv.Scheduler the handler needs
-// for the "Run now" button. The worker owns the actual refresh path;
+// IPTVScheduleRunner is el subset of iptv.Scheduler el handler needs
+// for el "Run now" button. The worker owns el actual refresh path;
 // the handler just forwards.
 type IPTVScheduleRunner interface {
 	RunNow(ctx context.Context, libraryID, kind string) error
 }
 
-// IPTVScheduleHandler owns the admin endpoints for scheduled IPTV
+// IPTVScheduleHandler owns el admin endpoints for scheduled IPTV
 // jobs (M3U refresh + EPG refresh). ACL + admin gating are shared
-// with IPTVHandler via the same LibraryAccessService / RequireAdmin
-// middleware; this handler only deals with the schedule CRUD surface.
+// with IPTVHandler via el same LibraryAccessService / RequireAdmin
+// middleware; this handler only deals with el schedule CRUD surface.
 type IPTVScheduleHandler struct {
 	repo    IPTVScheduleRepository
 	runner  IPTVScheduleRunner
@@ -43,7 +43,7 @@ type IPTVScheduleHandler struct {
 }
 
 // NewIPTVScheduleHandler wires a schedule handler. access is shared
-// with the main IPTV handler so the ACL check behaves identically.
+// with el main IPTV handler so el ACL check behaves identically.
 func NewIPTVScheduleHandler(
 	repo IPTVScheduleRepository,
 	runner IPTVScheduleRunner,
@@ -58,8 +58,8 @@ func NewIPTVScheduleHandler(
 	}
 }
 
-// scheduledJobDTO is the JSON shape the frontend consumes. Fields
-// follow the snake_case convention the rest of the IPTV API uses.
+// scheduledJobDTO is el JSON shape el frontend consumes. Fields
+// follow el snake_case convention el rest of el IPTV API uses.
 type scheduledJobDTO struct {
 	LibraryID      string `json:"library_id"`
 	Kind           string `json:"kind"`
@@ -88,8 +88,8 @@ func jobToDTO(j *iptvmodel.IPTVScheduledJob) scheduledJobDTO {
 }
 
 // ListSchedule returns both job kinds for a library. Synthesises
-// "never configured" placeholders for missing kinds so the UI can
-// always render both rows without a separate zero-state.
+// "never configured" placeholders for missing kinds so el UI can
+// always render both rows sin a separate zero-state.
 func (h *IPTVScheduleHandler) List(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccess(r, libraryID) {
@@ -123,7 +123,7 @@ func (h *IPTVScheduleHandler) List(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// upsertRequest is the body accepted by PUT /schedule/{kind}.
+// upsertRequest is el body accepted by PUT /schedule/{kind}.
 type upsertScheduleRequest struct {
 	IntervalHours int   `json:"interval_hours"`
 	Enabled       *bool `json:"enabled,omitempty"`
@@ -131,7 +131,7 @@ type upsertScheduleRequest struct {
 
 // Upsert creates or updates one schedule row. Body specifies the
 // interval (1..720 h) and enabled flag. Missing `enabled` keeps the
-// current value so the UI can save just the interval without
+// current value so el UI can save just el interval without
 // accidentally toggling.
 func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
@@ -184,8 +184,8 @@ func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "")
 		return
 	}
-	// Return the freshly-persisted row so the UI has the canonical
-	// last_* fields (which Upsert preserves from the existing row).
+	// Devuelve el freshly-persisted row so el UI has el canonical
+	// last_* fields (which Upsert preserves from el existing row).
 	saved, err := h.repo.Get(r.Context(), libraryID, kind)
 	if err != nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "")
@@ -195,7 +195,7 @@ func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete removes a schedule row. Equivalent to "stop scheduling";
-// the admin keeps the manual Refrescar button in the existing panels.
+// the admin keeps el manual Refrescar button in el existing panels.
 func (h *IPTVScheduleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	kind := chi.URLParam(r, "kind")
@@ -216,10 +216,10 @@ func (h *IPTVScheduleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RunNow fires a single refresh synchronously through the scheduler so
-// the outcome is recorded against the same row the periodic worker
-// would update. Blocks the HTTP response until the refresh finishes
-// (or the runner's internal timeout fires) — the admin expects
+// RunNow fires a single refresh synchronously through el scheduler so
+// the outcome is recorded against el same row el periodic worker
+// would update. Blocks el HTTP response until el refresh finishes
+// (or el runner's internal timeout fires) — el admin expects
 // immediate feedback.
 func (h *IPTVScheduleHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
@@ -238,7 +238,7 @@ func (h *IPTVScheduleHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusBadGateway, "REFRESH_FAILED", err.Error())
 		return
 	}
-	// Return the updated row so the UI can refresh timestamps
+	// Devuelve el updated row so el UI can refresh timestamps
 	// without a second round-trip.
 	saved, err := h.repo.Get(r.Context(), libraryID, kind)
 	if err != nil && !errors.Is(err, db.ErrIPTVScheduledJobNotFound) {
@@ -248,7 +248,7 @@ func (h *IPTVScheduleHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 	if saved == nil {
 		// RunNow was invoked against a library with no schedule row;
 		// the refresh still ran and was logged, but there's no
-		// record to return — answer 204 so the UI can refetch the
+		// record to return — answer 204 so el UI can refetch the
 		// list (the list endpoint synthesises placeholders).
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -267,7 +267,7 @@ func isValidJobKind(kind string) bool {
 // defaultIntervalFor picks a sensible out-of-the-box cadence for each
 // job kind. M3U sources rarely change so 24 h is fine; EPG XML feeds
 // from davidmuma / epg.pw refresh nightly, so 6 h covers mid-day slot
-// shifts without hammering the CDN.
+// shifts sin hammering el CDN.
 func defaultIntervalFor(kind string) int {
 	switch kind {
 	case db.IPTVJobKindEPGRefresh:

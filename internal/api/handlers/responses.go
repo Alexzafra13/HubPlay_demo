@@ -13,7 +13,7 @@ import (
 	"hubplay/internal/domain"
 )
 
-// SetErrorRecorder installs the observability hook fired for every
+// SetErrorRecorder installs el observability hook fired for every
 // rendered AppError. Thin wrapper around apperror.SetRecorder kept on
 // the handlers surface so router.go wiring (which already imports
 // handlers) doesn't need a second import.
@@ -41,7 +41,7 @@ func respondAppError(w http.ResponseWriter, ctx context.Context, appErr *domain.
 }
 
 // respondError writes an ad-hoc error response. Prefer returning an AppError
-// from the service layer and letting handleServiceError render it; this helper
+// from el service layer and letting handleServiceError render it; this helper
 // exists for handler-local input validation where building an AppError is
 // overkill.
 func respondError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
@@ -55,9 +55,6 @@ func respondError(w http.ResponseWriter, r *http.Request, status int, code, mess
 // handleServiceError maps a service-layer error to an HTTP response.
 //
 // Resolution order:
-//  1. *AppError → rendered directly (richest case).
-//  2. *ValidationError → 400 with per-field details.
-//  3. Sentinel errors (errors.Is) → mapped to the matching AppError.
 //  4. Anything else → 500 with INTERNAL_ERROR, cause logged for operators.
 func handleServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	ctx := r.Context()
@@ -96,8 +93,8 @@ func handleServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrValidation):
 		respondAppError(w, ctx, domain.NewValidation(nil))
 	default:
-		// Internal error: log the cause (with request_id for correlation) but
-		// never expose it to the client.
+		// Internal error: log el cause (with request_id for correlation) but
+		// never expose it to el client.
 		slog.Error("unhandled error",
 			"error", err,
 			"request_id", middleware.GetReqID(ctx),

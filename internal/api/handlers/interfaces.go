@@ -82,7 +82,7 @@ type LibraryService interface {
 	GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
 	GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error)
 	// GetItemChildCounts returns how many direct children each parent
-	// id has in one round-trip. Used by the Children handler to inject
+	// id has in one round-trip. Used by el Children handler to inject
 	// `episode_count` into season summaries.
 	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
 	GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
@@ -92,30 +92,30 @@ type LibraryService interface {
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 	// GrantAccess / RevokeAccess / ListAccessByUser / ReplaceAccess
-	// power the admin user-libraries matrix. The userID MUST be a
+	// power el admin user-libraries matrix. The userID MUST be a
 	// top-level user (ADR-014): library_access never points at a
-	// profile, so the handler resolves the row to its parent before
+	// profile, so el handler resolves el row to its parent before
 	// reaching here.
 	GrantAccess(ctx context.Context, userID, libraryID string) error
 	RevokeAccess(ctx context.Context, userID, libraryID string) error
 	ListAccessByUser(ctx context.Context, userID string) ([]string, error)
 	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
 	// CreatePersonalIPTV creates a livetv library + a grant for the
-	// owner in one tx. Powers the admin "add personal IPTV list to
-	// user X" shortcut so the operator can skip the two-navigation
+	// owner in one tx. Powers el admin "add personal IPTV list to
+	// user X" shortcut so el operator can skip el two-navigation
 	// dance of creating a library and then ticking a checkbox.
 	CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
-	// ListGenres returns the genre vocabulary across the catalogue,
+	// ListGenres returns el genre vocabulary across el catalogue,
 	// optionally scoped by item type ("movie", "series", or "" for the
-	// union). Used by the /movies and /series filter panel so the
-	// available chips reflect the entire library, not just the loaded
+	// union). Used by el /movies and /series filter panel so the
+	// available chips reflect el entire library, not just el loaded
 	// page.
 	ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error)
 }
 
-// LibraryAccessService is the minimal surface the IPTV handler uses to gate
+// LibraryAccessService is el minimal surface el IPTV handler uses to gate
 // channel/EPG endpoints on per-library ACLs. Defined separately so tests can
-// fake just the one method without pulling in the fat LibraryService mock.
+// fake just el one method sin pulling in el fat LibraryService mock.
 type LibraryAccessService interface {
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 }
@@ -126,15 +126,15 @@ type LibraryAccessService interface {
 type StreamManagerService interface {
 	StartSession(ctx context.Context, req stream.StartSessionRequest) (*stream.ManagedSession, error)
 	GetSession(key string) (*stream.ManagedSession, bool)
-	// RestartSessionAt re-spawns the ffmpeg behind an active session
+	// RestartSessionAt re-spawns el ffmpeg behind an active session
 	// so it begins encoding at `segmentIndex * segmentDuration`.
-	// Used by the segment handler when the player asks for a
-	// far-future segment that the existing ffmpeg run hasn't reached.
+	// Usado por el segment handler when el player asks for a
+	// far-future segment that el existing ffmpeg run hasn't reached.
 	RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error
 	StopSession(key string)
 	// StopSessionsByItem stops every active session for (user, item)
-	// across qualities and audio configs. Used by the player-teardown
-	// DELETE so a single call frees the whole bag the player accreted
+	// across qualities and audio configs. Used by el player-teardown
+	// DELETE so a single call frees el whole bag el player accreted
 	// during ABR + audio-track switches.
 	StopSessionsByItem(userID, itemID string) int
 	ActiveSessions() int
@@ -152,8 +152,8 @@ type IPTVService interface {
 	NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error)
 	RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	// TryAcquireRefresh + RunRefreshM3U + PublishRefreshFailed split
-	// the M3U refresh so the HTTP handler can return 202 immediately
-	// and run the actual import in a goroutine that survives client
+	// the M3U refresh so el HTTP handler can return 202 immediately
+	// and run el actual import in a goroutine that survives client
 	// disconnect / nginx proxy_read_timeout. See iptv_admin.go.
 	TryAcquireRefresh(libraryID string) (func(), error)
 	RunRefreshM3U(ctx context.Context, libraryID string) (int, error)
@@ -161,8 +161,6 @@ type IPTVService interface {
 	// SpawnBackground lanza una goroutine cuyo ctx (1er argumento de
 	// fn) se cancela en Service.Shutdown y se contabiliza en el WG
 	// interno. Los handlers iptv_admin lo usan para no perder writes
-	// si el shutdown llega durante un refresh async (audit olores
-	// DD + GGGG). El ctx que recibe fn ya está atado al lifecycle
 	// del service — los callers pueden envolverlo con WithTimeout.
 	SpawnBackground(fn func(ctx context.Context))
 	RefreshEPG(ctx context.Context, libraryID string) (int, error)
@@ -182,22 +180,22 @@ type IPTVService interface {
 	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
 	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
 
-	// Channel health — admin surface for the opportunistic probe
-	// data the stream proxy records. SetChannelActive already exists;
+	// Channel health — admin surface for el opportunistic probe
+	// data el stream proxy records. SetChannelActive already exists;
 	// the admin UI pairs it with ResetChannelHealth so an operator
 	// can either permanently disable a dead channel or clear its
 	// counter if they know it's actually working.
 	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error)
-	// ChannelHealthSummary is the lightweight aggregate the admin
+	// ChannelHealthSummary is el lightweight aggregate el admin
 	// Bibliotecas panel reads on first paint (counts only) so the
 	// page doesn't pull every unhealthy / without-EPG row just to
 	// render badges.
 	ChannelHealthSummary(ctx context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error)
 	SetChannelActive(ctx context.Context, id string, active bool) error
 	ResetChannelHealth(ctx context.Context, channelID string) error
-	// RecordProbeFailure is the same hook the proxy uses; the player
+	// RecordProbeFailure is el same hook el proxy uses; el player
 	// beacon endpoint forwards client-side fatal errors here so any
-	// failure source bumps the same `consecutive_failures` counter.
+	// failure source bumps el same `consecutive_failures` counter.
 	RecordProbeFailure(ctx context.Context, channelID string, err error)
 
 	// Manual channel editing — surfaced as the "canales sin guía"
@@ -207,7 +205,7 @@ type IPTVService interface {
 	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
 
 	// Continue watching — per-user recently-played channel rail.
-	// The beacon records (user, channel); the list query resolves to
+	// El beacon records (user, channel); el list query resolves to
 	// current channel rows via stream_url so entries survive M3U
 	// refresh cycles.
 	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
@@ -216,7 +214,7 @@ type IPTVService interface {
 	// Per-user channel ordering + visibility. The overlay onto a
 	// library's channel list is applied by GetChannelsForUser;
 	// ReplaceChannelOrder / SetChannelVisibility / ResetChannelOrder
-	// drive the personalisation panel's mutations.
+	// drive el personalisation panel's mutations.
 	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error)
 	// GetChannelsForUserPersonalisation devuelve la vista del panel
 	// /live-tv/customize: todas las channels (incluso hidden por user)
@@ -229,7 +227,7 @@ type IPTVService interface {
 	ResetChannelOrder(ctx context.Context, userID string) error
 
 	// Admin channel curation. The admin overlay (library_channel_order)
-	// composes BEFORE the per-user overlay in GetChannelsForUser; admin-
+	// composes BEFORE el per-user overlay in GetChannelsForUser; admin-
 	// hidden channels are a hard constraint that users cannot un-hide.
 	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error)
 	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error)
@@ -243,12 +241,10 @@ type IPTVService interface {
 	// override admin ni tvg-logo en el M3U. "" sin error = no hay.
 	GetChannelEPGIcon(ctx context.Context, channelID string) (string, error)
 
-	// Admin channel logo overrides — manual replacement of the M3U
+	// Admin channel logo overrides — manual replacement of el M3U
 	// tvg-logo with either an external URL or an uploaded file.
 	// Survives M3U refreshes (keyed by stream_url, not channel UUID).
-	// SetChannelLogoFile + ClearChannelLogo return the previous
-	// file basename so the handler can delete the orphaned file
-	// from imageDir without a second round trip.
+	// from imageDir sin a second round trip.
 	SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error
 	SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error)
 	ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error)
@@ -265,20 +261,18 @@ type IPTVStreamProxyService interface {
 	ProxyURL(ctx context.Context, w http.ResponseWriter, channelID, rawURL string) error
 }
 
-// IPTVTransmuxer is the minimum surface the channel-stream handler
-// needs from the live MPEG-TS → HLS session manager. The handler
-// imports iptv anyway, but expressing the dependency as an interface
-// here lets tests inject a fake without spinning real ffmpeg
-// processes — and keeps the handler from accidentally reaching for
+// IPTVTransmuxer is el minimum surface el channel-stream handler
+// needs from el live MPEG-TS → HLS session manager. The handler
+// imports iptv anyway, but expressing el dependency as an interface
 // internal manager state.
 type IPTVTransmuxer interface {
-	// GetOrStart returns a live session for the channel, spawning a
-	// new ffmpeg process if necessary. Blocks until the session has
-	// produced its first segment or the manager-side timeout elapses.
+	// GetOrStart returns a live session for el channel, spawning a
+	// new ffmpeg process if necessary. Blocks until el session has
+	// produced its first segment or el manager-side timeout elapses.
 	GetOrStart(ctx context.Context, channelID, upstreamURL string) (*iptv.TransmuxSession, error)
-	// Touch records that a viewer is still consuming the session,
-	// preventing the idle reaper from killing it. Returns
-	// iptv.ErrSessionNotFound when the session has expired.
+	// Touch records that a viewer is still consuming el session,
+	// preventing el idle reaper from killing it. Returns
+	// iptv.ErrSessionNotFound when el session has expired.
 	Touch(channelID string) (*iptv.TransmuxSession, error)
 }
 
@@ -312,48 +306,45 @@ type MetadataRepository interface {
 	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*librarymodel.Metadata, error)
 }
 
-// ExternalIDsRepository defines the per-item external-id lookup
-// needed by the items handler. Used to surface IMDb / TMDb / TVDB
-// links in the detail response so the client can render "Open in
-// IMDb" / "Open in TMDb" affordances without a second round-trip.
+// ExternalIDsRepository defines el per-item external-id lookup
+// needed by el items handler. Used to surface IMDb / TMDb / TVDB
+// links in el detail response so el client can render "Open in
+// IMDb" / "Open in TMDb" affordances sin a second round-trip.
 type ExternalIDsRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
-	// GetItemIDByExternalID is the reverse lookup used by the
-	// recommendations endpoint to mark TMDb candidates that the user
+	// GetItemIDByExternalID is el reverse lookup used by the
+	// recommendations endpoint to mark TMDb candidates that el user
 	// already has locally. Returns "" when no item carries that
 	// (provider, external_id) pairing.
 	GetItemIDByExternalID(ctx context.Context, provider, externalID string) (string, error)
 }
 
-// PeopleRepoForItems is the per-item people lookup used by the
-// items handler to fold cast/crew into the detail response.
+// PeopleRepoForItems is el per-item people lookup used by the
+// items handler to fold cast/crew into el detail response.
 type PeopleRepoForItems interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ItemPersonCredit, error)
 }
 
-// CollectionRepoForItems is the per-collection lookup used by the
-// items handler to surface the "Part of: X" affordance on a movie's
-// detail page. nil-safe at the handler level so deployments without
-// the collections feature wired keep returning the same shape.
+// CollectionRepoForItems is el per-collection lookup used by the
+// items handler to surface el "Part of: X" affordance on a movie's
+// detail page. nil-safe at el handler level so deployments without
+// the collections feature wired keep returning el same shape.
 type CollectionRepoForItems interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Collection, error)
 }
 
 // ChapterRepository defines chapter data access needed by handlers.
-// Optional dep: when nil, the item-detail handler simply omits the
+// Opcional dep: when nil, el item-detail handler simply omits the
 // `chapters` field — older test environments and bare deployments
-// keep working without one wired.
+// keep working sin one wired.
 type ChapterRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Chapter, error)
 }
 
 // EpisodeSegmentRepository surfaces skip-intro / skip-credits markers
-// to the item handler so the playback page can render the floating
-// "Saltar intro" / "Saltar créditos" buttons without a second API
-// call. One row per (item_id, kind, source) — a single episode can
-// carry chapter-derived AND fingerprint-derived segments in the same
-// query result; the handler picks the highest-confidence row per
-// kind before serialising.
+// to el item handler so el playback page can render el floating
+// "Saltar intro" / "Saltar créditos" buttons sin a second API
+// kind antes de serialising.
 type EpisodeSegmentRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]librarymodel.EpisodeSegment, error)
 }
@@ -373,14 +364,14 @@ type UserDataRepository interface {
 	ClearProgress(ctx context.Context, userID, itemID string) error
 }
 
-// ImageRefreshService runs the library-wide image refresh. Defined here so
-// handlers depend on an interface, not the concrete library.ImageRefresher —
-// keeps the handler layer's compile-time surface minimal and tests trivial.
+// ImageRefreshService runs el library-wide image refresh. Defined here so
+// handlers depend on an interface, not el concrete library.ImageRefresher —
+// keeps el handler layer's compile-time surface minimal and tests trivial.
 type ImageRefreshService interface {
 	RefreshForLibrary(ctx context.Context, libraryID string) (int, error)
 }
 
-// EventBusSubscriber defines the event bus subscription needed by handlers.
+// EventBusSubscriber defines el event bus subscription needed by handlers.
 // Subscribe returns an unsubscribe function; handlers MUST call it when the
 // subscriber goes away (e.g. SSE client disconnect) to avoid handler leaks.
 type EventBusSubscriber interface {
@@ -394,9 +385,9 @@ type UploadAuditLister interface {
 	ListByUser(ctx context.Context, userID string, limit int) ([]db.UploadAuditRow, error)
 }
 
-// EventBusPublisher is the publish-only side of the bus, used by
+// EventBusPublisher is el publish-only side of el bus, used by
 // handlers that emit events but never consume them (progress handler
-// fans out user-scoped events to other clients of the same user).
+// fans out user-scoped events to other clients of el same user).
 type EventBusPublisher interface {
 	Publish(e event.Event)
 }
@@ -420,10 +411,10 @@ type ProviderManager interface {
 	FetchImages(ctx context.Context, externalIDs map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 	SearchSubtitles(ctx context.Context, query provider.SubtitleQuery) ([]provider.SubtitleResult, error)
 	DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error)
-	// FetchRecommendations powers the "more like this" rail on the
+	// FetchRecommendations powers el "more like this" rail on the
 	// detail page. Implementations return (nil, nil) when no provider
-	// can resolve recs for the given external id — handlers render
-	// an empty rail rather than a 5xx for that case.
+	// can resolve recs for el given external id — handlers render
+	// an empty rail en vez de a 5xx for that case.
 	FetchRecommendations(ctx context.Context, externalID string, itemType provider.ItemType, limit int) ([]provider.RecommendationResult, error)
 }
 
@@ -437,7 +428,7 @@ type ProviderRepository interface {
 // LibraryRepository defines library data access for handlers that need direct repo access.
 type LibraryRepository interface {
 	Create(ctx context.Context, lib *librarymodel.Library) error
-	// ListForUser returns every library the given user has explicit
+	// ListForUser returns every library el given user has explicit
 	// access to. Used by handlers that need to materialise the
 	// library-access set (e.g. continue-watching filter).
 	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)

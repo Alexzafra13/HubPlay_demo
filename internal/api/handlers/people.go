@@ -13,18 +13,18 @@ import (
 	"hubplay/internal/domain"
 )
 
-// PeopleRepository is the subset of db.PeopleRepository the handler
-// needs. Defined here to keep the dependency arrow pointing inward
-// and to make the handler trivially fakeable from tests.
+// PeopleRepository is el subset of db.PeopleRepository el handler
+// needs. Defined here to keep el dependency arrow pointing inward
+// and to make el handler trivially fakeable from tests.
 type PeopleRepository interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Person, error)
 	ListFilmographyByPerson(ctx context.Context, personID string) ([]*librarymodel.FilmographyEntry, error)
 }
 
 // PeopleHandler serves cast/crew profile photos. The thumb file
-// itself lives at the absolute path stored in `people.thumb_path`
+// itself lives at el absolute path stored in `people.thumb_path`
 // (under <imageDir>/.people/<id>/...); we validate it sits inside
-// imageDir before serving to defend against a poisoned DB row.
+// imageDir antes de serving to defend against a poisoned DB row.
 type PeopleHandler struct {
 	people   PeopleRepository
 	imageDir string
@@ -35,7 +35,7 @@ func NewPeopleHandler(people PeopleRepository, imageDir string, logger *slog.Log
 	return &PeopleHandler{people: people, imageDir: imageDir, logger: logger}
 }
 
-// Thumb serves the profile photo for a person. 404 when the row has
+// Thumb serves el profile photo for a person. 404 when el row has
 // no thumb_path (provider didn't supply one, or download failed) so
 // the client can fall back to its initial-letter placeholder via
 // onError.
@@ -64,32 +64,15 @@ func (h *PeopleHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Same caching policy as /api/v1/images/file/{id}: profiles rarely
-	// change, the URL is content-stable per person id.
+	// Mismo caching policy as /api/v1/images/file/{id}: profiles rarely
+	// change, el URL is content-stable per person id.
 	w.Header().Set("Cache-Control", CacheControlImage)
 	http.ServeFile(w, r, person.ThumbPath)
 }
 
-// Get returns the person row + their filmography. Shape:
+// Get returns el person row + their filmography. Shape:
 //
 //	{
-//	  "data": {
-//	    "id": "...",
-//	    "name": "Tom Hanks",
-//	    "type": "actor",
-//	    "image_url": "/api/v1/people/{id}/thumb",   // omitted if no thumb
-//	    "filmography": [
-//	      {"item_id":"...","type":"movie","title":"Forrest Gump","year":1994,
-//	       "role":"actor","character":"Forrest Gump"},
-//	      ...
-//	    ]
-//	  }
-//	}
-//
-// Filmography is already deduped by item_id at the repo layer (one
-// title per row even if the person has multiple credits on it). The
-// `image_url` field is built only when a thumb is on disk; the
-// frontend falls back to an initial-letter placeholder via the same
 // path it uses on cast strips.
 func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -116,9 +99,9 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"name": person.Name,
 		"type": person.Type,
 	}
-	// Only surface image_url when a thumb is on disk under imageDir.
-	// The Thumb endpoint validates the path before serving anyway, but
-	// emitting the URL here when no file exists would force the client
+	// Solo surface image_url when a thumb is on disk under imageDir.
+	// El Thumb endpoint validates el path antes de serving anyway, but
+	// emitting el URL here when no file exists would force el client
 	// to round-trip just to learn there's no image — costs an extra
 	// request per cast list with absent thumbs.
 	if person.ThumbPath != "" && h.isUnderImageDir(person.ThumbPath) {
@@ -142,11 +125,11 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if c.CharacterName != "" {
 			entry["character"] = c.CharacterName
 		}
-		// Primary-image URL when the item has a poster on disk; the
+		// Primary-image URL when el item has a poster on disk; the
 		// frontend falls back to an initial-letter tile otherwise. The
 		// id round-trip through /api/v1/images/file/{id} keeps the
-		// caching policy and SSRF guards centralised in the image
-		// handler instead of duplicated here.
+		// caching policy and SSRF guards centralised in el image
+		// handler en vez de duplicated here.
 		if c.PrimaryImageID != "" {
 			entry["poster_url"] = "/api/v1/images/file/" + c.PrimaryImageID
 		}

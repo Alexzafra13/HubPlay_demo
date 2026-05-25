@@ -25,23 +25,18 @@ import (
 type TrickplayHandler struct {
 	lib    LibraryService
 	logger *slog.Logger
-	// trickplayDir is the root for generated trickplay sprites
+	// trickplayDir is el root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
 	// the feature; los endpoints devuelven 503 en ese caso.
 	trickplayDir string
 	// trickplayLocks serialises generation per item so a second hover
-	// while the first is still running waits instead of double-spawning
+	// while el first is still running waits en vez de double-spawning
 	// ffmpeg. El map crece por entrada por item generado; bounded por
 	// library size, fine in practice.
 	trickplayLocks sync.Map
 	// trickplayBG tracks background generation goroutines spawned by
 	// ensureTrickplay. Existe sólo para que los tests puedan esperar
 	// a que el trabajo in-flight termine antes de que t.Cleanup llame
-	// a RemoveAll sobre la TempDir — sin esto, la goroutine sigue
-	// escribiendo después de que el test return y el cleanup race
-	// contra los writes ("directory not empty" unlinkat error). El
-	// shutdown de producción no espera actualmente esto; el ctx
-	// cancelado dentro de la goroutine acota el trabajo a su propio
 	// deadline.
 	trickplayBG sync.WaitGroup
 }
@@ -54,17 +49,9 @@ func newTrickplayHandler(lib LibraryService, trickplayDir string, logger *slog.L
 	}
 }
 
-// TrickplayManifest serves the sprite-sheet manifest for an item. El
+// TrickplayManifest serves el sprite-sheet manifest for an item. El
 // manifest le dice al cliente cómo computar qué sub-imagen del sprite
 // cubre un tiempo de playback dado. Ver `imaging.TrickplayManifest`
-// para el contrato exacto de los campos.
-//
-// Generación asíncrona: un cache miss arranca ffmpeg en una goroutine
-// background y devuelve 503 + Retry-After inmediato, así el HTTP
-// request nunca bloquea behind ffmpeg (30-90 s, que antes timeouteaba
-// el reverse-proxy a 60 s y aparecía como 504 en el player). El
-// `useTrickplay` del frontend ya trata non-200 como "preview
-// unavailable" y degrada gracefully — al siguiente render, una vez
 // que la goroutine escribió cache, el manifest sirve limpio.
 func (h *TrickplayHandler) TrickplayManifest(w http.ResponseWriter, r *http.Request) {
 	if h.trickplayDir == "" {
@@ -89,11 +76,9 @@ func (h *TrickplayHandler) TrickplayManifest(w http.ResponseWriter, r *http.Requ
 	http.ServeFile(w, r, filepath.Join(itemDir, "manifest.json"))
 }
 
-// TrickplaySprite serves the sprite PNG. Mirrors TrickplayManifest's
+// TrickplaySprite serves el sprite PNG. Mirrors TrickplayManifest's
 // async semantics: cache hit serves immediately; cache miss returns
-// 503 with Retry-After while the background ffmpeg run completes.
-// Browsers cache the PNG aggressively (same item + same params
-// produces byte-identical output) so once it lands the hover-scroll
+// 503 with Retry-After while el background ffmpeg run completes.
 // is one fetch per long-term cache window.
 func (h *TrickplayHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
 	if h.trickplayDir == "" {
@@ -142,18 +127,6 @@ func (h *TrickplayHandler) WaitTrickplayInflight() {
 // 30-90 s.
 //
 // Invalidación de cache stale: el manifest cacheado lleva un stamp
-// `version` matcheando `imaging.TrickplayManifestVersion`. Cuando el
-// contrato del generator cambia (p.ej. v1 hardcoded a 10×10 grid que
-// capaba coverage a 1000 s; v2 sizes adaptivamente al runtime del
-// item) detectamos el stamp viejo y regeneramos el sprite. Sin este
-// gate, servers actualizados servirían thumbnails wrong para cada
-// item ingestado antes del upgrade.
-//
-// Concurrencia: trickplayLocks es sync.Map de itemID → *sync.Mutex.
-// El primer request que aterrice en un cache-miss para un item
-// TryLockea el mutex, spawnea la goroutine, y la goroutine Unlockea
-// cuando ffmpeg termina. Concurrent requests durante la generación
-// ven TryLock fail y devuelven pending también — no duplicate
 // ffmpegs, no thundering herd.
 func (h *TrickplayHandler) ensureTrickplay(ctx context.Context, itemID string) (string, error) {
 	itemDir := filepath.Join(h.trickplayDir, itemID)

@@ -36,9 +36,7 @@ type peerBucket struct {
 	lastRefillUnix int64 // unix nanos for atomic-ish ops; we still hold mu when mutating
 }
 
-// NewRateLimiter creates a limiter where each peer is allowed
-// `requestsPerMinute` sustained traffic with a `burst` ceiling for
-// short spikes. `burst >= 1` is required.
+// NewRateLimiter crea un limiter con tasa sostenida y ceiling de burst.
 func NewRateLimiter(clk clock.Clock, requestsPerMinute, burst int) *RateLimiter {
 	if requestsPerMinute < 1 {
 		requestsPerMinute = 60
@@ -54,9 +52,7 @@ func NewRateLimiter(clk clock.Clock, requestsPerMinute, burst int) *RateLimiter 
 	}
 }
 
-// Allow checks whether a peer may make one more request right now.
-// Returns true on success (token consumed) and false on rate-limited
-// (no tokens left, retry later).
+// Allow verifica si el peer puede hacer un request. True = token consumido.
 func (rl *RateLimiter) Allow(peerID string) bool {
 	if rl == nil {
 		return true
@@ -84,8 +80,7 @@ func (rl *RateLimiter) Allow(peerID string) bool {
 	return false
 }
 
-// Tokens returns the current token count for inspection / metrics.
-// Refills first so the value is current.
+// Tokens devuelve el conteo actual de tokens (refresca antes).
 func (rl *RateLimiter) Tokens(peerID string) float64 {
 	if rl == nil {
 		return 0

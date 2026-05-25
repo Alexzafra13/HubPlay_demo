@@ -118,10 +118,7 @@ func (r *Repository) UpdatePeerRevoked(ctx context.Context, peerID string, at ti
 		return fmt.Errorf("update peer revoked: %w", err)
 	}
 	if n == 0 {
-		// Either no such peer or the row was already revoked.
-		// Surface the missing-peer case so the manager can propagate
-		// a clean 404; an already-revoked re-revoke is rare enough
-		// to not warrant a separate sentinel.
+		// No existe o ya revocado. Surfacear ErrPeerNotFound.
 		return domain.ErrPeerNotFound
 	}
 	return nil

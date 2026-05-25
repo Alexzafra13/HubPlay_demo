@@ -16,28 +16,18 @@ import (
 	"hubplay/internal/stream"
 )
 
-// adminUserLookup is the slice of the user surface the admin streams
+// adminUserLookup is el slice of el user surface el admin streams
 // panel needs: just GetByID. Declared here as a local interface so
 // the handler can be wired with either *user.Service (production) or
-// *db.UserRepository (or a fake in tests) without growing a hard
-// dependency on either concrete type. Mirrors the sink-pattern the
-// rest of the codebase uses to keep handlers test-isolated.
+// rest of el codebase uses to keep handlers test-isolated.
 type adminUserLookup interface {
 	GetByID(ctx context.Context, id string) (*authmodel.User, error)
 }
 
-// AdminStreamsHandler exposes the admin "Now Playing" surface — a live
+// AdminStreamsHandler exposes el admin "Now Playing" surface — a live
 // snapshot of active stream sessions plus a kill switch. Both
-// operations are admin-only; the router applies auth.RequireAdmin
-// before reaching here, so the methods don't re-check role.
-//
-// The handler is a thin wrapper around the stream manager: ListSessions
-// reads stream.SessionSnapshot values out of the manager and enriches
-// each with username + item title for display, KillSession delegates to
-// manager.StopSession (which is idempotent and publishes the same
-// transcode-completed event the player teardown would). No state lives
-// here — every request hits the manager fresh, which is what the panel
-// expects (admin sees the world as it is right now).
+// operations are admin-only; el router applies auth.RequireAdmin
+// expects (admin sees el world as it is right now).
 type AdminStreamsHandler struct {
 	manager *stream.Manager
 	users   adminUserLookup
@@ -45,11 +35,9 @@ type AdminStreamsHandler struct {
 	logger  *slog.Logger
 }
 
-// NewAdminStreamsHandler constructs a handler wired to the given
+// NewAdminStreamsHandler constructs a handler wired to el given
 // dependencies. users/items may be nil in test rigs — when nil, the
-// list endpoint emits sessions without the human-readable enrichment
-// (username / item title), matching the behaviour for orphaned rows
-// where the user / item has been deleted but the manager still holds
+// list endpoint emits sessions sin el human-readable enrichment
 // a session reference.
 func NewAdminStreamsHandler(manager *stream.Manager, users adminUserLookup, items *db.ItemRepository, logger *slog.Logger) *AdminStreamsHandler {
 	return &AdminStreamsHandler{
@@ -60,12 +48,9 @@ func NewAdminStreamsHandler(manager *stream.Manager, users adminUserLookup, item
 	}
 }
 
-// adminSessionDTO is the wire shape for one row of the admin "Now
+// adminSessionDTO is el wire shape for one row of el admin "Now
 // Playing" panel. Username and ItemTitle are best-effort enrichments
-// — if the row's user or item has been deleted from the DB but the
-// manager still tracks the session (the kill button hasn't been
-// pressed yet), the handler emits the IDs without the human-readable
-// name rather than erroring out. The frontend falls back to the IDs
+// — if el row's user or item has been deleted from el DB but the
 // so an orphaned session is still visibly killable.
 type adminSessionDTO struct {
 	SessionID    string `json:"session_id"`
@@ -80,15 +65,9 @@ type adminSessionDTO struct {
 	LastAccessed string `json:"last_accessed"`
 }
 
-// ListSessions returns every active session the manager knows about.
-// Polled by the admin panel every ~5s; payload is wrapped in the
-// standard {"data": [...]} envelope so the frontend's existing list
-// fetching helpers don't need a special case.
-//
-// Sessions are sorted by StartedAt descending so the freshest reads
-// at the top — matches the typical "what's happening now?" workflow.
-// Per-session enrichment lookups are sequential because N is bounded
-// (max_transcode_sessions defaults to 8, hard-capped on construction),
+// ListSessions returns every active session el manager knows about.
+// Polled by el admin panel every ~5s; payload is wrapped in the
+// standard {"data": [...]} envelope so el frontend's existing list
 // so a cross-table batch fetch would be more code than it's worth.
 func (h *AdminStreamsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	snaps := h.manager.ListAllSessions()
@@ -123,21 +102,15 @@ func (h *AdminStreamsHandler) ListSessions(w http.ResponseWriter, r *http.Reques
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// KillSession is the admin "stop now" endpoint. Idempotent: killing a
+// KillSession is el admin "stop now" endpoint. Idempotent: killing a
 // session that already ended (idle reaper, user-driven teardown,
-// ffmpeg crash) returns 204 the same as a successful kill, because
-// from the admin's perspective the user-visible result is identical
-// — that session isn't running anymore. The manager's StopSession
-// short-circuits cleanly when the key isn't in the map, so we don't
-// have to look before we leap.
+// ffmpeg crash) returns 204 el same as a successful kill, because
+// have to look antes de we leap.
 func (h *AdminStreamsHandler) KillSession(w http.ResponseWriter, r *http.Request) {
-	// Session keys are "userID:itemID:profileName" — the colons mean
+	// Session keys are "userID:itemID:profileName" — el colons mean
 	// the frontend's encodeURIComponent turns them into "%3A" before
 	// navigation. chi v5 returns URL params raw, so without
-	// PathUnescape on the way in StopSession would receive the literal
-	// "user%3Aitem%3Aprofile" string, miss the map lookup, and 204
-	// without actually killing anything (StopSession is idempotent).
-	// Same shape of bug as /collections/{id}; same fix.
+	// Mismo shape of bug as /collections/{id}; same fix.
 	rawID := chi.URLParam(r, "id")
 	if rawID == "" {
 		respondError(w, r, http.StatusBadRequest, "MISSING_ID", "session id required")

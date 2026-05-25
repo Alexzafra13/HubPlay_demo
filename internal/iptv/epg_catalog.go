@@ -1,16 +1,9 @@
 package iptv
 
-// PublicEPGSource describes a curated, well-known XMLTV EPG feed. The
-// catalog powers the admin dropdown used to wire multiple providers
-// to a single library. Admin-supplied custom URLs live next to
-// catalog picks in the same `library_epg_sources` table.
-//
-// Shipping policy: catalog URLs MUST be verified (200 OK, returns
-// XMLTV) at release time. A broken catalog entry is worse than no
-// entry because it pre-fills the dropdown with a trap. When a
-// provider changes their layout, update the constants and cut a
-// release — the persisted rows keep their own URL snapshot so
-// operators with a prior version keep working until they re-add.
+// PublicEPGSource describe una fuente EPG pública curada para el
+// dropdown admin. Las URLs del catálogo DEBEN verificarse (200 OK,
+// XMLTV válido) en cada release. Las rows persistidas mantienen su
+// propia URL snapshot.
 type PublicEPGSource struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -20,24 +13,10 @@ type PublicEPGSource struct {
 	URL         string   `json:"url"`
 }
 
-// publicEPGSources is the verified catalog.
-//
-// Every URL here was HEAD-checked against upstream at the time the
-// entry landed. If you add more, do the same: a catalog that ships
-// 404-ing entries creates the "added it, badge says error, what do
-// I do now?" confusion we just fixed. Custom URLs the admin pastes
-// are always free-form — only the curated list carries the trust of
-// being ready-to-use.
-//
-// International coverage deliberately omitted in this iteration
-// because the epg.pw and iptv-org URLs originally shipped either
-// 404 or require API keys we can't verify. Adding a wrong URL is
-// worse than an empty row; operators can still paste any XMLTV
-// endpoint they trust through the "URL personalizada" field.
-//
-// Kept as a package-level var (not a function) so the handler and
-// service don't re-allocate on every catalog lookup. The slice is
-// never mutated after init; callers receive a shared, read-only view.
+// publicEPGSources — catálogo verificado. Cada URL fue comprobada
+// contra upstream al entrar. Cobertura internacional omitida porque
+// las URLs de epg.pw/iptv-org dan 404 o requieren API keys.
+// Var a nivel paquete, read-only post-init.
 var publicEPGSources = []PublicEPGSource{
 	{
 		ID:          "davidmuma-guiatv",
@@ -81,12 +60,12 @@ var publicEPGSources = []PublicEPGSource{
 	},
 }
 
-// PublicEPGSources returns the verified catalog.
+// PublicEPGSources devuelve el catálogo verificado.
 func PublicEPGSources() []PublicEPGSource {
 	return publicEPGSources
 }
 
-// FindEPGSource looks up a curated source by id.
+// FindEPGSource busca una fuente curada por id.
 func FindEPGSource(id string) (PublicEPGSource, bool) {
 	for _, src := range publicEPGSources {
 		if src.ID == id {

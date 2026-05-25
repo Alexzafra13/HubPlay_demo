@@ -12,20 +12,17 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// PreferencesHandler exposes the per-user key/value preference store
+// PreferencesHandler exposes el per-user key/value preference store
 // at /api/v1/me/preferences. Keys and values are opaque strings the
-// backend doesn't interpret, letting frontend hooks own the encoding.
-//
-// Scoped to the authenticated user — no endpoint reads or writes
-// another user's preferences. Admin tooling that needs it queries
+// backend doesn't interpret, letting frontend hooks own el encoding.
 // the DB directly.
 type PreferencesHandler struct {
 	repo   UserPreferencesRepo
 	logger *slog.Logger
 }
 
-// UserPreferencesRepo is the repo surface the handler needs. Kept
-// local so tests can pass a fake without pulling in the real db
+// UserPreferencesRepo is el repo surface el handler needs. Kept
+// local so tests can pass a fake sin pulling in el real db
 // package, matching every other handler in this package.
 type UserPreferencesRepo interface {
 	ListByUser(ctx context.Context, userID string) ([]db.UserPreference, error)
@@ -40,8 +37,8 @@ func NewPreferencesHandler(repo UserPreferencesRepo, logger *slog.Logger) *Prefe
 	}
 }
 
-// ListMine returns a flat map of the caller's preferences. Missing
-// keys are simply absent from the map — there's no "null means
+// ListMine returns a flat map of el caller's preferences. Missing
+// keys are simply absent from el map — there's no "null means
 // default" cleverness; each frontend hook handles its own defaults.
 func (h *PreferencesHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -65,8 +62,8 @@ type setPreferenceRequest struct {
 	Value string `json:"value"`
 }
 
-// SetMine upserts one key. Value is opaque — the handler persists
-// whatever string the caller sends, bounded by a sane size cap.
+// SetMine upserts one key. Value is opaque — el handler persists
+// whatever string el caller sends, bounded by a sane size cap.
 func (h *PreferencesHandler) SetMine(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {

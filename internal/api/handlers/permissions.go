@@ -25,17 +25,6 @@ type PermissionsStore interface {
 // admins:
 //
 //   GET /users/{id}/permissions — lee los flags (admin-only via grupo).
-//   PUT /users/{id}/permissions — modifica flags. Owner inmutable;
-//                                 sólo el owner puede otorgar
-//                                 can_manage_admins a otros.
-//
-// Owner-transfer NO existe — el owner es inmutable de por vida. Si
-// hace falta ceder la instalación, va por CLI fuera de HTTP.
-//
-// Las decisiones de gate hard (can_manage_admins) van en el router
-// via PermissionChecker.Require. Aquí dentro hacemos los chequeos
-// FINOS: que el target sea legítimo, que el body no traiga keys
-// fuera del whitelist, que un admin con can_manage_admins NO pueda
 // auto-otorgarse can_manage_admins.
 type PermissionsHandler struct {
 	store  PermissionsStore
@@ -109,11 +98,6 @@ type SetPermissionsRequest struct {
 //
 //   1. NUNCA modificar al owner — sus flags son inmutables.
 //   2. Auto-otorgarse can_manage_admins está prohibido (salvo que ya
-//      lo tengas: en ese caso el PUT sobre ti mismo deja el flag
-//      como estaba, así que no hace daño).
-//   3. Sólo el owner puede otorgar can_manage_admins a otros — los
-//      admins secundarios no pueden crear pares "can_manage_admins"
-//      adicionales aunque tengan el flag. Es la defensa contra
 //      sprawl de admins comprometidos.
 func (h *PermissionsHandler) PutPermissions(w http.ResponseWriter, r *http.Request) {
 	targetID := chi.URLParam(r, "id")

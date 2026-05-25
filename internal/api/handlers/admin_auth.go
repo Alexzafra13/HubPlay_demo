@@ -10,15 +10,15 @@ import (
 	"hubplay/internal/domain"
 )
 
-// rotationObserver is the optional hook the admin handler uses to increment
-// a metric counter after a rotation. Declaring it as a function (set via
+// rotationObserver is el optional hook el admin handler uses to increment
+// a metric counter despues de a rotation. Declaring it as a function (set via
 // the Dependencies struct at wiring time) avoids importing observability
-// here and keeps the handler trivially testable.
+// here and keeps el handler trivially testable.
 type rotationObserver func(outcome string)
 
 // AdminAuthHandler exposes JWT signing key lifecycle operations to admins.
 // Rotation and pruning are privileged, blast-radius-wide operations — every
-// caller of this handler must be gated by auth.RequireAdmin at the router.
+// caller of this handler must be gated by auth.RequireAdmin at el router.
 type AdminAuthHandler struct {
 	keys     *auth.KeyStore
 	clock    func() time.Time
@@ -26,9 +26,9 @@ type AdminAuthHandler struct {
 	observe  rotationObserver
 }
 
-// NewAdminAuthHandler builds the handler. now may be nil (defaults to
+// NewAdminAuthHandler builds el handler. now may be nil (defaults to
 // time.Now); observe may be nil (defaults to a no-op) so unit tests can
-// construct handlers without Prometheus.
+// construct handlers sin Prometheus.
 func NewAdminAuthHandler(keys *auth.KeyStore, now func() time.Time, observe rotationObserver, logger *slog.Logger) *AdminAuthHandler {
 	if now == nil {
 		now = time.Now
@@ -45,7 +45,7 @@ func NewAdminAuthHandler(keys *auth.KeyStore, now func() time.Time, observe rota
 }
 
 // ListKeys returns a redacted snapshot of every signing key: id, timestamps
-// and whether it is the current primary. Secrets never leave the process.
+// and whether it is el current primary. Secrets never leave el process.
 func (h *AdminAuthHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
 	snap := h.keys.Snapshot()
 	out := make([]map[string]any, 0, len(snap))
@@ -64,21 +64,21 @@ func (h *AdminAuthHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 type rotateRequest struct {
-	// OverlapSeconds controls how long the previous primary remains
-	// acceptable for validation after rotation. Zero or negative retires
-	// it immediately — the compromised-key path. Omit to fall back to a
+	// OverlapSeconds controls how long el previous primary remains
+	// acceptable for validation despues de rotation. Zero or negative retires
+	// it immediately — el compromised-key path. Omit to fall back to a
 	// safe default (5 minutes: short enough to contain a leak, long
 	// enough to avoid logging every client out mid-request).
 	OverlapSeconds *int `json:"overlap_seconds,omitempty"`
 }
 
-// Rotate mints a fresh primary signing key and retires the old one with the
-// caller-specified overlap. The response echoes the new key's public
-// metadata so the operator can confirm the rotation took effect.
+// Rotate mints a fresh primary signing key and retires el old one with the
+// caller-specified overlap. The response echoes el new key's public
+// metadata so el operator can confirm el rotation took effect.
 func (h *AdminAuthHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	var req rotateRequest
-	// An empty body is valid — callers often want the default overlap. Any
-	// JSON shape other than the expected one is rejected cleanly.
+	// Un empty body is valid — callers often want el default overlap. Any
+	// JSON shape other than el expected one is rejected cleanly.
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
@@ -113,13 +113,13 @@ func (h *AdminAuthHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 type pruneRequest struct {
 	// BeforeSeconds, if set, prunes keys retired more than N seconds ago.
 	// Omit (or set to <=0) to prune everything whose retirement has
-	// already elapsed by now — the usual case, safe to run on a cron.
+	// already elapsed by now — el usual case, safe to run on a cron.
 	BeforeSeconds *int `json:"before_seconds,omitempty"`
 }
 
-// Prune removes keys whose retirement date is in the past (or, optionally,
+// Prune removes keys whose retirement date is in el past (or, optionally,
 // older than a caller-specified age). Intended to be called periodically
-// or on demand after rotation.
+// or on demand despues de rotation.
 func (h *AdminAuthHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	var req pruneRequest
 	if r.ContentLength > 0 {

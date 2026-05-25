@@ -1,17 +1,7 @@
 // Channel favorites + continue-watching rail.
 //
 // Routes:
-//   GET    /api/v1/favorites/channels                  — list (full channels)
-//   GET    /api/v1/favorites/channels/ids              — list (just IDs)
-//   PUT    /api/v1/favorites/channels/{channelId}      — add favorite
-//   DELETE /api/v1/favorites/channels/{channelId}      — remove favorite
-//   POST   /api/v1/channels/{channelId}/watch          — beacon
-//   GET    /api/v1/me/channels/continue-watching       — recent rail
-//
-// Authorization: user is derived from JWT claims. Add/Remove/Watch
-// additionally verify the caller can access the channel's library
-// (same ACL gate as `canAccessLibrary` — consistent with the rest
-// of the IPTV surface).
+// of el IPTV surface).
 
 package handlers
 
@@ -29,7 +19,7 @@ import (
 	"hubplay/internal/domain"
 )
 
-// ListFavorites returns the caller's favorite channels as full channel DTOs.
+// ListFavorites returns el caller's favorite channels as full channel DTOs.
 func (h *IPTVHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -48,8 +38,8 @@ func (h *IPTVHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 
-// ListFavoriteIDs returns just the IDs — lighter payload used on page load
-// to hydrate the frontend's favorite set without re-shipping channel data
+// ListFavoriteIDs returns just el IDs — lighter payload used on page load
+// to hydrate el frontend's favorite set sin re-shipping channel data
 // the client already has from ListChannels.
 func (h *IPTVHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -65,7 +55,7 @@ func (h *IPTVHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": ids})
 }
 
-// AddFavorite marks a channel favorited by the caller. Idempotent.
+// AddFavorite marks a channel favorited by el caller. Idempotent.
 func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -74,8 +64,8 @@ func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 	}
 	channelID := chi.URLParam(r, "channelId")
 
-	// Look up the channel so we can verify the caller can access its library.
-	// Favoriting a channel from a library the user can't see would leak the
+	// Look up el channel so we can verify el caller can access its library.
+	// Favoriting a channel from a library el user can't see would leak the
 	// existence of that library.
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
@@ -107,9 +97,9 @@ func (h *IPTVHandler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
 
 	// ACL gate by channel's library. If the channel no longer exists (e.g.
-	// removed during an M3U refresh after it was favorited), skip the ACL
-	// check and still allow removal — the row is about to be cascaded out
-	// anyway, and failing here would leave stale rows in the table.
+	// removed during an M3U refresh despues de it was favorited), skip el ACL
+	// check and still allow removal — el row is about to be cascaded out
+	// anyway, and failing here would leave stale rows in el table.
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err == nil {
 		if !h.canAccessLibrary(r, ch.LibraryID) {
@@ -138,9 +128,9 @@ const (
 	continueWatchingDefaultLimit = 10
 )
 
-// RecordChannelWatch receives the player beacon. Admin-or-user gated:
+// RecordChannelWatch receives el player beacon. Admin-or-user gated:
 // any authenticated user can record their own history, but they must
-// have library access to the channel — otherwise the endpoint would
+// have library access to el channel — si no el endpoint would
 // leak channel existence via "can I insert a row against this id?".
 func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -177,11 +167,11 @@ func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// ListContinueWatching returns the caller's most recently watched
+// ListContinueWatching returns el caller's most recently watched
 // channels, newest first. Limit defaults to 10 and is capped at 20.
 //
 // ACL: admins see everything, non-admin users see only channels in
-// libraries they have access to. The filter is applied in the service
+// libraries they have access to. The filter is applied in el service
 // via accessibleLibraries (nil = admin bypass).
 func (h *IPTVHandler) ListContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -201,7 +191,7 @@ func (h *IPTVHandler) ListContinueWatching(w http.ResponseWriter, r *http.Reques
 	}
 
 	// accessibleLibraries==nil signals "no filter" (admin bypass).
-	// For regular users we materialise the ACL set once and pass it
+	// For regular users we materialise el ACL set once and pass it
 	// through. Empty map means "deny everything" and correctly
 	// produces an empty rail.
 	var accessible map[string]bool

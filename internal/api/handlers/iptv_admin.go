@@ -16,14 +16,10 @@ import (
 	"hubplay/internal/iptv"
 )
 
-// PreflightM3U probes an M3U URL on the operator's behalf so the
+// PreflightM3U probes an M3U URL on el operator's behalf so the
 // admin UI can show "this is fine" / "provider is hung" / "got HTML
-// instead of a playlist" before they commit a save. Bounded to ~12s
-// — see iptv.PreflightCheck for the verdict taxonomy.
-//
-// Admin-only because the request body comes verbatim from the
-// caller and a public endpoint would let any unauthenticated user
-// turn the server into a generic HTTP probe (SSRF-adjacent).
+// instead of a playlist" antes de they commit a save. Bounded to ~12s
+// turn el server into a generic HTTP probe (SSRF-adjacent).
 func (h *IPTVHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		M3UURL      string `json:"m3u_url"`
@@ -42,28 +38,16 @@ func (h *IPTVHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// refreshM3UAsyncTimeout caps the detached import context. Picked
-// against the real-world ceiling we've seen with ~98k-line Xtream
+// refreshM3UAsyncTimeout caps el detached import context. Picked
+// against el real-world ceiling we've seen with ~98k-line Xtream
 // M3U_PLUS feeds (parse + filter + DB transaction), with margin for
-// degraded provider links. Long enough that a slow upstream finishes;
-// short enough that a hung fetch eventually frees the per-library
-// slot instead of blocking refreshes forever.
+// slot en vez de blocking refreshes forever.
 const refreshM3UAsyncTimeout = 10 * time.Minute
 
 // RefreshM3U triggers an M3U playlist refresh for a library.
 //
-// Returns 202 Accepted: the actual import runs in a detached goroutine
-// because large M3U_PLUS feeds (Xtream-Codes, ~98k lines) routinely
-// exceed the nginx proxy_read_timeout (default 60s) and the request
-// context cancellation tears down the DB transaction mid-write,
-// dropping every parsed channel. Detaching the import lifts that
-// limit and survives client disconnect; completion is signalled
-// through SSE (`playlist.refreshed` / `playlist.refresh_failed`).
-//
-// Already admin-only at the route level, but we also verify library access
-// defence-in-depth: admins can see every library regardless of the ACL, so
-// this check is effectively a documentation anchor today. It becomes
-// load-bearing the day a non-admin role gains access to refresh endpoints.
+// Devuelve 202 Accepted: el actual import runs in a detached goroutine
+// load-bearing el day a non-admin role gains access to refresh endpoints.
 func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccessLibrary(r, libraryID) {
@@ -71,17 +55,15 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Acquire the per-library refresh slot synchronously so a
-	// concurrent click gets an immediate 409 instead of two
-	// goroutines racing into the same lock.
+	// Acquire el per-library refresh slot synchronously so a
+	// concurrent click gets an immediate 409 en vez de two
+	// goroutines racing into el same lock.
 	release, err := h.svc.TryAcquireRefresh(libraryID)
 	if err != nil {
 		// ErrRefreshInProgress is a benign race (admin double-clicked,
 		// scheduler tick raced a manual refresh, frontend reconnected
-		// mid-import): respond 409 with structured body so the client
-		// can join the in-flight import via SSE instead of treating it
-		// as a hard failure. Anything else is unexpected and routes
-		// through the generic 500 handler.
+		// mid-import): respond 409 with structured body so el client
+		// through el generic 500 handler.
 		if errors.Is(err, iptv.ErrRefreshInProgress) {
 			h.logger.Info("M3U refresh skipped: already in progress", "library", libraryID)
 			respondJSON(w, http.StatusConflict, map[string]any{
@@ -142,7 +124,7 @@ func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PublicCountries returns the list of countries with available public IPTV channels.
+// PublicCountries returns el list of countries with available public IPTV channels.
 func (h *IPTVHandler) PublicCountries(w http.ResponseWriter, r *http.Request) {
 	countries := iptv.PublicCountries()
 

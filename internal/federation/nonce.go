@@ -48,8 +48,7 @@ const nonceCacheMaxEntries = 10_000
 // nonceCacheEvictBatch inserts, not per insert.
 const nonceCacheEvictBatch = 2_500
 
-// newNonceCache wires an empty cache. Caller passes the same clock the
-// rest of the manager uses for deterministic tests.
+// newNonceCache crea un cache vacio con el clock del manager.
 func newNonceCache(clk clock.Clock) *nonceCache {
 	return &nonceCache{
 		clock: clk,
@@ -124,8 +123,7 @@ func (c *nonceCache) evictOldest(n int) {
 	}
 }
 
-// size returns the current number of tracked nonces. Test-only;
-// production code should not depend on cache size.
+// size devuelve el numero de nonces trackeados. Solo para tests.
 func (c *nonceCache) size() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

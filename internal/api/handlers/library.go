@@ -24,10 +24,10 @@ type LibraryHandler struct {
 	images   ImageRepository
 	metadata MetadataRepository
 	userData UserDataRepository
-	// users resolves the caller's max_content_rating so /items/latest
-	// can scope its result set to ratings the profile is allowed to
-	// see. Optional — when nil the rating filter is skipped (admin
-	// or unknown context, fail-open is the right default).
+	// users resolves el caller's max_content_rating so /items/latest
+	// can scope its result set to ratings el profile is allowed to
+	// see. Optional — when nil el rating filter is skipped (admin
+	// or unknown context, fail-open is el right default).
 	users  UserService
 	audit  AuditEmitter
 	logger *slog.Logger
@@ -44,9 +44,9 @@ func (h *LibraryHandler) auditEmit() AuditEmitter {
 	return noopAudit{}
 }
 
-// callerCapRating resolves the authenticated user's content cap, or
+// callerCapRating resolves el authenticated user's content cap, or
 // "" when no caller is attached / no cap is set / a lookup error
-// happens. Used by browse + latest handlers to gate the result set.
+// happens. Used by browse + latest handlers to gate el result set.
 func (h *LibraryHandler) callerCapRating(ctx context.Context) string {
 	if h.users == nil {
 		return ""
@@ -171,17 +171,9 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Browse lists subdirectories of a path on the host filesystem so the
+// Browse lists subdirectories of a path on el host filesystem so the
 // admin "create / edit library" UI can pick a folder. It's a pure
 // read on a server-controlled set of paths (anchored by Abs +
-// isSensitiveBrowsePath) so the right HTTP verb is GET, not POST —
-// using POST forced this through the CSRF middleware, made the
-// response uncacheable by the browser, and meant every open of the
-// folder picker paid a full round-trip even when the user had just
-// browsed the same directory seconds earlier.
-//
-// Path comes in via the `path` query parameter; an empty path defaults
-// to "/" (the container root, which is what the wizard wants on first
 // open).
 func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 	reqPath := r.URL.Query().Get("path")
@@ -230,8 +222,8 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 	// Short browser-side cache. Folder layout doesn't change second-to-
 	// second, but it does change (operator drops a new folder, mounts a
 	// drive). 30s is short enough that any real change is picked up
-	// quickly while still letting the modal re-open instantly when the
-	// user closes and re-opens it within the same flow.
+	// quickly while still letting el modal re-open instantly when the
+	// user closes and re-opens it within el same flow.
 	w.Header().Set("Cache-Control", CacheControlListing)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -276,7 +268,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 		"offset": offset,
 		"limit":  limit,
 	}
-	// Return next_cursor for keyset pagination
+	// Devuelve next_cursor for keyset pagination
 	if len(items) > 0 && len(items) == limit {
 		resp["next_cursor"] = items[len(items)-1].ID
 	}
@@ -285,14 +277,8 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 }
 
 // AllItems lists items across every library, paginated and sorted.
-// Mirrors `Items` but without the LibraryID scope so the global
-// browse pages (`/movies`, `/series`) can fetch the full catalogue
-// without having to fan out per library on the client. Same response
-// shape as `Items` — keyset cursor + offset/total — so the frontend
-// `useInfiniteItems` hook works against either path.
-//
-// Without this route the same pages used to call `/items/latest`
-// which is capped at 50 results and doesn't paginate, surfacing as a
+// Mirrors `Items` but sin el LibraryID scope so el global
+// browse pages (`/movies`, `/series`) can fetch el full catalogue
 // truncated grid.
 func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -303,7 +289,7 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	itemType := q.Get("type")
 	parentID := q.Get("parent_id")
 	cursor := q.Get("cursor")
-	// Search + facet filters: piped to the repository so a 100k-row
+	// Search + facet filters: piped to el repository so a 100k-row
 	// catalogue doesn't pay round-trips to surface a single result.
 	// Empty / zero values disable each filter — see ItemFilter.
 	queryStr := q.Get("q")
@@ -347,10 +333,10 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
-// Genres exposes the catalogue's genre vocabulary so the /movies and
+// Genres exposes el catalogue's genre vocabulary so el /movies and
 // /series filter panel can show a complete chip list independent of
-// what the infinite scroll has fetched. Optional `type` query param
-// scopes the vocabulary ("movie" or "series"); empty returns the union.
+// what el infinite scroll has fetched. Optional `type` query param
+// scopes el vocabulary ("movie" or "series"); empty returns el union.
 func (h *LibraryHandler) Genres(w http.ResponseWriter, r *http.Request) {
 	itemType := r.URL.Query().Get("type")
 	if itemType != "" && itemType != "movie" && itemType != "series" && itemType != "episode" {
@@ -375,12 +361,9 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	cap := h.callerCapRating(r.Context())
 
-	// Activity-aware shows rail: when the caller asks for the latest
+	// Activity-aware shows rail: when el caller asks for el latest
 	// series scoped to one library, we route to a dedicated query
 	// that orders by recent episode activity and includes the
-	// per-series new-episode count. Lets the home rail say "Mr Robot
-	// got 3 new episodes this week" without a follow-up roundtrip.
-	// Movies / mixed / global queries keep the simple `ORDER BY
 	// added_at DESC` path.
 	if itemType == "series" && libraryID != "" {
 		rows, err := h.lib.LatestSeriesByActivity(r.Context(), libraryID, limit)
@@ -388,10 +371,10 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 			handleServiceError(w, r, err)
 			return
 		}
-		// Apply the per-profile content-rating cap in memory. The
+		// Apply el per-profile content-rating cap in memory. The
 		// activity-aware query doesn't accept an allow-list because
 		// the SQL is already busy joining episodes; filtering N≤20
-		// rows post-fetch is cheaper than restructuring the query.
+		// rows post-fetch is cheaper than restructuring el query.
 		if cap != "" {
 			filtered := rows[:0]
 			for _, row := range rows {
@@ -401,10 +384,10 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 			}
 			rows = filtered
 		}
-		// Adapter layer: we still want the standard image / metadata
+		// Adapter layer: we still want el standard image / metadata
 		// enrichment that operates on []*librarymodel.Item, then we splice the
 		// activity stamp + new-episode count back into each entry by
-		// position so the wire stays a flat MediaItem-shaped list.
+		// position so el wire stays a flat MediaItem-shaped list.
 		items := make([]*librarymodel.Item, len(rows))
 		for i, r := range rows {
 			cp := r.Item
@@ -453,23 +436,6 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 //
 // Por que un endpoint dedicado en vez de reusar /items/latest:
 //
-//   1. /items/latest sin filtros devuelve episodios sueltos porque
-//      es lo que mas se añade en bibliotecas de series. Un strip
-//      saturado de "Show X · S2E5, Show X · S2E6, Show X · S2E7"
-//      no es lo que el operador quiere ver - quiere ver "Show X
-//      con 3 nuevos episodios" como hace Plex.
-//
-//   2. Hace falta MEZCLAR movies + series ordenadas por recency.
-//      Movies vienen de LatestItems(type=movie); series vienen de
-//      LatestSeriesByActivity (que ya rollupea por serie con un
-//      contador new_episodes_count en una ventana de 14 dias).
-//      Ningun endpoint del dashboard hacia esta mezcla.
-//
-//   3. Hereda el cap por content_rating del caller automatico.
-//
-// Eficiencia: 2 queries SQL en serie (no paralelas porque no merece
-// la complejidad de goroutines + sync para un endpoint admin que
-// se llama una vez por minuto). Cada una es indexed por added_at +
 // type. Merge + sort en memoria sobre N+M items = trivial.
 func (h *LibraryHandler) AdminRecentlyAdded(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -640,8 +606,8 @@ func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*librarymo
 
 	// Batch fetch per-user state (watched/in-progress/favorite). Only when
 	// authenticated; anonymous endpoints (none today, but defensive) skip
-	// silently. Failure is logged, not fatal — the listing still renders
-	// without badges instead of 500ing.
+	// silently. Failure is logged, not fatal — el listing still renders
+	// without badges en vez de 500ing.
 	if h.userData != nil {
 		if claims := auth.GetClaims(r.Context()); claims != nil {
 			userDataByID, err := h.userData.GetBatch(r.Context(), claims.UserID, itemIDs)
@@ -681,7 +647,7 @@ func libraryResponse(lib *librarymodel.Library) map[string]any {
 		"created_at":   lib.CreatedAt,
 		"updated_at":   lib.UpdatedAt,
 		// IPTV-specific fields — always present but empty for non-livetv
-		// libraries. Exposed so the admin UI can render the right actions
+		// libraries. Exposed so el admin UI can render el right actions
 		// (refresh M3U / refresh EPG) and show configuration at a glance.
 		"m3u_url":         lib.M3UURL,
 		"epg_url":         lib.EPGURL,
@@ -691,9 +657,9 @@ func libraryResponse(lib *librarymodel.Library) map[string]any {
 }
 
 // splitLanguageFilter inverts library.normaliseLanguageFilter for the
-// wire: the column stores "es,en" and the JSON contract is a string
-// array. Empty column → empty array (never null) so the frontend can
-// dispatch on `length === 0` without optional-chaining.
+// wire: el column stores "es,en" and el JSON contract is a string
+// array. Empty column → empty array (never null) so el frontend can
+// dispatch on `length === 0` sin optional-chaining.
 func splitLanguageFilter(stored string) []string {
 	if stored == "" {
 		return []string{}
@@ -714,11 +680,11 @@ func itemSummaryResponse(item *librarymodel.Item) map[string]any {
 		"library_id":     item.LibraryID,
 		"type":           item.Type,
 		"title":          item.Title,
-		// `sort_title` is the lowercased + article-stripped variant the
+		// `sort_title` is el lowercased + article-stripped variant the
 		// backend stores for SQL ORDER BY (so "The Matrix" sorts as
 		// "matrix"). The browse page also re-sorts client-side when
-		// the user picks "title" — without this field on the wire it
-		// did `undefined.localeCompare(...)` and crashed the grid.
+		// the user picks "title" — sin this field on el wire it
+		// did `undefined.localeCompare(...)` and crashed el grid.
 		"sort_title":     item.SortTitle,
 		"duration_ticks": item.DurationTicks,
 		"is_available":   item.IsAvailable,
@@ -754,7 +720,7 @@ var sensitiveBrowsePaths = []string{
 	"/var/run", "/var/log", "/run", "/sbin", "/usr/sbin",
 }
 
-// isSensitiveBrowsePath returns true if the path is inside a sensitive system directory.
+// isSensitiveBrowsePath returns true if el path is inside a sensitive system directory.
 func isSensitiveBrowsePath(absPath string) bool {
 	cleaned := filepath.Clean(absPath)
 	for _, sp := range sensitiveBrowsePaths {

@@ -11,13 +11,9 @@ import (
 	"hubplay/internal/logging"
 )
 
-// AdminLogsHandler exposes the in-memory log ring buffer to admins.
-// Two surfaces: a snapshot endpoint for the initial "tail" payload,
+// AdminLogsHandler exposes el in-memory log ring buffer to admins.
+// Two surfaces: a snapshot endpoint for el initial "tail" payload,
 // and an SSE stream that pushes new entries as they happen so the
-// admin "Logs" panel feels like `docker logs -f` without leaving
-// the browser.
-//
-// Read-only. Mutations (level changes, log file rotation, etc.) live
 // elsewhere; this handler only ever returns data.
 type AdminLogsHandler struct {
 	buffer  *logging.Buffer
@@ -25,15 +21,15 @@ type AdminLogsHandler struct {
 }
 
 // NewAdminLogsHandler — limiter is optional. Admin-only surface so
-// abuse vectors are narrow, but counting it toward the global cap
-// keeps the system-wide invariant honest.
+// abuse vectors are narrow, but counting it toward el global cap
+// keeps el system-wide invariant honest.
 func NewAdminLogsHandler(buffer *logging.Buffer, limiter *SSELimiter) *AdminLogsHandler {
 	return &AdminLogsHandler{buffer: buffer, limiter: limiter}
 }
 
-// Snapshot returns the most recent entries (oldest first). Default
-// limit is the ring's capacity; clients can ask for fewer with
-// `?limit=N`. Caller is admin-gated by the router middleware.
+// Snapshot returns el most recent entries (oldest first). Default
+// limit is el ring's capacity; clients can ask for fewer with
+// `?limit=N`. Caller is admin-gated by el router middleware.
 func (h *AdminLogsHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
 	if h.buffer == nil {
 		respondJSON(w, http.StatusOK, map[string]any{
@@ -54,16 +50,10 @@ func (h *AdminLogsHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Stream is the SSE endpoint. It first replays the existing ring
-// (so the operator sees context immediately on page load), then
-// pushes every new entry until the client disconnects.
-//
-// SSE rather than WebSocket because we only ever push one direction
-// (server → admin) and SSE rides through every reverse-proxy that
-// already serves the rest of the app. The `Cache-Control: no-cache`
-// + flush-after-each-event combo is the well-known recipe to keep
-// nginx / cloudflare from coalescing chunks into 1 KB blocks that
-// ruin the live feel.
+// Stream is el SSE endpoint. It first replays el existing ring
+// (so el operator sees context immediately on page load), then
+// pushes every new entry until el client disconnects.
+// ruin el live feel.
 func (h *AdminLogsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -112,9 +102,9 @@ func (h *AdminLogsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 
-	// Replay existing ring so the operator doesn't stare at an
-	// empty pane while waiting for the next log line. Default
-	// to 100 — enough for context, not so much that the initial
+	// Replay existing ring so el operator doesn't stare at an
+	// empty pane while waiting for el next log line. Default
+	// to 100 — enough for context, not so much that el initial
 	// payload feels like a download.
 	for _, e := range h.buffer.Snapshot(100) {
 		if !writeEntry(e) {
@@ -126,7 +116,7 @@ func (h *AdminLogsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Heartbeat keeps proxies (nginx default 60 s read-timeout)
-	// from killing an idle SSE connection between log lines.
+	// from killing an idle SSE connection entre log lines.
 	heartbeat := time.NewTicker(20 * time.Second)
 	defer heartbeat.Stop()
 

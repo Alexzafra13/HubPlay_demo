@@ -1,55 +1,16 @@
 package iptv
 
-// HLS transmux session manager for live IPTV streams that the browser
-// cannot consume directly (raw MPEG-TS over HTTP, the format Xtream
-// Codes M3U_PLUS feeds typically serve).
+// Transmux session manager: convierte MPEG-TS upstream (formato de
+// Xtream M3U_PLUS que los browsers no reproducen) a HLS vía ffmpeg
+// `-c copy -f hls`. CPU ~0 porque no re-codifica.
 //
-// Why this exists
-// ───────────────
-// The plain proxy (proxy.go) handles two upstream shapes:
-//  1. HLS playlists (`*.m3u8`) — rewritten and forwarded as HLS, which
-//     hls.js + native Safari + every modern player consumes.
-//  2. Anything else — raw bytes piped through.
-//
-// Case (2) breaks for browsers because raw MPEG-TS over HTTP is not a
-// format any current `<video>` engine plays. The user sees "200 OK,
-// transferred N MB" in our logs and a stuck spinner in the player.
-//
-// This file adds case (3): MPEG-TS upstream → ffmpeg `-c copy -f hls`
-// transmux → HLS surface. CPU is near-zero because we don't re-encode;
-// we just repackage the existing H.264/AAC ES streams into HLS
-// segments. If the codec doesn't survive copy (rare in IPTV) we fall
-// through to the same error UI as today.
-//
-// Design choices that matter
-// ──────────────────────────
-//  * **One session per channel, shared across viewers.** N users
-//    watching the same channel = 1 ffmpeg process, 1 upstream
-//    connection. Indexed by channel ID, not user ID. This is critical:
-//    a 5-user household watching the same news channel must not pull
-//    5× upstream bandwidth from the provider, and most providers will
-//    rate-limit or kick concurrent connections from the same account.
-//
-//  * **Lazy spawn, idle reap.** Sessions start on first manifest
-//    request and self-destruct after `idleTimeout` with no segment
-//    requests. The reaper runs on a separate goroutine so requests
-//    don't pay teardown cost.
-//
-//  * **Bounded concurrency.** `maxSessions` caps simultaneous ffmpeg
-//    processes. Without this, a user opening 50 tabs each on a
-//    different channel would fork-bomb the server.
-//
-//  * **Ready signal.** The first manifest read after spawn must wait
-//    for ffmpeg to write at least one segment + the playlist file.
-//    The Session exposes `Ready()` (chan closed when first segment
-//    appears) so the handler can block briefly with a timeout instead
-//    of guessing or polling.
-//
-//  * **Failure isolation.** ffmpeg crash (bad codec, dead upstream)
-//    marks the session failed and removes it from the map. Next
-//    request restarts. We don't loop the failure: if `Start()` fails
-//    twice in `failureCooldown` we surface the error and let the
-//    higher-level circuit breaker (proxy.go) take over.
+// Decisiones clave:
+//  - Una sesión por canal, compartida entre viewers (1 ffmpeg, 1 upstream).
+//  - Lazy spawn, idle reap (idleTimeout sin segment requests).
+//  - maxSessions limita ffmpeg concurrentes (evita fork-bomb).
+//  - Ready signal: el handler espera al primer segmento con timeout.
+//  - Aislamiento de fallos: crash marca la sesión como fallida y la
+//    elimina; el circuit breaker toma el control.
 
 import (
 	"context"
@@ -65,54 +26,31 @@ import (
 	"time"
 )
 
-// ErrTooManySessions is returned by GetOrStart when the manager is at
-// capacity. The handler turns this into HTTP 503 so clients can retry
-// after the reap window clears an idle slot.
+// ErrTooManySessions — el manager está al máximo de sesiones (503).
 var ErrTooManySessions = errors.New("iptv-transmux: max sessions reached")
 
-// ErrTooManyReencodeSessions is returned when the per-mode cap on
-// reencode sessions is full but the global cap still has room.
-// Distinct from ErrTooManySessions so the handler can map it to the
-// same 503 + Retry-After while the metrics layer counts it
-// separately ("reencode_busy" outcome).
+// ErrTooManyReencodeSessions — cap de reencode alcanzado (distinto
+// de ErrTooManySessions para métricas separadas).
 var ErrTooManyReencodeSessions = errors.New("iptv-transmux: max reencode sessions reached")
 
-// ErrSessionNotFound is returned by Touch / SegmentPath when no live
-// session exists for the channel. The handler returns 404 so the
-// player can recover with a manifest reload (which will re-spawn).
+// ErrSessionNotFound — no hay sesión viva para el canal (404).
 var ErrSessionNotFound = errors.New("iptv-transmux: no session")
 
-// ErrTransmuxFailed is returned when ffmpeg exits before producing
-// any segment. Usually means the upstream is dead or the codec is
-// not transmux-compatible (would need re-encode).
+// ErrTransmuxFailed — ffmpeg salió sin producir ningún segmento.
 var ErrTransmuxFailed = errors.New("iptv-transmux: session failed before ready")
 
-// ChannelGate is the per-channel circuit-breaker contract shared by
-// the stream proxy and the transmux session manager. Both planes
-// punch the same gate so a series of failures on either path triggers
-// the cooldown for all subsequent attempts on either path.
-//
-// Implementations must be goroutine-safe and cheap to call; Allow is
-// invoked on every viewer attempt and Record* on every outcome. The
-// concrete implementation lives in circuit_breaker.go (channelBreaker);
-// the interface is exposed here so transmux can take it without
-// importing the proxy struct.
+// ChannelGate — contrato del circuit breaker compartido entre el
+// proxy y el transmux manager. Goroutine-safe, barato de llamar.
+// La implementación concreta está en circuit_breaker.go.
 type ChannelGate interface {
 	Allow(channelID string) (bool, time.Duration)
 	RecordSuccess(channelID string)
 	RecordFailure(channelID string)
 }
 
-// decodeMode describes how ffmpeg should turn the upstream MPEG-TS into
-// the HLS sliding window we serve. Most sane Xtream feeds work with
-// `direct` (`-c copy`), which is near-zero CPU. A subset (HEVC main10,
-// AC3 audio in some PMTs, codecs that don't survive the
-// `h264_mp4toannexb` bitstream filter) crash ffmpeg with cryptic
-// "Invalid data" / "codec not currently supported" errors before the
-// first segment, even when the upstream is reachable. For those
-// channels we transparently fall back to `reencode` on the next
-// attempt, swallowing the CPU hit so the user sees video instead of
-// a 502.
+// decodeMode — cómo ffmpeg convierte MPEG-TS a HLS. `direct` (-c copy,
+// ~0 CPU) para la mayoría. Algunos codecs (HEVC main10, AC3) crashean
+// en copy mode; para esos se cae a `reencode` transparentemente.
 type decodeMode int
 
 const (
@@ -127,80 +65,50 @@ func (m decodeMode) String() string {
 	return "direct"
 }
 
-// decodeModeFallbackTTL is how long a channel stays pinned in
-// `reencode` mode after an auto-promotion. After the window the
-// manager retries `direct` so a recovered upstream (codec change,
-// provider fix, …) reverts to the cheap path automatically.
+// decodeModeFallbackTTL — duración del pin en reencode tras auto-promoción.
+// Expirado el TTL se reintenta direct por si el upstream se recuperó.
 const decodeModeFallbackTTL = 1 * time.Hour
 
-// TransmuxMetrics is the optional metrics sink that lets the
-// observability package count starts by outcome and decode mode
-// without pulling Prometheus into this package. Nil-tolerant at all
-// call sites.
+// TransmuxMetrics — sink de métricas opcional. Nil-tolerant.
 type TransmuxMetrics interface {
 	IncStarts(outcome string)        // ok, crash, gate_denied, busy
 	IncDecodeMode(mode string)       // direct, reencode
 	IncReencodePromotions()          // sticky flips after a copy-mode crash
 }
 
-// segmentNamePattern matches the segment names ffmpeg writes with the
-// `seg-%05d.ts` filename template we pass it. Used to validate
-// incoming segment requests so a malicious client cannot ask for
-// `../../etc/passwd`.
+// segmentNamePattern — validar nombres de segmento contra path-traversal.
 var segmentNamePattern = regexp.MustCompile(`^seg-\d{5,6}\.ts$`)
 
-// IsValidSegmentName reports whether a segment name matches the
-// filename template ffmpeg writes. Exposed so the HTTP handler can
-// reject path-traversal attempts before touching the filesystem.
+// IsValidSegmentName — exportado para que el handler rechace path-traversal.
 func IsValidSegmentName(name string) bool {
 	return segmentNamePattern.MatchString(name)
 }
 
-// TransmuxManagerConfig captures the knobs that affect runtime
-// behaviour. Defaults are filled in by NewTransmuxManager so callers
-// can pass a zero value and get sensible production defaults.
+// TransmuxManagerConfig — knobs de comportamiento runtime.
+// NewTransmuxManager rellena defaults para valores zero.
 type TransmuxManagerConfig struct {
-	// CacheDir is the parent directory under which per-channel work
-	// directories are created. Will be created with 0755 if missing.
-	// Each session lives in `<CacheDir>/<channel-id>/` and is removed
-	// on session stop.
+	// CacheDir — directorio padre para work dirs per-canal. Se crea con 0755.
 	CacheDir string
 
-	// FFmpegPath is the absolute path to the ffmpeg binary. Defaults
-	// to "ffmpeg" (resolved from $PATH) which matches the existing
-	// VOD transcoder convention.
+	// FFmpegPath — ruta al binario ffmpeg. Default "ffmpeg" (de $PATH).
 	FFmpegPath string
 
-	// MaxSessions caps the number of simultaneous transmux sessions.
-	// 0 = unlimited (do not use in production). Default 10.
+	// MaxSessions — máximo de sesiones simultáneas. Default 10.
 	MaxSessions int
 
-	// IdleTimeout is how long a session stays alive after the last
-	// segment request. Default 30 s. Lower trades faster cleanup for
-	// more spawn churn on channel-zap; higher wastes CPU/bandwidth on
-	// channels nobody is watching.
+	// IdleTimeout — tiempo sin segment requests antes de reap. Default 30s.
 	IdleTimeout time.Duration
 
-	// ReadyTimeout is how long GetOrStart will wait for ffmpeg to
-	// produce its first segment before declaring the session failed.
-	// Default 15 s. Bigger than typical first-segment latency for
-	// well-behaved upstream (~3-5 s) but bounded so a dead provider
-	// doesn't hang the player UI forever.
+	// ReadyTimeout — espera máxima al primer segmento. Default 15s.
 	ReadyTimeout time.Duration
 
-	// ReaperInterval controls how often the idle reaper sweeps. Must
-	// be much smaller than IdleTimeout. Default 5 s.
+	// ReaperInterval — frecuencia del barrido de idle. Default 5s.
 	ReaperInterval time.Duration
 
-	// UserAgent is sent to upstream by ffmpeg's HTTP demuxer. Empty
-	// means use defaultTransmuxUserAgent. Override only when a
-	// specific provider needs a different fingerprint.
+	// UserAgent — enviado al upstream por ffmpeg. Vacío = default.
 	UserAgent string
 
-	// Gate is the optional per-channel circuit breaker. When set, the
-	// manager refuses GetOrStart with a wrapped CircuitOpenError if
-	// Allow returns false, and records success/failure of each spawn
-	// so the breaker state stays in sync with the proxy plane.
+	// Gate — circuit breaker per-canal opcional.
 	Gate ChannelGate
 
 	// Reporter is the optional channel-health sink. Mirrors what the

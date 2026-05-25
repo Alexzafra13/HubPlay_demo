@@ -11,9 +11,8 @@ import (
 	"hubplay/internal/federation"
 )
 
-// UpsertProgress writes or replaces the user's playback state for a
-// (peer, remote_item) pair. Duration is preserved across updates that
-// pass 0 -- see the SQL upsert for the rationale.
+// UpsertProgress escribe estado de reproduccion para (peer, remote_item).
+// Duration se preserva si se pasa 0 (ver SQL upsert).
 func (r *Repository) UpsertProgress(ctx context.Context, p *federation.Progress) error {
 	var err error
 	if r.useSQLite() {
@@ -45,8 +44,7 @@ func (r *Repository) UpsertProgress(ctx context.Context, p *federation.Progress)
 	return nil
 }
 
-// GetProgress returns nil, nil when there's no row -- the player
-// treats that as "start from 0" with no special-casing.
+// GetProgress devuelve nil, nil si no hay fila (= empezar de 0).
 func (r *Repository) GetProgress(ctx context.Context, userID, peerID, remoteItemID string) (*federation.Progress, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetFederationProgress(ctx, sqlc.GetFederationProgressParams{
@@ -115,11 +113,8 @@ func (r *Repository) DeleteProgress(ctx context.Context, userID, peerID, remoteI
 	return nil
 }
 
-// ListContinueWatching returns the user's in-progress federated items
-// ordered by last_played_at desc, joined with the catalog cache for
-// title / poster availability. Rows whose cache entry has been evicted
-// are dropped silently -- the rail prefers no row over a title-less
-// row.
+// ListContinueWatching devuelve items federados en progreso, ordenados
+// por last_played_at desc. Filas sin cache se descartan silenciosamente.
 func (r *Repository) ListContinueWatching(ctx context.Context, userID string, limit int) ([]*federation.PeerContinueWatchingItem, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20

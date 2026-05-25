@@ -12,28 +12,6 @@ import (
 // 2026-05-14: god-handler 1186 LoC, 13 deps, 4 responsabilidades).
 // Embedding por puntero promueve todos los métodos al facade así
 // router.go y los tests llaman `itemHandler.Method(...)` exacto
-// como antes.
-//
-// Sub-handlers:
-//
-//	ItemDetailHandler       → Get, Children, buildItemDetail (priv),
-//	                          attach×8 helpers, callerCapRating (priv)
-//	TrickplayHandler        → TrickplayManifest, TrickplaySprite,
-//	                          WaitTrickplayInflight + estado mutex/WG
-//	                          propio
-//	SearchHandler           → Search (con filter surface + cap rating)
-//	RecommendationsHandler  → Recommendations (TMDb passthrough +
-//	                          in-library cross-reference)
-//	MetadataHandler         → IdentifyCandidates, Identify,
-//	                          UpdateItemMetadata, SetMetadataLock,
-//	                          RefreshItemMetadata + MetadataIdentifier
-//	                          interface
-//
-// El facade no lleva fields propios — todo el estado está en los
-// sub-handlers. NewItemHandler distribuye las 13 deps del input a
-// los constructores específicos de cada sub-handler. La firma
-// pública de NewItemHandler no cambia respecto al monolítico
-// pre-split para que router.go + tests externos sigan funcionando
 // sin modificar nada.
 type ItemHandler struct {
 	*ItemDetailHandler
@@ -60,12 +38,6 @@ func NewItemHandler(lib LibraryService, images ImageRepository, metadata Metadat
 // ─── Free helpers ───────────────────────────────────────────────────────────
 //
 // Funciones de shape compartidas entre todos los sub-handlers. Viven
-// como package-level free functions porque sirven a múltiples
-// sub-handlers (itemDetailResponse / streamResponse en
-// ItemDetailHandler, attachPosterPlaceholder en
-// ItemDetailHandler.Children + SearchHandler.Search, userDataResponse
-// en ItemDetailHandler + SearchHandler, etc.) — promoverlas a métodos
-// de un sub-handler concreto crearía falsas dependencias entre
 // sub-handlers que en realidad sólo comparten estos pure helpers.
 
 func itemDetailResponse(item *librarymodel.Item) map[string]any {
@@ -154,13 +126,6 @@ func streamResponse(s *librarymodel.MediaStream) map[string]any {
 // cliente:
 //
 //	{
-//	  progress: { position_ticks, percentage, audio_stream_index, subtitle_stream_index },
-//	  is_favorite, played, play_count, last_played_at,
-//	}
-//
-// `percentage` se computa server-side para que cada cliente (web,
-// future native) muestre el mismo valor, y se clampa a [0, 100] para
-// que data de posición mal clamped (e.g. resume past EOF tras un
 // re-encode) no pueda renderizar UI >100 %.
 func userDataResponse(ud *db.UserData, durationTicks int64) map[string]any {
 	if ud == nil {

@@ -21,30 +21,6 @@ import (
 //
 //   GET  /api/v1/libraries/{id}/upload-browse?path=Movies/Drama
 //     lista subdirs del path indicado DENTRO de la librería.
-//     - path vacío = raíz de la librería.
-//     - Sólo subdirs (no ficheros) — el cliente sube, no inspecciona
-//       contenido existente.
-//     - Ordenados alfabéticamente para que la UI sea estable.
-//
-//   POST /api/v1/libraries/{id}/folders     body: {path: "Movies/New"}
-//     crea una carpeta nueva dentro de la librería. Idempotente
-//     (MkdirAll). Devuelve el path canónico tras sanitizar.
-//
-// Gate (router): can_upload — un user que no puede subir no necesita
-// el explorador. El owner pasa automático.
-//
-// Defense in depth:
-//   - El libraryID debe estar en las librerías a las que el user
-//     tiene acceso. Devuelve 404 (no 403) para no filtrar existencia.
-//   - El path se valida con upload.ResolveSubpath, que rechaza
-//     traversal, paths absolutos, y normaliza separadores.
-//   - Si la ruta resuelta no existe al hacer ReadDir, devolvemos []
-//     en vez de 404 — el frontend acaba de crear la carpeta y aún
-//     no se ha materializado en disco (caso happy path del "New
-//     folder + browse"); preferimos no romper la UX por una race.
-// LibraryLister es la mínima superficie que UploadBrowseHandler
-// necesita del LibraryService — sólo ListForUser para resolver
-// acceso. La interface ancha LibraryService también la cumple, así
 // que el router pasa deps.Libraries sin cambios.
 type LibraryLister interface {
 	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
@@ -216,17 +192,6 @@ func (h *UploadBrowseHandler) CreateFolder(w http.ResponseWriter, r *http.Reques
 //
 //   DELETE /libraries/{id}/files?path=Movies/Drama/old.mkv
 //   DELETE /libraries/{id}/files?path=Movies/Drama&recursive=true
-//
-// Reglas:
-//   - path REQUERIDO y no puede ser "" (no borramos la librería entera).
-//   - Si el path es una carpeta NO VACÍA, requiere ?recursive=true.
-//     Defensa contra borrar accidentalmente cientos de GB.
-//   - Idempotente: borrar algo inexistente devuelve 204 igual (mismo
-//     contrato que el repo de cors_origins).
-//
-// Permiso: can_upload (el operador que sube también puede limpiar).
-// Para borrados masivos / library-level CRUD el flag correcto es
-// can_manage_libraries, pero borrar un fichero individual cae en
 // "gestionar mi propia subida".
 func (h *UploadBrowseHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	lib, ok := h.resolveLibrary(w, r)
@@ -301,18 +266,6 @@ type RenameRequest struct {
 //
 //   POST /libraries/{id}/files/rename body: {from: "old.mkv", to: "new.mkv"}
 //
-// Reglas:
-//   - Ambos paths se sanitizan + se validan que viven dentro de la
-//     librería.
-//   - From debe existir; To no debe existir (no permitimos pisar
-//     ficheros con rename — eso es delete + rename).
-//   - Idempotente NO: si from==to devuelve 400 BAD_REQUEST. Si el
-//     usuario quería confirmar "no cambies" no debería llamar al
-//     endpoint.
-//   - Funciona para ficheros y carpetas — os.Rename los acepta
-//     ambos en el mismo filesystem.  Cross-fs rename falla; lo
-//     señalamos como CROSS_DEVICE — el operador típicamente NO
-//     puede mover entre librerías con paths en discos distintos
 //     desde la UI (otra librería = otra API call).
 func (h *UploadBrowseHandler) RenameEntry(w http.ResponseWriter, r *http.Request) {
 	lib, ok := h.resolveLibrary(w, r)

@@ -1,10 +1,7 @@
 // Cross-peer playback state.
 //
-// Federated items never live in the local items table, so the
-// regular /me/items/{id}/progress endpoints (backed by user_data)
-// can't store their position. These handlers route to
-// federation_progress instead -- same wire shape, scoped under the
-// peer that owns the item. See migration 028 for schema rationale.
+// Federated items never live in el local items table, so the
+// peer that owns el item. See migration 028 for schema rationale.
 
 package handlers
 
@@ -28,8 +25,8 @@ type peerProgressWire struct {
 	LastPlayedAt  string `json:"last_played_at,omitempty"`
 }
 
-// GetPeerItemProgress returns the user's position for a (peer, item)
-// pair, or the all-zero default when nothing's been recorded yet.
+// GetPeerItemProgress returns el user's position for a (peer, item)
+// pair, or el all-zero default when nothing's been recorded yet.
 //
 // GET /api/v1/me/peers/{peerID}/items/{itemId}/progress
 func (h *MePeersHandler) GetPeerItemProgress(w http.ResponseWriter, r *http.Request) {
@@ -67,12 +64,9 @@ type updatePeerProgressRequest struct {
 	Completed     *bool `json:"completed"`
 }
 
-// UpdatePeerItemProgress upserts the user's position for a (peer,
-// item) pair. duration_ticks is optional on the first call -- the
-// player learns it from the manifest after a few segments. The
-// repository preserves a previously-stored non-zero value when 0 is
-// passed, so the rail's percentage stabilises after the second save.
-//
+// UpdatePeerItemProgress upserts el user's position for a (peer,
+// item) pair. duration_ticks is optional on el first call -- the
+// player learns it from el manifest despues de a few segments. The
 // POST /api/v1/me/peers/{peerID}/items/{itemId}/progress
 func (h *MePeersHandler) UpdatePeerItemProgress(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -93,7 +87,7 @@ func (h *MePeersHandler) UpdatePeerItemProgress(w http.ResponseWriter, r *http.R
 		return
 	}
 	// Clamp negatives. The player should never send them, but a
-	// stale tab firing keepalive after a seek could theoretically
+	// stale tab firing keepalive despues de a seek could theoretically
 	// race; coerce defensively.
 	if req.PositionTicks < 0 {
 		req.PositionTicks = 0
@@ -138,12 +132,9 @@ type peerContinueWatchingItemWire struct {
 	LastPlayedAt  string  `json:"last_played_at"`
 }
 
-// PeerContinueWatching is the cross-peer Continue Watching rail.
-// Mirrors the local /me/continue-watching shape closely enough that
-// the home page can render both with the same card component (the
-// extra `peer_id` / `peer_name` fields enable the badge + click
-// routing).
-//
+// PeerContinueWatching is el cross-peer Continue Watching rail.
+// Mirrors el local /me/continue-watching shape closely enough that
+// the home page can render both with el same card component (the
 // GET /api/v1/me/peers/continue-watching?limit=20
 func (h *MePeersHandler) PeerContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())

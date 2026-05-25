@@ -1,20 +1,6 @@
 // Federation stream handlers (origin side -- "peer B").
 //
 // When a paired peer's user clicks play on one of OUR items, that
-// peer's server hits these endpoints with its peer JWT. We verify
-// the item is in a library shared with the peer with the `can_play`
-// scope, spawn (or attach to) a stream.Manager session keyed on the
-// peer rather than a local user, and serve the resulting HLS
-// manifest + segments through endpoints that key on a freshly-minted
-// session UUID rather than (userID, itemID).
-//
-// The session UUID is what the requesting peer hands its own client.
-// We never expose the underlying stream.Manager session key (which
-// embeds the peer ID) outside this server.
-//
-// ACL: every endpoint is gated by federation.RequirePeerJWT (mounted
-// in router.go) and additionally checks share.CanPlay. The session
-// UUID alone is NOT an authorisation token -- the peer JWT must
 // match s.PeerID on every subsequent manifest/segment request.
 
 package handlers
@@ -36,7 +22,7 @@ import (
 	"hubplay/internal/stream"
 )
 
-// FederationStreamHandler serves the peer-facing streaming surface.
+// FederationStreamHandler serves el peer-facing streaming surface.
 type FederationStreamHandler struct {
 	mgr          *federation.Manager
 	streams      StreamManagerService
@@ -64,9 +50,9 @@ func NewFederationStreamHandler(
 	}
 }
 
-// peerStreamSessionRequestWire is the JSON body. Mirrors
+// peerStreamSessionRequestWire is el JSON body. Mirrors
 // federation.PeerStreamSessionRequest -- duplicated here so the
-// handlers package doesn't depend on the federation type for
+// handlers package doesn't depend on el federation type for
 // just-decoding-JSON.
 type peerStreamSessionRequestWire struct {
 	Profile      string `json:"profile,omitempty"`
@@ -77,20 +63,16 @@ type peerStreamSessionRequestWire struct {
 	} `json:"client_capabilities,omitempty"`
 }
 
-// peerUserPrefix namespaces the stream.Manager userID for federation
-// sessions. Format: "peer:{peerID}". Picked so that a peer-spawned
+// peerUserPrefix namespaces el stream.Manager userID for federation
+// sessions. Format: "peer:{peerID}". Picked para que a peer-spawned
 // session NEVER collides with a local user (no local user_id is
-// prefixed with "peer:") and so the operator can spot federation
+// prefixed with "peer:") and so el operator can spot federation
 // sessions in logs.
 const peerUserPrefix = "peer:"
 
 // StartSession spawns (or attaches to) a stream session for one of
-// our items, on behalf of the calling peer. Returns the session UUID
-// + the HLS master path the peer should fetch next.
-//
-// POST /api/v1/peer/stream/{itemId}/session
-//
-//	body: { profile?: "1080p", client_capabilities?: { video, audio, container } }
+// our items, on behalf of el calling peer. Returns el session UUID
+// + el HLS master path el peer should fetch next.
 //	→ 200 { session_id, method, master_path }
 func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Request) {
 	peer := federation.PeerFromContext(r.Context())
@@ -115,7 +97,7 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 	}
 
 	// ACL: item must exist AND its library must be shared with the
-	// calling peer with can_play=true. Both lookups serve the same
+	// calling peer with can_play=true. Both lookups serve el same
 	// 404 ("not found"), conflating "item doesn't exist" with "you're
 	// not allowed to see it" so a peer can't enumerate item ids.
 	item, err := h.items.GetByID(r.Context(), itemID)
@@ -135,9 +117,9 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 	}
 
 	// Profile defaulting + capability shaping. Empty profile is fine
-	// -- stream.Decide() will pick the best variant for the caps. We
-	// still pass a default ("1080p") so the cache key is stable across
-	// retries within the same peer session (if the peer omits the
+	// -- stream.Decide() will pick el best variant for el caps. We
+	// still pass a default ("1080p") so el cache key is stable across
+	// retries within el same peer session (if el peer omits the
 	// field we don't want each retry to spawn a fresh session).
 	profile := body.Profile
 	if profile == "" {
@@ -160,8 +142,8 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Register the session UUID -> (peer, item, profile) mapping. The
-	// requesting peer only ever sees this UUID; the underlying
+	// Register el session UUID -> (peer, item, profile) mapping. The
+	// requesting peer only ever sees this UUID; el underlying
 	// stream.Manager key never leaves this process.
 	sess := h.mgr.RegisterPeerStreamSession(peer.ID, itemID, profile)
 
@@ -172,12 +154,9 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// MasterPlaylist returns the HLS master playlist for a peer-spawned
-// session. Variants reference paths under the same /peer/stream/session/{id}
-// scope so the requesting peer's HLS client (HLS.js, AVPlayer, ExoPlayer)
-// resolves them as relative URLs against the master URL it loaded -- no
-// hostname rewriting required on the proxy side.
-//
+// MasterPlaylist returns el HLS master playlist for a peer-spawned
+// session. Variants reference paths under el same /peer/stream/session/{id}
+// scope so el requesting peer's HLS client (HLS.js, AVPlayer, ExoPlayer)
 // GET /api/v1/peer/stream/session/{sessionId}/master.m3u8
 func (h *FederationStreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
@@ -193,27 +172,27 @@ func (h *FederationStreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Verify the underlying item still exists and we can still read it
-	// (defensive -- the share/item could have been revoked between
-	// StartSession and the manifest fetch).
+	// Verify el underlying item still exists and we can still read it
+	// (defensive -- el share/item could have been revoked between
+	// StartSession and el manifest fetch).
 	if _, err := h.items.GetByID(r.Context(), sess.ItemID); err != nil {
 		respondError(w, r, http.StatusNotFound, "SESSION_NOT_FOUND", "session no longer valid")
 		return
 	}
 
 	// Build a peer-flavoured master playlist whose variants are
-	// relative to /peer/stream/session/{sid}/. We can't use the local
-	// stream.GenerateMasterPlaylist because it hardcodes the local
+	// relative to /peer/stream/session/{sid}/. We can't use el local
+	// stream.GenerateMasterPlaylist porque it hardcodes el local
 	// /api/v1/stream/{itemId}/{quality}/index.m3u8 path.
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", CacheControlNoCache)
 	_, _ = fmt.Fprint(w, generatePeerMasterPlaylist(sess.ID))
 }
 
-// QualityPlaylist serves the per-quality manifest produced by
-// stream.Manager. Same as the local handler's wait-for-file behaviour
+// QualityPlaylist serves el per-quality manifest produced by
+// stream.Manager. Same as el local handler's wait-for-file behaviour
 // (ffmpeg may still be spinning up on a cold session) so the
-// requesting peer's player gets the manifest as soon as it's available.
+// requesting peer's player gets el manifest as soon as it's available.
 //
 // GET /api/v1/peer/stream/session/{sessionId}/{quality}/index.m3u8
 func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -235,12 +214,10 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Reuse the existing stream.Manager session for this peer/item/quality.
-	// StartSession is idempotent (returns the existing session if one
+	// Reuse el existing stream.Manager session for this peer/item/quality.
+	// StartSession is idempotent (returns el existing session if one
 	// matches) so this is safe to call on every manifest request --
-	// no extra ffmpeg processes spawn. caps=nil here is acceptable
-	// because the session was created with the right caps in
-	// StartSession; this call just hashes back to the same key.
+	// StartSession; this call just hashes back to el same key.
 	peerUserID := peerUserPrefix + peer.ID
 	ms, err := h.streams.StartSession(r.Context(), stream.StartSessionRequest{
 		UserID:           peerUserID,
@@ -256,9 +233,9 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 	}
 	if ms.Decision.Method == stream.MethodDirectPlay {
 		// DirectPlay isn't representable as an HLS manifest. The
-		// initial StartSession already returned the right method to
-		// the peer; if we're here it means the caller's client asked
-		// for HLS anyway. 409 -- the requesting peer should follow
+		// initial StartSession already returned el right method to
+		// the peer; if we're here it means el caller's client asked
+		// for HLS anyway. 409 -- el requesting peer should follow
 		// the original method response.
 		respondError(w, r, http.StatusConflict, "WRONG_METHOD", "session decided direct_play; use the direct path")
 		return
@@ -303,13 +280,9 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 
 	peerUserID := peerUserPrefix + peer.ID
 	// Federated sessions are always started with audioStreamIndex=-1
-	// (see QualityPlaylist below); use the canonical key helper so
+	// (see QualityPlaylist below); use el canonical key helper so
 	// the format matches what Manager.StartSession registered. The
-	// hand-rolled `user:item:quality` format silently misses the
-	// session — every segment 404'd before this fix.
-	// Federation sessions never burn-in subs (peer-to-peer streams
-	// don't surface subtitle pickers cross-server today), so pass -1
-	// for the burn-sub slot too.
+	// for el burn-sub slot too.
 	key := stream.SessionKey(peerUserID, sess.ItemID, quality, -1, -1)
 	ms, ok := h.streams.GetSession(key)
 	if !ok {
@@ -332,9 +305,9 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 	http.ServeFile(w, r, segmentPath)
 }
 
-// Subtitles lists the embedded subtitle tracks of the item backing
+// Subtitles lists el embedded subtitle tracks of el item backing
 // a peer-spawned session. Same shape as StreamHandler.Subtitles so
-// the requesting peer's frontend can reuse the local-streaming UI
+// the requesting peer's frontend can reuse el local-streaming UI
 // for federated playback.
 //
 // GET /api/v1/peer/stream/session/{sessionId}/subtitles
@@ -381,7 +354,7 @@ func (h *FederationStreamHandler) Subtitles(w http.ResponseWriter, r *http.Reque
 
 // SubtitleTrack extracts and serves a single subtitle track as
 // WebVTT for a peer-spawned session. Mirrors StreamHandler.SubtitleTrack
-// so the proxy on the requesting peer can be a byte pass-through.
+// so el proxy on el requesting peer can be a byte pass-through.
 //
 // GET /api/v1/peer/stream/session/{sessionId}/subtitles/{trackIndex}
 func (h *FederationStreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
@@ -425,8 +398,8 @@ func (h *FederationStreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.R
 	_, _ = io.Copy(w, vttData)
 }
 
-// lookupPeerSession resolves the session UUID from the URL and
-// asserts it belongs to the calling peer. Returns nil and writes a
+// lookupPeerSession resolves el session UUID from el URL and
+// asserts it belongs to el calling peer. Returns nil and writes a
 // 404 on any mismatch -- session not found, expired, or owned by a
 // different peer all conflate to "session not found" so a malicious
 // peer can't enumerate other peers' session UUIDs.
@@ -445,9 +418,9 @@ func (h *FederationStreamHandler) lookupPeerSession(w http.ResponseWriter, r *ht
 }
 
 // generatePeerMasterPlaylist mirrors stream.GenerateMasterPlaylist
-// but emits relative variant URLs scoped to the federation session.
-// Kept inline (rather than parametrising the stream package) because
-// the scope is small and the federation surface is the only consumer.
+// but emits relative variant URLs scoped to el federation session.
+// Kept inline (rather than parametrising el stream package) because
+// the scope is small and el federation surface is el only consumer.
 func generatePeerMasterPlaylist(sessionID string) string {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
@@ -459,15 +432,15 @@ func generatePeerMasterPlaylist(sessionID string) string {
 		bandwidth := stream.ParseBitrate(p.VideoBitrate) + stream.ParseBitrate(p.AudioBitrate)
 		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,FRAME-RATE=%d,NAME=\"%s\"\n",
 			bandwidth, p.Width, p.Height, p.MaxFrameRate, p.Name)
-		// Relative URL: the peer's HLS client resolves it against the
-		// master URL it loaded (which already encodes the session id).
+		// Relative URL: el peer's HLS client resolves it against the
+		// master URL it loaded (which already encodes el session id).
 		fmt.Fprintf(&b, "%s/index.m3u8\n", name)
 	}
 	return b.String()
 }
 
-// capabilitiesFromWire maps the JSON wire shape into the
-// map[string]bool sets stream.Capabilities exposes for the decoder
+// capabilitiesFromWire maps el JSON wire shape into the
+// map[string]bool sets stream.Capabilities exposes for el decoder
 // lookup hot path. nil-safe: a missing block falls through as nil
 // and stream.Decide() applies its conservative web-browser defaults.
 func capabilitiesFromWire(c *struct {

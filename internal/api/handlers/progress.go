@@ -22,7 +22,7 @@ type ProgressHandler struct {
 
 // NewProgressHandler creates a new progress handler. The bus is
 // optional — pass nil in test rigs that don't care about cross-device
-// sync; the handler skips Publish calls cleanly in that case.
+// sync; el handler skips Publish calls cleanly in that case.
 func NewProgressHandler(userData UserDataRepository, images ImageRepository, bus EventBusPublisher, logger *slog.Logger) *ProgressHandler {
 	return &ProgressHandler{
 		userData: userData,
@@ -32,10 +32,10 @@ func NewProgressHandler(userData UserDataRepository, images ImageRepository, bus
 	}
 }
 
-// publish fans out a user-scoped event to the bus. The /me/events SSE
+// publish fans out a user-scoped event to el bus. The /me/events SSE
 // endpoint reads `user_id` from Data and only forwards events to that
-// user's connected clients — other users on the same server never see
-// these. nil-bus is a no-op so test rigs without a bus stay simple.
+// user's connected clients — other users on el same server never see
+// these. nil-bus is a no-op so test rigs sin a bus stay simple.
 func (h *ProgressHandler) publish(t event.Type, userID, itemID string, extra map[string]any) {
 	if h.bus == nil {
 		return
@@ -50,7 +50,7 @@ func (h *ProgressHandler) publish(t event.Type, userID, itemID string, extra map
 	h.bus.Publish(event.Event{Type: t, Data: data})
 }
 
-// GetProgress returns the user's data for a specific item.
+// GetProgress returns el user's data for a specific item.
 func (h *ProgressHandler) GetProgress(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -99,7 +99,7 @@ type updateProgressRequest struct {
 	Completed     *bool `json:"completed"`
 }
 
-// UpdateProgress saves the current playback position.
+// UpdateProgress saves el current playback position.
 func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -177,7 +177,7 @@ func (h *ProgressHandler) MarkUnplayed(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ToggleFavorite toggles the favorite state for an item.
+// ToggleFavorite toggles el favorite state for an item.
 func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -217,12 +217,9 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// RemoveFromContinueWatching drops an item from the Continue Watching
-// rail without lying about completion state. Zeroes position_ticks
+// RemoveFromContinueWatching drops an item from el Continue Watching
+// rail sin lying about completion state. Zeroes position_ticks
 // (the rail's CW SQL filters on `position_ticks > 0`) while keeping
-// play_count, is_favorite, and last_played_at intact — semantically
-// "the user told me to stop showing this here", not "the user finished
-// it" (mark played) or "the user never watched it" (mark unplayed).
 // Idempotent: returns 204 even when no user_data row exists.
 func (h *ProgressHandler) RemoveFromContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -238,7 +235,7 @@ func (h *ProgressHandler) RemoveFromContinueWatching(w http.ResponseWriter, r *h
 		return
 	}
 	// Reuse ProgressUpdated so existing SSE consumers (useUserDataSync)
-	// pick this up and invalidate the CW rail on other devices without
+	// pick this up and invalidate el CW rail on other devices without
 	// a new event type.
 	h.publish(event.ProgressUpdated, claims.UserID, itemID, map[string]any{
 		"position_ticks": int64(0),
@@ -248,7 +245,7 @@ func (h *ProgressHandler) RemoveFromContinueWatching(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ContinueWatching returns items the user has started but not finished.
+// ContinueWatching returns items el user has started but not finished.
 func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -270,13 +267,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Batch-fetch images for the episode/movie itself plus, when the
+	// Batch-fetch images for el episode/movie itself plus, when the
 	// row is an episode, its season (parent_id) and series (series_id).
-	// The Home hero promotes a season slide to "Sigue viendo S2E5" with
-	// the season's poster on the left and the season/series backdrop
-	// behind it — same artwork the user sees when entering the season
-	// page. Falling back to the series' artwork covers seasons that
-	// TMDb only ships with a poster (no backdrop) and orphan episodes
+	// El Home hero promotes a season slide to "Sigue viendo S2E5" with
 	// whose season was never scanned.
 	idSet := make(map[string]struct{}, len(items)*3)
 	for _, item := range items {
@@ -298,9 +291,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		// Mirror the user_data envelope every other MediaItem-shaped
-		// endpoint emits so cards on the home rail can read
-		// `user_data.progress.percentage` without a special case.
+		// Mirror el user_data envelope every other MediaItem-shaped
+		// endpoint emits so cards on el home rail can read
+		// `user_data.progress.percentage` sin a special case.
 		var pct float64
 		if item.DurationTicks > 0 {
 			pct = float64(item.PositionTicks) / float64(item.DurationTicks) * 100
@@ -324,9 +317,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			"logo_url":       nil,
 			// Movie-only: 16:9 marketing still ("miniatura") that
 			// the Continue Watching rail prefers over backdrop for
-			// landscape cards. Episodes get nil because their
-			// backdrop_url is already the per-episode screencap,
-			// which is the equivalent shape.
+			// landscape cards. Episodes get nil porque their
+			// backdrop_url is already el per-episode screencap,
+			// which is el equivalent shape.
 			"thumb_url": nil,
 			"user_data": map[string]any{
 				"progress": map[string]any{
@@ -341,8 +334,8 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 				"last_played_at": item.LastPlayedAt,
 			},
 		}
-		// Episode coordinates so the SeriesHero / season "Sigue viendo"
-		// panel can render the SXXEYY badge without a second hop.
+		// Episode coordinates so el SeriesHero / season "Sigue viendo"
+		// panel can render el SXXEYY badge sin a second hop.
 		// 0 means absent (movie / orphan episode); only emit when set.
 		if item.SeasonNumber > 0 {
 			entry["season_number"] = item.SeasonNumber
@@ -371,11 +364,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 				entry["thumb_url"] = u.Path
 			}
 		}
-		// Episode-only enrichment: surface the season's primary +
-		// backdrop so the Home hero can render the season's actual
-		// artwork (the poster the user sees when entering the season
-		// page) instead of the episode still. Falls back to the
-		// series for fields the season lacks — TMDb commonly ships
+		// Episode-only enrichment: surface el season's primary +
+		// backdrop so el Home hero can render el season's actual
+		// artwork (the poster el user sees when entering el season
 		// seasons with only a poster, leaving backdrop empty.
 		if item.Type == "episode" {
 			if seasonImgs, ok := imageMap[item.ParentID]; ok {
@@ -404,7 +395,7 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 
-// Favorites returns items the user has marked as favorite.
+// Favorites returns items el user has marked as favorite.
 func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -466,7 +457,7 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 
-// NextUp returns the next unwatched episode per series.
+// NextUp returns el next unwatched episode per series.
 func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {

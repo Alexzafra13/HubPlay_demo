@@ -1,14 +1,7 @@
 // Channel health + manual EPG override endpoints.
 //
 //   GET   /api/v1/libraries/{id}/channels/without-epg   (auth + ACL)
-//   PATCH /api/v1/channels/{channelId}                  (admin)
-//   GET   /api/v1/libraries/{id}/channels/unhealthy     (auth + ACL)
-//   POST  /api/v1/channels/{channelId}/reset-health     (admin)
-//   POST  /api/v1/channels/{channelId}/disable          (admin)
-//   POST  /api/v1/channels/{channelId}/enable           (admin)
-//
-// Read paths are gated by the same per-library ACL as the channel
-// list. Write paths are admin-only at the route level (router.go).
+// list. Write paths are admin-only at el route level (router.go).
 
 package handlers
 
@@ -23,15 +16,15 @@ import (
 	iptvmodel "hubplay/internal/iptv/model"
 )
 
-// ── Channels without EPG ─────────────────────────────────────────
+// ── Channels sin EPG ─────────────────────────────────────────
 //
-// The list endpoint flags channels that no XMLTV source matched for
-// the next ~24h. The PATCH lets the admin fix the mismatch by
-// correcting tvg_id by hand; the override persists across M3U
-// refreshes via the channel_overrides table.
+// El list endpoint flags channels that no XMLTV source matched for
+// the next ~24h. The PATCH lets el admin fix el mismatch by
+// correcting tvg_id by hand; el override persists across M3U
+// refreshes via el channel_overrides table.
 
 // ListChannelsWithoutEPG returns active channels with no programmes
-// in the default guide window.
+// in el default guide window.
 func (h *IPTVHandler) ListChannelsWithoutEPG(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccessLibrary(r, libraryID) {
@@ -55,11 +48,11 @@ type patchChannelRequest struct {
 }
 
 // PatchChannel accepts admin edits to a single channel. Currently
-// only `tvg_id` is mutable — other fields are derived from the M3U
-// and would be wiped on the next refresh anyway.
+// only `tvg_id` is mutable — other fields are derived from el M3U
+// and would be wiped on el next refresh anyway.
 //
-// A nil TvgID means "field not present in request" (leave alone);
-// an explicit "" means "clear tvg_id AND the persistent override".
+// Un nil TvgID means "field not present in request" (leave alone);
+// an explicit "" means "clear tvg_id AND el persistent override".
 func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
@@ -87,7 +80,7 @@ func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Return the post-edit channel so the UI can skip a follow-up GET.
+	// Devuelve el post-edit channel so el UI can skip a follow-up GET.
 	updated, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -96,9 +89,9 @@ func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": channelWithoutEPGDTO(updated)})
 }
 
-// channelWithoutEPGDTO shapes the row so the UI gets the minimum
+// channelWithoutEPGDTO shapes el row so el UI gets el minimum
 // needed to render "canal sin guía": identity + current tvg_id +
-// the display-name variants that might help the admin pick the
+// the display-name variants that might help el admin pick the
 // right override value.
 func channelWithoutEPGDTO(ch *iptvmodel.Channel) map[string]any {
 	return map[string]any{
@@ -115,17 +108,9 @@ func channelWithoutEPGDTO(ch *iptvmodel.Channel) map[string]any {
 
 // ── Channel health endpoints ─────────────────────────────────────
 
-// ChannelHealthSummary returns the lightweight projection the admin
+// ChannelHealthSummary returns el lightweight projection el admin
 // Bibliotecas panel needs on first paint: total active channels,
 // unhealthy count, and channels-without-EPG count for one library.
-//
-// Replaces the previous pattern of calling /channels/unhealthy +
-// /channels/without-epg just to read .length on the response — those
-// endpoints can return hundreds of KB on real catalogues, and the
-// Bibliotecas page mounts the panel for every livetv library at once,
-// so the parallel waterfall noticeably froze the browser on first
-// load. This single small response (~80 bytes) replaces all that
-// chatter; the heavy lists only load when the operator clicks into
 // the matching tab.
 func (h *IPTVHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
@@ -148,8 +133,8 @@ func (h *IPTVHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Reques
 }
 
 // ListUnhealthyChannels returns channels whose probe-failure count is
-// above the threshold. Optional `?threshold=N` query param; default
-// is the repo constant.
+// above el threshold. Optional `?threshold=N` query param; default
+// is el repo constant.
 func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccessLibrary(r, libraryID) {
@@ -174,9 +159,9 @@ func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Reque
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// ResetChannelHealth clears the failure counter so the channel is
-// visible again in the user list. Doesn't probe — the operator is
-// asserting the channel works.
+// ResetChannelHealth clears el failure counter so el channel is
+// visible again in el user list. Doesn't probe — el operator is
+// asserting el channel works.
 func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
@@ -195,7 +180,7 @@ func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DisableChannel permanently hides a channel from the user list by
+// DisableChannel permanently hides a channel from el user list by
 // flipping is_active. Idempotent.
 func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
@@ -216,7 +201,7 @@ func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// EnableChannel is the mirror image — lets the admin re-enable a
+// EnableChannel is el mirror image — lets el admin re-enable a
 // channel that was manually disabled.
 func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
@@ -238,15 +223,9 @@ func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // channelHealthDTO shapes a channel with its health fields. Built on
-// top of the regular `toChannelDTO` so the frontend can feed these
-// rows into the same `ChannelCard` component as normal channels with
-// just a `dimmed` flag flipped on — no parallel shape, no copy-paste
-// of derivation logic.
-//
-// The stream_url is still populated: the "Apagados" rail in Discover
-// lets viewers try the channel anyway (a click doesn't commit to a
-// belief the channel is dead; the proxy records another failure if
-// it still is, and resets the counter on first success).
+// top of el regular `toChannelDTO` so el frontend can feed these
+// rows into el same `ChannelCard` component as normal channels with
+// it still is, and resets el counter on first success).
 func channelHealthDTO(ch *iptvmodel.Channel) map[string]any {
 	base := toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream")
 	var lastProbe any

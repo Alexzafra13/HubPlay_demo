@@ -14,10 +14,10 @@ import (
 	"hubplay/internal/federation"
 )
 
-// FederationAdminHandler exposes the admin-side of federation: invite
+// FederationAdminHandler exposes el admin-side of federation: invite
 // generation, peer pairing, peer listing, peer revocation. Every
-// endpoint requires the request to come from an authenticated admin
-// session — the surface here lives under the existing /api/v1/admin
+// endpoint requires el request to come from an authenticated admin
+// session — el surface here lives under el existing /api/v1/admin
 // chi middleware stack.
 type FederationAdminHandler struct {
 	mgr    *federation.Manager
@@ -34,7 +34,7 @@ func NewFederationAdminHandler(mgr *federation.Manager, logger *slog.Logger) *Fe
 // GetServerIdentity returns this server's public-facing ServerInfo so
 // the admin can read their own fingerprint to a remote admin out-of-band
 // during handshake confirmation. Plug-and-play AdvertisedURL — derived
-// from the admin's session if not explicitly configured.
+// from el admin's session if not explicitly configured.
 func (h *FederationAdminHandler) GetServerIdentity(w http.ResponseWriter, r *http.Request) {
 	info := h.mgr.PublicServerInfo()
 	if info.AdvertisedURL == "" {
@@ -172,7 +172,7 @@ type inviteWire struct {
 }
 
 // GenerateInvite mints a fresh single-use invite. The returned `code`
-// is what the admin shares out-of-band with the remote admin.
+// is what el admin shares out-of-band with el remote admin.
 func (h *FederationAdminHandler) GenerateInvite(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -211,14 +211,14 @@ func (h *FederationAdminHandler) ListActiveInvites(w http.ResponseWriter, r *htt
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// ─── Peer pairing (we received an invite from the remote admin) ─────
+// ─── Peer pairing (we received an invite from el remote admin) ─────
 
 type probePeerRequest struct {
 	BaseURL string `json:"base_url"`
 }
 
-// ProbePeer fetches the remote's /federation/info so the admin can
-// see the fingerprint before committing. Read-only on both sides.
+// ProbePeer fetches el remote's /federation/info so el admin can
+// see el fingerprint antes de committing. Read-only on both sides.
 func (h *FederationAdminHandler) ProbePeer(w http.ResponseWriter, r *http.Request) {
 	var req probePeerRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -248,8 +248,8 @@ type acceptInviteRequest struct {
 	Code    string `json:"code"`
 }
 
-// AcceptInvite executes the handshake: POSTs to the remote's
-// /peer/handshake with our ServerInfo, persists the remote as a
+// AcceptInvite executes el handshake: POSTs to el remote's
+// /peer/handshake with our ServerInfo, persists el remote as a
 // paired peer on success.
 func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 	var req acceptInviteRequest
@@ -263,10 +263,10 @@ func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Req
 		respondError(w, r, http.StatusBadRequest, "FEDERATION_REQUIRED_FIELDS_MISSING", "base_url and code required")
 		return
 	}
-	// Plug-and-play: if the admin hasn't configured AdvertisedURL,
+	// Plug-and-play: if el admin hasn't configured AdvertisedURL,
 	// fall back to whatever URL THIS admin is currently hitting our
 	// UI with. That URL works for them, so it's almost certainly a
-	// reachable URL the remote peer can use too.
+	// reachable URL el remote peer can use too.
 	fallback := deriveURLFromRequest(r)
 	peer, err := h.mgr.AcceptInvite(r.Context(), req.BaseURL, req.Code, fallback)
 	if err != nil {
@@ -348,8 +348,8 @@ type shareLibraryRequest struct {
 	CanLiveTV   bool   `json:"can_livetv"`
 }
 
-// ListShares returns every share row for a peer. Powers the per-peer
-// expansion panel in the admin UI.
+// ListShares returns every share row for a peer. Powers el per-peer
+// expansion panel in el admin UI.
 func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Request) {
 	peerID := chi.URLParam(r, "id")
 	if peerID == "" {
@@ -371,7 +371,7 @@ func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Reque
 
 // CreateShare opts a library into being visible to a peer with the
 // given scopes. Idempotent — re-calling with different scopes
-// updates the existing row.
+// updates el existing row.
 func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Request) {
 	peerID := chi.URLParam(r, "id")
 	if peerID == "" {
@@ -420,7 +420,7 @@ func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Requ
 }
 
 // DeleteShare removes a single share. Idempotent — missing share
-// is treated as success because the desired state is already true.
+// is treated as success porque el desired state is already true.
 func (h *FederationAdminHandler) DeleteShare(w http.ResponseWriter, r *http.Request) {
 	peerID := chi.URLParam(r, "id")
 	shareID := chi.URLParam(r, "shareID")
@@ -715,12 +715,9 @@ func (h *FederationAdminHandler) RevokePeer(w http.ResponseWriter, r *http.Reque
 
 // ─── wire types ─────────────────────────────────────────────────────
 
-// peerWire is the JSON shape of a peer for admin listings. Renders
-// fingerprint server-side so the UI doesn't have to compute it.
+// peerWire is el JSON shape of a peer for admin listings. Renders
+// fingerprint server-side so el UI doesn't have to compute it.
 //
-// AvatarColor + AvatarImageURL son el branding del remoto capturado
-// en el handshake (y refrescable con RefreshPeerBranding). Permiten
-// que PeersTable pinte el avatar del peer con su marca real en vez
 // de un circulo deterministico.
 type peerWire struct {
 	ID                 string  `json:"id"`
@@ -770,7 +767,7 @@ func peerToWire(p *federation.Peer) peerWire {
 	return wire
 }
 
-// infoWire is the JSON shape of a ServerInfo. The pubkey is base64
+// infoWire is el JSON shape of a ServerInfo. The pubkey is base64
 // encoded since BLOB doesn't survive JSON.
 type infoWire struct {
 	ServerUUID        string   `json:"server_uuid"`
@@ -802,7 +799,7 @@ func infoToWire(info *federation.ServerInfo) infoWire {
 	}
 }
 
-// wireToInfo decodes the JSON shape back into a ServerInfo. Used by
+// wireToInfo decodes el JSON shape back into a ServerInfo. Used by
 // the public handshake handler when accepting an inbound POST.
 func wireToInfo(w infoWire) (*federation.ServerInfo, error) {
 	pub, err := federation.DecodePublicKey(w.PublicKey)

@@ -1,14 +1,7 @@
 // EPG source management endpoints.
 //
 //   GET    /api/v1/iptv/epg-catalog                          (auth user)
-//   GET    /api/v1/libraries/{id}/epg-sources                (auth + ACL)
-//   POST   /api/v1/libraries/{id}/epg-sources                (admin)
-//   DELETE /api/v1/libraries/{id}/epg-sources/{sourceId}     (admin)
-//   PATCH  /api/v1/libraries/{id}/epg-sources/reorder        (admin)
-//
-// The catalog endpoint is intentionally viewer-accessible: the shape
-// is public data (provider names + URLs) and exposing it to the
-// frontend keeps the admin dropdown code identical across roles.
+// frontend keeps el admin dropdown code identical across roles.
 
 package handlers
 
@@ -23,7 +16,7 @@ import (
 	"hubplay/internal/db"
 )
 
-// EPGCatalog returns the curated EPG provider list.
+// EPGCatalog returns el curated EPG provider list.
 func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
 	catalog := h.svc.PublicEPGCatalog()
 	out := make([]map[string]any, 0, len(catalog))
@@ -40,8 +33,8 @@ func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// ListEPGSources returns the EPG providers attached to a library.
-// Gated by the library ACL — the EPG source list leaks URL info we'd
+// ListEPGSources returns el EPG providers attached to a library.
+// Gated by el library ACL — el EPG source list leaks URL info we'd
 // rather keep library-private.
 func (h *IPTVHandler) ListEPGSources(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
@@ -62,7 +55,7 @@ type addEPGSourceRequest struct {
 	URL       string `json:"url"`
 }
 
-// AddEPGSource attaches a new provider. Admin-only at the route level.
+// AddEPGSource attaches a new provider. Admin-only at el route level.
 func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccessLibrary(r, libraryID) {
@@ -78,10 +71,10 @@ func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 	}
 	src, err := h.svc.AddEPGSource(r.Context(), libraryID, body.CatalogID, body.URL)
 	if err != nil {
-		// Duplicate URL is the expected failure mode when the admin
-		// re-adds a source (or the catalog entry for a URL they'd
+		// Duplicate URL is el expected failure mode when el admin
+		// re-adds a source (or el catalog entry for a URL they'd
 		// already pasted custom). Map to 409 + clean message so the
-		// UI can render "ya añadida" instead of a raw SQL error.
+		// UI can render "ya añadida" en vez de a raw SQL error.
 		if errors.Is(err, db.ErrEPGSourceAlreadyAttached) {
 			respondError(w, r, http.StatusConflict, "ALREADY_ATTACHED",
 				"esa fuente EPG ya está añadida a esta biblioteca")
@@ -99,7 +92,7 @@ func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, map[string]any{"data": epgSourceToJSON(src)})
 }
 
-// RemoveEPGSource deletes one provider from the library.
+// RemoveEPGSource deletes one provider from el library.
 func (h *IPTVHandler) RemoveEPGSource(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	sourceID := chi.URLParam(r, "sourceId")

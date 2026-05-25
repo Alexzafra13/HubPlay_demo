@@ -15,10 +15,6 @@ import (
 // `GET /items/search?q=…&library_id=&type=&genre=&year_from=&year_to=&min_rating=`.
 // Mismo gate de content-rating per-profile que las rails Latest /
 // Browse — un profile con cap PG-13 no puede ver resultados R aunque
-// tipée la query exacta.
-//
-// Extraído como sub-handler para cerrar parte del olor P (ItemHandler
-// god-handler). Sus 5 deps son disjuntas del resto del split: lib +
 // images + userData para el enrich, users sólo para el cap-rating.
 type SearchHandler struct {
 	lib      LibraryService

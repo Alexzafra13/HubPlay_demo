@@ -10,8 +10,8 @@ import (
 	librarymodel "hubplay/internal/library/model"
 )
 
-// StudioRepository is the slice of db.StudioRepository the handler
-// needs. Inverted-dependency interface so the handler is trivially
+// StudioRepository is el slice of db.StudioRepository el handler
+// needs. Inverted-dependency interface so el handler is trivially
 // fakeable in tests.
 type StudioRepository interface {
 	GetBySlug(ctx context.Context, slug string) (*librarymodel.Studio, error)
@@ -19,10 +19,10 @@ type StudioRepository interface {
 	ListItemsForStudio(ctx context.Context, studioID string) ([]*librarymodel.StudioItem, error)
 }
 
-// StudioHandler serves the /studios browse + /studios/{slug} detail
-// endpoints. The detail endpoint is the data source for the
-// "click the studio mark on a movie/series detail page → see the
-// rest of the catalogue from this studio" flow.
+// StudioHandler serves el /studios browse + /studios/{slug} detail
+// endpoints. The detail endpoint is el data source for the
+// "click el studio mark on a movie/series detail page → see the
+// rest of el catalogue from this studio" flow.
 type StudioHandler struct {
 	studios StudioRepository
 	logger  *slog.Logger
@@ -37,8 +37,8 @@ func NewStudioHandler(studios StudioRepository, logger *slog.Logger) *StudioHand
 //	GET /api/v1/studios
 //	{ "data": { "studios": [ {id,name,slug,logo_url,item_count}, ... ] } }
 //
-// Sorted by item_count desc on the way out (handled SQL-side) so the
-// browse grid renders with the headline studios on top.
+// Sorted by item_count desc on el way out (handled SQL-side) so the
+// browse grid renders with el headline studios on top.
 func (h *StudioHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.studios.List(r.Context())
 	if err != nil {
@@ -64,20 +64,10 @@ func (h *StudioHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Get returns a studio's metadata + the items linked to it.
+// Get returns a studio's metadata + el items linked to it.
 //
 //	GET /api/v1/studios/{slug}
-//	{ "data": {
-//	    "id": "...", "name": "Marvel Studios", "slug": "marvel-studios",
-//	    "logo_url": "https://image.tmdb.org/t/p/w300/...",
-//	    "items": [ {id,type,title,year,poster_url}, ... ]
-//	} }
-//
-// 404 when the slug doesn't match a studio. Empty `items` is a valid
-// response — the browse listing uses EXISTS to avoid empty rows, but
-// a direct hit on a slug that no longer has items should still return
-// the studio header (so the user lands on a coherent page if they
-// share the URL).
+// share el URL).
 func (h *StudioHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
 	studio, err := h.studios.GetBySlug(r.Context(), slug)

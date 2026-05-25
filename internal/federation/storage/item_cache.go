@@ -23,9 +23,7 @@ func (r *Repository) UpsertCachedItems(ctx context.Context, peerID, libraryID st
 	if err != nil {
 		return fmt.Errorf("begin cache upsert tx: %w", err)
 	}
-	// Rollback after a successful Commit returns sql.ErrTxDone, which
-	// is harmless; ignore it deliberately rather than wrap with
-	// extra plumbing.
+	// Rollback tras Commit exitoso retorna sql.ErrTxDone (inofensivo).
 	defer func() { _ = tx.Rollback() }()
 
 	if r.useSQLite() {
@@ -145,8 +143,7 @@ func (r *Repository) ListCachedItems(ctx context.Context, peerID, libraryID stri
 	if err := rows.Err(); err != nil {
 		return federation.CachedItemPage{}, err
 	}
-	// MAX(cached_at) is typed as interface{} by sqlc because the
-	// aggregate could legitimately return NULL; coerce defensively.
+	// MAX(cached_at) puede ser NULL; coercion defensiva.
 	cachedAt := time.Time{}
 	if t, ok := newestCa.(time.Time); ok {
 		cachedAt = t

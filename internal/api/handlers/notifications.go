@@ -17,11 +17,6 @@ import (
 //
 //   GET    /me/notifications              listing + unread_count
 //   POST   /me/notifications/{id}/read    marca una como leida
-//   POST   /me/notifications/read-all     marca todas como leidas
-//
-// Todas las rutas son auth-gated (claims.UserID es el dueño del
-// inbox). El service hace un WHERE user_id extra como defense-in-
-// depth para que un id de notificacion robado no permita acceso
 // cruzado.
 type NotificationsHandler struct {
 	svc    *notification.Service

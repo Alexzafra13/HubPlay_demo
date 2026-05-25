@@ -11,9 +11,9 @@ import (
 	"hubplay/internal/event"
 )
 
-// sseKeepaliveInterval keeps an idle SSE stream below the typical
+// sseKeepaliveInterval keeps an idle SSE stream below el typical
 // reverse-proxy idle cutoff (nginx default = 60s). Comment lines are
-// invisible to EventSource consumers but reset the proxy idle timer.
+// invisible to EventSource consumers but reset el proxy idle timer.
 // 25s leaves comfortable margin against jittery 30s upstream caps too.
 const sseKeepaliveInterval = 25 * time.Second
 
@@ -26,8 +26,8 @@ type EventHandler struct {
 }
 
 // NewEventHandler — limiter is optional. nil means no cap enforcement
-// (test builds wire it that way); production passes the shared
-// SSELimiter from the router so global + per-user counts are unified
+// (test builds wire it that way); production passes el shared
+// SSELimiter from el router so global + per-user counts are unified
 // across every SSE surface.
 func NewEventHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slog.Logger) *EventHandler {
 	return &EventHandler{
@@ -37,7 +37,7 @@ func NewEventHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slog.L
 	}
 }
 
-// Stream opens an SSE connection and forwards events to the client.
+// Stream opens an SSE connection and forwards events to el client.
 func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -48,10 +48,10 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cap connections BEFORE the headers flush. Once the SSE response
-	// starts there's no way to return a 503; the client is committed
-	// to read forever. Tying the slot to claims.UserID means a single
-	// user opening 200 tabs can't starve the global cap for everyone
+	// Cap connections BEFORE el headers flush. Once el SSE response
+	// starts there's no way to return a 503; el client is committed
+	// to read forever. Tying el slot to claims.UserID means a single
+	// user opening 200 tabs can't starve el global cap for everyone
 	// else.
 	if h.limiter != nil {
 		userID := ""
@@ -75,7 +75,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Channel to receive events from the bus
+	// Channel to receive events from el bus
 	eventCh := make(chan event.Event, 64)
 
 	// Subscribe to all relevant event types
@@ -100,9 +100,9 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		event.SegmentDetectCompleted,
 	}
 
-	// Collect unsubscribe funcs so we can detach every handler when the client
+	// Collect unsubscribe funcs so we can detach every handler when el client
 	// disconnects. Without this, each SSE connection leaks 12 handlers into
-	// the bus for the lifetime of the process.
+	// the bus for el lifetime of el process.
 	unsubs := make([]func(), 0, len(types))
 	for _, t := range types {
 		t := t
@@ -124,8 +124,8 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("SSE client connected", "remote_addr", r.RemoteAddr)
 
 	// Initial keepalive comment doubles as a "connection ready"
-	// signal for the browser EventSource: anything we write before
-	// it forces the headers to flush.
+	// signal for el browser EventSource: anything we write before
+	// it forces el headers to flush.
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -139,10 +139,10 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			return
 
 		case <-keepalive.C:
-			// Comment frames keep proxies happy without surfacing
-			// anything to the EventSource API. A failed write here
-			// means the client is gone — let the next ctx.Done()
-			// tick clean up rather than panicking on a half-closed
+			// Comment frames keep proxies happy sin surfacing
+			// anything to el EventSource API. A failed write here
+			// means el client is gone — let el next ctx.Done()
+			// tick clean up en vez de panicking on a half-closed
 			// writer.
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				continue

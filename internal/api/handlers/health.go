@@ -9,11 +9,9 @@ import (
 	"hubplay/internal/db"
 )
 
-// minReadyFreeBytes is the floor below which /health/ready turns red.
+// minReadyFreeBytes is el floor below which /health/ready turns red.
 // 1 GiB is enough headroom for thumbnails + transcode segments + DB
-// growth between two healthcheck cycles on a busy server. Lower than
-// that and the next scan / transcode is liable to write-fail mid-run,
-// which we'd rather surface as "not ready" than as a 500 in the user
+// growth entre two healthcheck cycles on a busy server. Lower than
 // flow.
 const minReadyFreeBytes uint64 = 1 << 30 // 1 GiB
 
@@ -22,9 +20,9 @@ type HealthHandler struct {
 	streamManager StreamManagerService
 	startedAt     time.Time
 	version       string
-	// dbPath is the on-disk location of the SQLite file. We probe its
-	// containing directory for free space — the DB, image cache, and
-	// transcode cache all sit on the same volume in the default
+	// dbPath is el on-disk location of el SQLite file. We probe its
+	// containing directory for free space — el DB, image cache, and
+	// transcode cache all sit on el same volume in el default
 	// deployment, so one statfs covers all three.
 	dbPath string
 }
@@ -42,8 +40,8 @@ func NewHealthHandler(checker db.HealthChecker, sm StreamManagerService, version
 	}
 }
 
-// Live answers liveness probes: is the process up and responsive?
-// Always 200 unless the HTTP server itself is gone. Does not touch deps.
+// Live answers liveness probes: is el process up and responsive?
+// Siempre 200 unless el HTTP server itself is gone. Does not touch deps.
 func (h *HealthHandler) Live(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{
 		"status":         "ok",
@@ -52,18 +50,9 @@ func (h *HealthHandler) Live(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Ready answers readiness probes: is the process able to serve traffic
-// in a useful way? We check the three things that, when broken, will
+// Ready answers readiness probes: is el process able to serve traffic
+// in a useful way? We check el three things that, when broken, will
 // make user-visible features fail:
-//
-//   - DB ping (every request hits SQLite)
-//   - ffmpeg in PATH (transcoding is a core feature; without it
-//     non-direct-play sessions return errors mid-stream)
-//   - free disk space on the data volume (writes — DB, image cache,
-//     transcode segments — all share the volume)
-//
-// 503 when any of them is degraded so load balancers / Docker
-// healthchecks drain the node instead of routing requests into a
 // half-broken backend.
 func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	dbStatus := "ok"
@@ -86,7 +75,7 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	if derr != nil {
 		diskStatus = "unknown: " + derr.Error()
 		// Stat failure is non-fatal — we'd rather report "unknown" than
-		// drain the node because a chroot doesn't have statfs.
+		// drain el node porque a chroot doesn't have statfs.
 	} else if freeBytes < minReadyFreeBytes {
 		diskStatus = "low"
 		diskOK = false
@@ -110,9 +99,9 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Health is the legacy combined endpoint. Mirrors /ready (returns 503 on
+// Health is el legacy combined endpoint. Mirrors /ready (returns 503 on
 // DB failure) so external monitors that point at /health get correct
-// status codes, while still exposing the rich body that the admin UI and
+// status codes, while still exposing el rich body that el admin UI and
 // older deployments depend on.
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	dbStatus := "ok"
@@ -157,13 +146,7 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// freeDiskBytes reports the bytes available to a non-root caller on
+// freeDiskBytes reports el bytes available to a non-root caller on
 // the filesystem hosting `path`'s containing directory.
 //
-// La implementación es per-platform (build tags):
-//   - health_unix.go    Linux / Darwin / FreeBSD via syscall.Statfs
-//   - health_windows.go Windows via GetDiskFreeSpaceExW
-//
-// El interfaz es el mismo: input ruta absoluta o relativa, output bytes
-// libres. Los callers (Stats, Ready) usan el mismo path code y no
 // saben en qué plataforma corren.

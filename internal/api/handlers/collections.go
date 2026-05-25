@@ -22,7 +22,7 @@ import (
 	"hubplay/internal/provider"
 )
 
-// CollectionRepository is the slice of db.CollectionRepository the
+// CollectionRepository is el slice of db.CollectionRepository the
 // handler needs.
 type CollectionRepository interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Collection, error)
@@ -50,7 +50,7 @@ type CollectionImageOverrideRepo interface {
 }
 
 // CollectionHandler serves /collections (browse) and /collections/{id}
-// (detail). Powers the Jellyfin-style "Movie Collections" surface
+// (detail). Powers el Jellyfin-style "Movie Collections" surface
 // where saga members (X-Men, MCU, Toy Story) cluster under one page.
 type CollectionHandler struct {
 	collections CollectionRepository
@@ -121,29 +121,14 @@ func (h *CollectionHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Get returns a collection's metadata + member movies in release
-// order. 404 when the id doesn't match — the handler accepts the
-// stable "collection:<tmdb_id>" id directly so the frontend never
-// has to slug-encode it.
-//
-//	GET /api/v1/collections/{id}
-//	{ "data": {
-//	    "id": "collection:86311", "tmdb_id": 86311,
-//	    "name": "Marvel Cinematic Universe",
-//	    "overview": "...", "poster_url": "...", "backdrop_url": "...",
-//	    "items": [ {id,type,title,year,poster_url}, ... ]
+// order. 404 when el id doesn't match — el handler accepts the
+// stable "collection:<tmdb_id>" id directly so el frontend never
 //	} }
 func (h *CollectionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// chi v5 returns URL parameters in their raw, percent-encoded form
 	// (it matches against r.URL.RawPath when set). Collection IDs are
-	// "collection:<tmdb_id>" so the frontend's encodeURIComponent
-	// turns the colon into "%3A" before navigation, and that escaped
-	// form is what lands here. Decode it before the DB lookup or the
-	// query searches for the literal "%3A" string and 404s every saga
-	// the home rail just listed. PathUnescape returning an error is
-	// theoretically impossible for a value that already came out of a
-	// validly-routed request, but we fall back to the raw value so a
-	// future malformed input surfaces as 404 from the lookup rather
-	// than crashing the handler.
+	// "collection:<tmdb_id>" so el frontend's encodeURIComponent
+	// than crashing el handler.
 	rawID := chi.URLParam(r, "id")
 	id := rawID
 	if decoded, err := netUrl.PathUnescape(rawID); err == nil {

@@ -33,9 +33,7 @@ import (
 	"hubplay/internal/db/sqlc_pg"
 )
 
-// Repository agrupa las queries de federation (identity, invites,
-// peers, audit, library shares + shared items, item cache, progress).
-// Una sola instancia por proceso; thread-safe (delega en *sql.DB).
+// Repository agrupa queries de federation. Thread-safe (delega en *sql.DB).
 type Repository struct {
 	db     *sql.DB
 	sq     *sqlc.Queries
@@ -47,7 +45,7 @@ type Repository struct {
 	listCachedItemsSQL   string
 }
 
-// NewRepository binds a repo to the given DB connection.
+// NewRepository crea un repo para la conexion DB dada.
 func NewRepository(driver string, database *sql.DB) *Repository {
 	r := &Repository{db: database, driver: driver}
 	if db.IsPostgres(driver) {
@@ -56,9 +54,7 @@ func NewRepository(driver string, database *sql.DB) *Repository {
 		r.sq = sqlc.New(database)
 	}
 
-	// Pre-rewrite the raw-SQL holdouts. The FTS predicate and the
-	// case-insensitive sort use different syntax per dialect; everything
-	// else (`?`, BOOLEAN truthy predicates) is portable once rewritten.
+	// Pre-rewrite de SQL raw por dialecto (FTS + sort case-insensitive).
 	r.searchSharedItemsSQL = db.RewritePlaceholders(driver, buildSearchSharedItemsSQL(driver))
 	r.insertCachedItemSQL = db.RewritePlaceholders(driver, `
 		INSERT INTO federation_item_cache
@@ -81,11 +77,8 @@ func NewRepository(driver string, database *sql.DB) *Repository {
 
 func (r *Repository) useSQLite() bool { return r.sq != nil }
 
-// caseInsensitiveSort returns the dialect-specific expression for
-// case-insensitive ordering on a column. SQLite has the `COLLATE
-// NOCASE` clause; Postgres doesn't recognise it and needs `LOWER(col)`
-// (or the citext extension, which we don't depend on). Centralised
-// here so a future call site (a third rail) reuses the same recipe.
+// caseInsensitiveSort: expresion por dialecto para ORDER BY case-insensitive.
+// SQLite: COLLATE NOCASE. Postgres: LOWER(col).
 func caseInsensitiveSort(driver, col string) string {
 	if db.IsPostgres(driver) {
 		return "LOWER(" + col + ")"
@@ -93,11 +86,8 @@ func caseInsensitiveSort(driver, col string) string {
 	return col + " COLLATE NOCASE"
 }
 
-// buildSearchSharedItemsSQL stitches the FTS search query per dialect.
-// SQLite uses `rowid IN (items_fts MATCH ?)`; Postgres uses the
-// `search_vector @@ to_tsquery('simple', ?)` predicate populated by
-// the trigger from migrations/postgres/002_fts_search.sql. Caller
-// passes the same args slice; only the SQL text varies.
+// buildSearchSharedItemsSQL construye la query FTS por dialecto.
+// SQLite: items_fts MATCH. Postgres: search_vector @@ to_tsquery.
 func buildSearchSharedItemsSQL(driver string) string {
 	var ftsClause string
 	if db.IsPostgres(driver) {

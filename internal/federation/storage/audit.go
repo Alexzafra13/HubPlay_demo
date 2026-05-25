@@ -126,9 +126,7 @@ func (r *Repository) ListAuditEntries(ctx context.Context, peerID string, limit 
 	return out, nil
 }
 
-// PruneAuditBefore deletes audit rows older than the cutoff and
-// returns the number of rows removed. Called from a background
-// pruner (Phase 7+); for now it exists for completeness.
+// PruneAuditBefore borra filas de audit anteriores al cutoff.
 func (r *Repository) PruneAuditBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	var (
 		n   int64

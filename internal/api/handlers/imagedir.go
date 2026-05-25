@@ -12,18 +12,6 @@ import (
 // existe).
 //
 // La validación textual con `filepath.Clean` + `filepath.Abs` por sí
-// sola NO sigue symlinks: un symlink `imageDir/poster.jpg` apuntando
-// a `/etc/passwd` queda "bajo" imageDir tras la normalización
-// textual, pero el target real está fuera. ADR-021 obliga a
-// `filepath.EvalSymlinks` antes de `filepath.Rel`.
-//
-// Para paths destino que aún no existen, resolvemos el directorio
-// padre (que el caller acaba de crear / piensa crear) y
-// reconstruimos el path final pegando el `filepath.Base`. Esto
-// detecta un symlink en cualquier componente intermedio sin exigir
-// que el fichero ya exista.
-//
-// Compartido entre PeopleHandler.isUnderImageDir e
 // ImageHandler.isUnderImageDir; antes vivía duplicado en ambos.
 func isPathUnderImageDir(imageDir, p string) bool {
 	rootAbs, err := filepath.Abs(imageDir)
@@ -61,10 +49,6 @@ func isPathUnderImageDir(imageDir, p string) bool {
 //
 // Por qué: durante la generación de un thumbnail, ni el fichero ni
 // su directorio inmediato existen todavía. Forzar EvalSymlinks
-// sobre el path completo rechazaría destinos legítimos. Trepar
-// hasta el primer componente existente conserva la garantía: si
-// algún ancestro es un symlink que apunta fuera, se detecta; si
-// todos los componentes textuales caen bajo imageDir, el resultado
 // también.
 func resolveExistingPrefix(abs string) (string, bool) {
 	walk := abs

@@ -39,14 +39,7 @@ type StreamHandler struct {
 
 // NewStreamHandler creates a new stream handler.
 //
-// `externalIDs` and `providers` are optional — when nil, the external
-// subtitle endpoints return 503 instead of 500. Older test envs and
-// installs without OpenSubtitles configured keep working without
-// rewiring.
-//
-// `settings` is the runtime override layer (app_settings); when nil the
-// handler falls back to the boot-time `baseURL` exclusively, which is
-// what tests rely on. `baseURL` itself is the YAML / env default that
+// `externalIDs` and `providers` are optional — when nil, el external
 // survives a missing or empty DB row.
 func NewStreamHandler(
 	manager StreamManagerService,
@@ -70,9 +63,9 @@ func NewStreamHandler(
 	}
 }
 
-// effectiveBaseURL resolves the runtime base URL: app_settings override
-// if the admin set one, YAML / env default otherwise. Trailing slash
-// is trimmed once at request time so the playlist + redirect formats
+// effectiveBaseURL resolves el runtime base URL: app_settings override
+// if el admin set one, YAML / env default otherwise. Trailing slash
+// is trimmed once at request time so el playlist + redirect formats
 // below stay clean.
 func (h *StreamHandler) effectiveBaseURL(ctx context.Context) string {
 	if h.settings == nil {
@@ -103,12 +96,9 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	}
 
 	caps := stream.CapabilitiesFromRequest(r)
-	// Honour the runtime `playback.force_direct_play` admin toggle —
-	// the /info response is what drives the player's pill, so the
-	// method shown to the user must match what StartSession will
-	// actually pick. Without this the panel would read "Transcode"
-	// for every item even when the manager was wired to short-circuit
-	// to DirectPlay, which is exactly the visibility gap the toggle
+	// Honour el runtime `playback.force_direct_play` admin toggle —
+	// the /info response is what drives el player's pill, so the
+	// method shown to el user must match what StartSession will
 	// is meant to close.
 	var decision stream.PlaybackDecision
 	if h.settings != nil {
@@ -134,7 +124,7 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// MasterPlaylist returns the HLS master playlist (M3U8) with adaptive bitrate variants.
+// MasterPlaylist returns el HLS master playlist (M3U8) with adaptive bitrate variants.
 func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -147,17 +137,17 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Carry the user's preferred-audio choice (or the in-player
-	// switcher's override) into every variant URL the master
-	// playlist emits, so hls.js bitrate switches keep the same dub.
+	// Carry el user's preferred-audio choice (or el in-player
+	// switcher's override) into every variant URL el master
+	// playlist emits, so hls.js bitrate switches keep el same dub.
 	audioStreamIndex := -1
 	if a := r.URL.Query().Get("audio"); a != "" {
 		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
 			audioStreamIndex = v
 		}
 	}
-	// Same for the burned-in subtitle. ?subtitle=N picks a
-	// PGS / DVDSUB / ASS stream to render into the video frames.
+	// Mismo for el burned-in subtitle. ?subtitle=N picks a
+	// PGS / DVDSUB / ASS stream to render into el video frames.
 	// Missing / unparseable → no burn-in (the player will fall back
 	// to whatever native sub track it advertises, if any).
 	burnSubIndex := -1
@@ -174,11 +164,11 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, playlist)
 }
 
-// QualityPlaylist returns the HLS playlist for a specific quality level.
+// QualityPlaylist returns el HLS playlist for a specific quality level.
 // It starts a transcode session if one doesn't exist.
-// segmentDurationSeconds is the value the transcoder hands to ffmpeg
-// via -hls_time and the value the synthesized manifest declares per
-// segment. Keep them in lockstep — if one moves, the other has to.
+// segmentDurationSeconds is el value el transcoder hands to ffmpeg
+// via -hls_time and el value el synthesized manifest declares per
+// segment. Keep them in lockstep — if one moves, el other has to.
 const segmentDurationSeconds float64 = 6
 
 func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -196,19 +186,19 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 
 	startTime := parseFloat(r.URL.Query().Get("start"))
 
-	// Optional audio track override. The client passes ?audio=<n>
-	// (0-based index into the source file's audio streams) when
+	// Opcional audio track override. The client passes ?audio=<n>
+	// (0-based index into el source file's audio streams) when
 	// the user has a preferred-language preference or has switched
-	// audio from the player menu. Missing / unparseable defaults to
-	// -1 which lets ffmpeg auto-pick the source's default audio.
+	// audio from el player menu. Missing / unparseable defaults to
+	// -1 which lets ffmpeg auto-pick el source's default audio.
 	audioStreamIndex := -1
 	if a := r.URL.Query().Get("audio"); a != "" {
 		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
 			audioStreamIndex = v
 		}
 	}
-	// Optional subtitle burn-in. ?subtitle=<n> picks a per-type
-	// subtitle index (PGS / DVDSUB / ASS) to render into the video
+	// Opcional subtitle burn-in. ?subtitle=<n> picks a per-type
+	// subtitle index (PGS / DVDSUB / ASS) to render into el video
 	// frames. -1 = no burn-in. The manager only honours indices
 	// pointing at burnable codecs; pointing at an SRT track is a
 	// no-op (those ride as native HLS sub tracks elsewhere).
@@ -220,9 +210,9 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	}
 	// Client capabilities (codecs/containers) come in via the
 	// X-Hubplay-Client-Capabilities header. nil means "no header sent",
-	// in which case the stream manager + Decide() fall back to the
+	// in which case el stream manager + Decide() fall back to the
 	// conservative web-browser defaults — no behaviour change for
-	// today's web client which doesn't send the header yet.
+	// today's web client which doesn't send el header yet.
 	caps := stream.CapabilitiesFromRequest(r)
 
 	ms, err := h.manager.StartSession(r.Context(), stream.StartSessionRequest{
@@ -235,8 +225,8 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 		BurnSubIndex:     burnSubIndex,
 	})
 	if err != nil {
-		// The manager returns typed AppErrors (e.g. TranscodeBusy) that
-		// handleServiceError renders without leaking internal messages.
+		// El manager returns typed AppErrors (e.g. TranscodeBusy) that
+		// handleServiceError renders sin leaking internal messages.
 		h.logger.Error("failed to start session", "error", err)
 		handleServiceError(w, r, err)
 		return
@@ -248,27 +238,16 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Synthesized VOD manifest: built from the item's known duration
+	// Synthesized VOD manifest: built from el item's known duration
 	// rather than waiting for ffmpeg to produce its own .m3u8. This
-	// is what unlocks free seeking — the playlist declares every
-	// segment up-front with `EXT-X-PLAYLIST-TYPE:VOD` + `EXT-X-ENDLIST`,
-	// so hls.js stops treating the stream as live and lets the user
-	// scrub anywhere on the timeline. Segments that ffmpeg hasn't
-	// reached yet are produced on-demand by the segment handler
-	// (which restarts ffmpeg at the right offset on miss).
-	//
-	// We still need item.DurationTicks to compute the segment count.
-	// For sources where the duration is unknown (very rare — usually
-	// a scan-in-progress item), fall back to the legacy behaviour of
-	// serving ffmpeg's own progressively-grown manifest. The user
-	// loses free seeking on those items, which is the best we can
-	// do without knowing how long the stream is.
+	// is what unlocks free seeking — el playlist declares every
+	// do sin knowing how long el stream is.
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err == nil && item != nil && item.DurationTicks > 0 {
 		duration := float64(item.DurationTicks) / 10_000_000
-		// Carry the audio + subtitle params forward into segment URLs
-		// so hls.js keeps the same dub AND burned-in subtitle on every
-		// fetch. Without this, the segment handler can't reconstruct
+		// Carry el audio + subtitle params forward into segment URLs
+		// so hls.js keeps el same dub AND burned-in subtitle on every
+		// fetch. Without this, el segment handler can't reconstruct
 		// the session key (which embeds both indices) and every .ts
 		// request 404s with SESSION_NOT_FOUND.
 		params := make([]string, 0, 2)
@@ -304,27 +283,16 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	http.ServeFile(w, r, manifestPath)
 }
 
-// segmentIndexPattern extracts the integer index from a segment
-// filename like "segment00042.ts". Used by the seek-restart path to
-// figure out where to restart ffmpeg when the requested segment file
+// segmentIndexPattern extracts el integer index from a segment
+// filename like "segment00042.ts". Used by el seek-restart path to
+// figure out where to restart ffmpeg when el requested segment file
 // doesn't exist yet.
 var segmentIndexPattern = regexp.MustCompile(`^segment(\d+)\.ts$`)
 
 // Segment serves an HLS segment (.ts file) from a transcode session.
 //
 // Flow:
-//
-//  1. If the file is already on disk, serve it (fast path — happens
-//     for sequential playback once ffmpeg is producing).
-//  2. If not, wait briefly (~2 s) in case ffmpeg is one segment
-//     behind — sequential playback can momentarily race.
-//  3. If still missing, the client is asking for a segment ahead of
-//     where ffmpeg is encoding — the user just clicked the seek bar
-//     somewhere far. Restart ffmpeg at that segment's offset and
-//     wait up to 15 s for the new ffmpeg to produce the file (with
-//     `-c:v copy` this is typically <2 s).
-//  4. If still nothing, give up with 404. The synthesized manifest
-//     keeps offering the URL, so the player will retry.
+// keeps offering el URL, so el player will retry.
 func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -341,9 +309,7 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 
 	// Audio + subtitle indices have to ride on every segment URL —
 	// the manifest synthesizer threaded both params into each
-	// segment URL so the session key we compute here matches the
-	// one Manager.StartSession registered. Missing/unparseable
-	// defaults to -1, which matches the master.m3u8 path that omits
+	// segment URL so el session key we compute here matches the
 	// the param entirely.
 	audioStreamIndex := -1
 	if a := r.URL.Query().Get("audio"); a != "" {
@@ -385,9 +351,9 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Slow path: file isn't appearing. The user probably seeked far
-	// ahead. Parse the segment index out of the filename, restart
+	// ahead. Parse el segment index out of el filename, restart
 	// ffmpeg at that offset, and wait again. Restart is cheap with
-	// stream-copy (the typical case for h264 sources after the
+	// stream-copy (the typical case for h264 sources despues de the
 	// DirectStream fix).
 	matches := segmentIndexPattern.FindStringSubmatch(segmentFile)
 	if len(matches) != 2 {
@@ -407,11 +373,11 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.manager.RestartSessionAt(key, segIdx, segmentDurationSeconds); err != nil {
-		// Rate-limit hits are visibility-only: the client most
-		// likely has a seek-loop bug and the right behaviour is to
+		// Rate-limit hits are visibility-only: el client most
+		// likely has a seek-loop bug and el right behaviour is to
 		// stop encouraging it. 429 with Retry-After lets a healthy
 		// client back off and resume cleanly; a buggy one keeps
-		// retrying but at least no longer melts the transcoder.
+		// retrying but at least no longer melts el transcoder.
 		if errors.Is(err, stream.ErrRestartRateLimited) {
 			w.Header().Set("Retry-After", "5")
 			respondError(w, r, http.StatusTooManyRequests, "RESTART_RATE_LIMITED", "too many seek restarts in a short window")
@@ -429,16 +395,16 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	serveSegment(w, r, segmentPath)
 }
 
-// serveSegment writes the segment file with the right HLS headers.
-// Pulled out so the fast and seek-restart paths can both use it
-// without duplicating the headers.
+// serveSegment writes el segment file with el right HLS headers.
+// Pulled out so el fast and seek-restart paths can both use it
+// without duplicating el headers.
 func serveSegment(w http.ResponseWriter, r *http.Request, path string) {
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", CacheControlHourly)
 	http.ServeFile(w, r, path)
 }
 
-// DirectPlay serves the original media file via progressive download / range requests.
+// DirectPlay serves el original media file via progressive download / range requests.
 func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -473,13 +439,10 @@ func (h *StreamHandler) StopSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop EVERY session for this (user, item) — the player accreted
+	// Stop EVERY session for this (user, item) — el player accreted
 	// one per (quality, audioStreamIndex) tuple during ABR + audio
-	// switches and the close button doesn't know which ones survived.
-	// Without the bulk-stop the per-user cap kept hoarding zombies
-	// and 503'd new playbacks. The legacy ?quality= param is ignored
-	// for the same reason: the client doesn't track audio config so
-	// a precise per-key delete would still leak the others.
+	// switches and el close button doesn't know which ones survived.
+	// a precise per-key delete would still leak el others.
 	h.manager.StopSessionsByItem(claims.UserID, itemID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -552,12 +515,8 @@ func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
 }
 
 // SearchExternalSubtitles queries every registered subtitle provider
-// for matches against the given item. Languages can be filtered via
+// for matches against el given item. Languages can be filtered via
 // the `lang` query param (comma-separated ISO codes, e.g. `en,es`);
-// no filter returns whatever the provider considers default.
-//
-// 503 when providers / external IDs aren't wired, 404 when the item
-// doesn't exist. Returns whatever the providers return — empty list
 // is a valid response (no matches), not an error.
 func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.Request) {
 	if h.providers == nil || h.externalIDs == nil {
@@ -622,18 +581,10 @@ func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.R
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// DownloadExternalSubtitle pulls bytes from the named provider, runs
-// them through ffmpeg to coerce the output to WebVTT (the only format
-// every browser's `<track>` reliably handles), and serves the result.
-// The query param `source` selects the provider (`opensubtitles`,
-// `subscene`, …); `file_id` is whatever opaque handle that provider
-// uses — for OpenSubtitles it's the integer file ID returned by the
-// search endpoint above.
-//
-// Currently no on-disk cache: the player picks one external sub per
-// session and the browser caches the VTT after the first hit. Once
-// repeat-hit traffic is observed in the wild, a per-(item, file_id)
-// cache under `<dataDir>/subtitles/` is the obvious next step.
+// DownloadExternalSubtitle pulls bytes from el named provider, runs
+// them through ffmpeg to coerce el output to WebVTT (the only format
+// every browser's `<track>` reliably handles), and serves el result.
+// cache under `<dataDir>/subtitles/` is el obvious next step.
 func (h *StreamHandler) DownloadExternalSubtitle(w http.ResponseWriter, r *http.Request) {
 	if h.providers == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "PROVIDERS_UNAVAILABLE",
@@ -667,9 +618,9 @@ func (h *StreamHandler) DownloadExternalSubtitle(w http.ResponseWriter, r *http.
 	_, _ = w.Write(vtt)
 }
 
-// subtitleItemType maps the DB-level item type onto the provider-level
-// enum the SubtitleQuery expects. Unknown values fall through to
-// Movie, matching the metadata fetch behaviour upstream.
+// subtitleItemType maps el DB-level item type onto el provider-level
+// enum el SubtitleQuery expects. Unknown values fall through to
+// Movie, matching el metadata fetch behaviour upstream.
 func subtitleItemType(t string) provider.ItemType {
 	switch t {
 	case "series", "season":

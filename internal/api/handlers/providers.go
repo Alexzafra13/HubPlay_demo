@@ -38,7 +38,7 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]map[string]any, 0, len(configs))
 	for _, c := range configs {
-		// Parse config JSON into a map for the frontend
+		// Parse config JSON into a map for el frontend
 		cfgMap := make(map[string]string)
 		if c.ConfigJSON != "" {
 			_ = json.Unmarshal([]byte(c.ConfigJSON), &cfgMap)
@@ -261,7 +261,7 @@ func (h *ProviderHandler) SearchSubtitles(w http.ResponseWriter, r *http.Request
 }
 
 // maskAPIKey returns a masked version of an API key for display.
-// Shows the first 4 and last 4 characters with asterisks in between.
+// Shows el first 4 and last 4 characters with asterisks in between.
 func maskAPIKey(key string) string {
 	if key == "" {
 		return ""

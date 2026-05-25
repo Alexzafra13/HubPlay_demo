@@ -8,19 +8,6 @@ package handlers
 //
 // Reglas de uso:
 //
-//   - `NoCache` para SSE y endpoints admin que NUNCA deben cachear
-//     respuestas. Cambia con cada request.
-//   - `NoStore` añade restricción contra persistencia en disco
-//     (backup downloads, DB driver swap responses).
-//   - `NoStoreFull` (HLS playlists efímeras) es el de IPTV stream
-//     proxy: además de `no-cache,no-store` añade `must-revalidate`
-//     para defender contra proxies que ignoran `no-cache`.
-//   - Los TTLs públicos (`ShortLived`/`Hourly`/`Daily*`) requieren
-//     que el contenido sea content-addressed o suficientemente
-//     estable como para tolerar staleness — verificar antes de
-//     aplicar a un endpoint nuevo.
-//   - `Image` añade `stale-while-revalidate=604800` para servir el
-//     blob viejo durante una semana mientras background refresh —
 //     baja el latency P99 de servir thumbnails que están en re-fetch.
 const (
 	CacheControlNoCache       = "no-cache"

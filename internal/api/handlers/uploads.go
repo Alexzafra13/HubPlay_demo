@@ -20,9 +20,6 @@ import (
 //   GET /api/v1/uploads/events  — SSE filtrado a sus uploads (publica
 //                                  UploadPhase + UploadDone + UploadError
 //                                  cuyo data.user_id coincide).
-//
-// El POST/PATCH/HEAD/DELETE del protocolo tus los sirve el TusdHandler
-// del paquete internal/upload, montado en /api/v1/uploads/ por el
 // router. Aquí sólo viven las superficies de lectura.
 type UploadsHandler struct {
 	audit   UploadAuditLister
@@ -92,9 +89,6 @@ func (h *UploadsHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 //
 // Decisión de filtrar aquí (vs. publicar dos canales): la información
 // del user_id ya viaja en el data — un filtrado server-side mantiene
-// la garantía de privacidad y simplifica el bus (un solo topic). El
-// coste es que un usuario con 50 uploads simultáneos hace que TODOS
-// los suscriptores reciban handlers; aceptable para self-hosted donde
 // el orden de magnitud es decenas.
 func (h *UploadsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	_ = DisableWriteDeadline(w)

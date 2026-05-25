@@ -11,11 +11,11 @@ import (
 type PeerStatus string
 
 const (
-	// PeerPending: invite generated locally, not yet completed by remote.
+	// PeerPending: invite generada, handshake no completado.
 	PeerPending PeerStatus = "pending"
-	// PeerPaired: handshake complete; peer is fully linked.
+	// PeerPaired: handshake completo, peer enlazado.
 	PeerPaired PeerStatus = "paired"
-	// PeerRevoked: admin has revoked; all subsequent peer JWTs are rejected.
+	// PeerRevoked: admin revoco; JWTs posteriores rechazados.
 	PeerRevoked PeerStatus = "revoked"
 )
 
@@ -51,9 +51,7 @@ type Peer struct {
 	AvatarImageURL string
 }
 
-// Fingerprint returns the same SSH-style hex fingerprint of the peer's
-// pinned pubkey that the admin saw at handshake time. Useful for
-// rendering peer cards in the admin UI and for audit log entries.
+// Fingerprint devuelve el fingerprint hex del pubkey pineado.
 func (p *Peer) Fingerprint() string {
 	return Fingerprint(p.PublicKey)
 }

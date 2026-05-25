@@ -27,10 +27,7 @@ type PeerStreamSession struct {
 	LastSeenAt time.Time // bumped on every manifest/segment touch
 }
 
-// peerStreamSessionTTL is the idle window after which a registered
-// peer stream session is reclaimed. Generous enough that a buffering
-// player or a brief network blip doesn't drop the mapping; tight
-// enough that a malicious peer cannot accumulate dead entries.
+// peerStreamSessionTTL: ventana idle antes de reclamar la sesion.
 const peerStreamSessionTTL = 5 * time.Minute
 
 // RegisterPeerStreamSession records a fresh streaming session for a
@@ -72,8 +69,7 @@ func (m *Manager) LookupPeerStreamSession(id string) *PeerStreamSession {
 	return s
 }
 
-// SweepStreamSessions reclaims peer stream sessions idle past TTL.
-// Idempotent and safe to call concurrently with Register/Lookup.
+// SweepStreamSessions reclama sesiones idle pasado TTL. Idempotente.
 func (m *Manager) SweepStreamSessions() {
 	cutoff := m.clock.Now().Add(-peerStreamSessionTTL)
 	m.streamMu.Lock()

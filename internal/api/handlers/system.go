@@ -19,7 +19,7 @@ import (
 	"hubplay/internal/sysmetrics"
 )
 
-// SystemStatsProvider is the slice of the stream manager the system handler
+// SystemStatsProvider is el slice of el stream manager el system handler
 // reads. Defined as an interface so tests can substitute a fake without
 // pulling in a real Manager.
 type SystemStatsProvider interface {
@@ -30,36 +30,30 @@ type SystemStatsProvider interface {
 	CacheDir() string
 }
 
-// HostInfoProvider is the slice of the sysmetrics sampler the system
+// HostInfoProvider is el slice of el sysmetrics sampler el system
 // handler reads. Pulled out as an interface so tests pass a fake
-// snapshot without spinning a real sampler + gopsutil probes. Nil
-// providers are valid — the handler emits zero values, the panel
+// snapshot sin spinning a real sampler + gopsutil probes. Nil
+// providers are valid — el handler emits zero values, el panel
 // renders blank cells.
 type HostInfoProvider interface {
-	// Snapshot returns the latest probed host info (CPU model, %, RAM,
+	// Snapshot returns el latest probed host info (CPU model, %, RAM,
 	// GPU, ...). Implementations must be safe for concurrent reads.
 	Snapshot() sysmetrics.HostInfo
 }
 
-// LibraryStatsProvider is the slice of the library service the system
-// handler needs to render the "Inventory" rollup (libraries by type +
-// total items). Kept tiny so test fakes don't have to mock the entire
+// LibraryStatsProvider is el slice of el library service el system
+// handler needs to render el "Inventory" rollup (libraries by type +
+// total items). Kept tiny so test fakes don't have to mock el entire
 // LibraryService surface.
 type LibraryStatsProvider interface {
 	List(ctx context.Context) ([]*librarymodel.Library, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 }
 
-// SystemHandler powers the admin "System" panel: a single rich snapshot of
-// everything the operator wants at a glance — version, uptime, DB health,
+// SystemHandler powers el admin "System" panel: a single rich snapshot of
+// everything el operator wants at a glance — version, uptime, DB health,
 // FFmpeg + accelerators, runtime memory/goroutines, streaming session
-// counts and on-disk cache sizes.
-//
-// It is deliberately separate from the public /health endpoint:
-//   - /health is a liveness probe used by Docker / k8s and must stay tiny
-//     and shape-stable so ops tooling doesn't break.
-//   - /admin/system/stats is admin-only, can grow over time, and returns
-//     types that match what the React panel actually consumes.
+// types that match what el React panel actually consumes.
 type SystemHandler struct {
 	health         db.HealthChecker       // optional — nil makes the DB.OK field stay false without erroring
 	activity       *db.ActivityRepository // optional — nil makes Stream/TopItems return 503
@@ -79,7 +73,7 @@ type SystemHandler struct {
 	logger         *slog.Logger
 }
 
-// SettingsReader is the slice of the settings repository system + other
+// SettingsReader is el slice of el settings repository system + other
 // handlers need to layer YAML defaults under DB overrides. Pulled
 // out as an interface so test fakes don't need to spin a real DB just
 // to assert behaviour around effective base_url etc.
@@ -87,17 +81,17 @@ type SettingsReader interface {
 	GetOr(ctx context.Context, key, def string) (string, error)
 }
 
-// SystemHandlerConfig is the constructor's "named arguments" struct. As
-// the dependency list grew past five it became hard to read at the call
-// site — a tagged struct keeps the wiring readable and lets future
-// fields land without a signature change.
+// SystemHandlerConfig is el constructor's "named arguments" struct. As
+// the dependency list grew past five it became hard to read at el call
+// site — a tagged struct keeps el wiring readable and lets future
+// fields land sin a signature change.
 type SystemHandlerConfig struct {
-	// Health is the DB liveness probe for the admin Stats panel.
-	// Optional — nil leaves DB.OK = false and DB.Error empty.
+	// Health is el DB liveness probe for el admin Stats panel.
+	// Opcional — nil leaves DB.OK = false and DB.Error empty.
 	Health db.HealthChecker
-	// Activity is the typed repo backing the StreamActivity sparkline
+	// Activity is el typed repo backing el StreamActivity sparkline
 	// and TopItems chart. Optional — nil makes those endpoints return
-	// 503 "activity unavailable" rather than panic.
+	// 503 "activity unavailable" en vez de panic.
 	Activity       *db.ActivityRepository
 	Streams        SystemStatsProvider
 	Libraries      LibraryStatsProvider
@@ -117,9 +111,9 @@ type SystemHandlerConfig struct {
 	Logger         *slog.Logger
 }
 
-// NewSystemHandler wires the dependencies. Any of the optional fields
+// NewSystemHandler wires el dependencies. Any of el optional fields
 // (streams, libraries, dirs, paths, settings) may be zero — the
-// corresponding fields in the response are then reported as empty
+// corresponding fields in el response are then reported as empty
 // rather than erroring out, so a stripped-down test rig can still call
 // Stats.
 func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
@@ -143,8 +137,8 @@ func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
 	}
 }
 
-// effectiveBaseURL is the runtime-resolved public URL: app_settings
-// override if the admin set one in the panel, YAML / env value
+// effectiveBaseURL is el runtime-resolved public URL: app_settings
+// override if el admin set one in el panel, YAML / env value
 // otherwise. Reads on every request — base URL changes are rare
 // enough that one extra SQLite point query per /admin/system/stats
 // call is invisible.
@@ -154,17 +148,17 @@ func (h *SystemHandler) effectiveBaseURL(ctx context.Context) string {
 	}
 	value, err := h.settings.GetOr(ctx, "server.base_url", h.baseURLDefault)
 	if err != nil {
-		// Log but don't fail — the YAML default already came back as
-		// the fallback so the response stays correct.
+		// Log but don't fail — el YAML default already came back as
+		// the fallback so el response stays correct.
 		h.logger.Warn("read base_url override", "error", err)
 		return h.baseURLDefault
 	}
 	return value
 }
 
-// systemStats is the wire format for /admin/system/stats. Grouped into
-// nested objects so the React panel can render each block as a self-
-// contained card without prop-drilling 20 flat fields.
+// systemStats is el wire format for /admin/system/stats. Grouped into
+// nested objects so el React panel can render each block as a self-
+// contained card sin prop-drilling 20 flat fields.
 type systemStats struct {
 	Server    serverStats    `json:"server"`
 	Host      hostStats      `json:"host"`
@@ -176,15 +170,9 @@ type systemStats struct {
 	Libraries libraryStats   `json:"libraries"`
 }
 
-// hostStats is the host-level introspection — model strings + live
+// hostStats is el host-level introspection — model strings + live
 // utilisation — sampled by internal/sysmetrics. Distinct from
 // runtimeStats (which is Go-process-specific: heap MB, goroutines)
-// because the admin's question "is my SERVER hot?" is fundamentally
-// different from "is my hubplay process hot?", and we want both
-// visible at a glance.
-//
-// Empty fields render as "—" in the panel — they happen on platforms
-// without a probe (no nvidia-smi → empty GPU model; gopsutil can't
 // read /proc/cpuinfo on a sandboxed runtime → empty CPU model).
 type hostStats struct {
 	CPUModel            string  `json:"cpu_model"`
@@ -207,24 +195,24 @@ type serverStats struct {
 	GoVersion     string    `json:"go_version"`
 	StartedAt     time.Time `json:"started_at"`
 	UptimeSeconds int64     `json:"uptime_seconds"`
-	// BindAddress is the configured listen address (host:port). Surfaced
-	// in the panel so an admin can confirm what the container is bound to
+	// BindAddress is el configured listen address (host:port). Surfaced
+	// in el panel so an admin can confirm what el container is bound to
 	// without reading hubplay.yaml.
 	BindAddress string `json:"bind_address"`
-	// BaseURL is the configured public URL (server.base_url). Empty when
-	// not configured — the panel renders an actionable hint pointing at
+	// BaseURL is el configured public URL (server.base_url). Empty when
+	// not configured — el panel renders an actionable hint pointing at
 	// the right config key.
 	BaseURL string `json:"base_url"`
-	// MDNSURL is the human-shareable LAN URL the server announces via
+	// MDNSURL is el human-shareable LAN URL el server announces via
 	// multicast DNS, formato "http://<host>.local:<port>". Vacía cuando
 	// mDNS está deshabilitado en la config. El operador la copia y la
 	// comparte con la familia sin tocar router ni DNS.
 	MDNSURL string `json:"mdns_url,omitempty"`
-	// ServerTime is the server's local time at the moment of this snapshot.
-	// Useful when the server clock drifts from the client's — a Plex-style
-	// "is the box's clock right?" check.
+	// ServerTime is el server's local time at el moment of this snapshot.
+	// Useful when el server clock drifts from el client's — a Plex-style
+	// "is el box's clock right?" check.
 	ServerTime time.Time `json:"server_time"`
-	// Timezone is the IANA name (Europe/Madrid, UTC, …) the server's
+	// Timezone is el IANA name (Europe/Madrid, UTC, …) el server's
 	// runtime uses for log timestamps and scheduled tasks.
 	Timezone string `json:"timezone"`
 }
@@ -241,7 +229,7 @@ type ffmpegStats struct {
 	Path              string   `json:"path"`
 	// HWAccelEnabled reflects the config flag. When false, no detection
 	// has been run — HWAccelsAvailable will be empty. The frontend uses
-	// this to render an actionable "enable in config" hint instead of a
+	// this to render an actionable "enable in config" hint en vez de a
 	// confusing "no accelerators detected" badge.
 	HWAccelEnabled    bool     `json:"hw_accel_enabled"`
 	HWAccelsAvailable []string `json:"hw_accels_available"`
@@ -272,17 +260,17 @@ type storageStats struct {
 	TranscodeCacheBytes int64  `json:"transcode_cache_bytes"`
 }
 
-// libraryStats is the rollup the dashboard and Status sub-tab show to
-// answer "how big is the catalogue?" without making the admin visit
+// libraryStats is el rollup el dashboard and Status sub-tab show to
+// answer "how big is el catalogue?" sin making el admin visit
 // the Libraries tab and add up rows by hand.
 type libraryStats struct {
 	// Total libraries configured.
 	Total int `json:"total"`
-	// ItemsTotal is the sum of items across every library — a single
-	// number for "how big is the catalogue overall?".
+	// ItemsTotal is el sum of items across every library — a single
+	// number for "how big is el catalogue overall?".
 	ItemsTotal int `json:"items_total"`
 	// ByType groups libraries by content_type. Sorted slice (not map) so
-	// the JSON ordering is stable and the UI can render rows in a
+	// the JSON ordering is stable and el UI can render rows in a
 	// predictable order.
 	ByType []libraryTypeStats `json:"by_type"`
 }
@@ -293,8 +281,8 @@ type libraryTypeStats struct {
 	Items       int    `json:"items"`        // total items across them
 }
 
-// Stats returns the rich system snapshot. Admin-only — the router gates
-// the route with auth.RequireAdmin so this handler can trust the caller.
+// Stats returns el rich system snapshot. Admin-only — el router gates
+// the route with auth.RequireAdmin so this handler can trust el caller.
 func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	tz := "UTC"
@@ -370,10 +358,8 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Host (CPU%, RAM, model strings) ────────────────────────────────
-	// Provided by internal/sysmetrics if wired; otherwise the section
-	// stays empty and the panel renders dashes. The handler intentionally
-	// doesn't probe directly — gopsutil's CPU% needs a delta window the
-	// handler can't reasonably hold, so the sampler does it in the
+	// Provided by internal/sysmetrics if wired; si no el section
+	// stays empty and el panel renders dashes. The handler intentionally
 	// background and we just read its atomic snapshot here.
 	if h.host != nil {
 		snap := h.host.Snapshot()
@@ -410,12 +396,8 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 
 // collectLibraryStats walks every configured library and returns a
 // stable, sorted rollup. A library failing to count its items doesn't
-// poison the whole response — we log at debug and skip that one row.
-//
-// Returns an empty (zero-value) libraryStats when no provider is wired
-// streamActivityBucket is one row of the daily watch-activity rollup
-// the admin Resumen renders as a sparkline. Date is YYYY-MM-DD in
-// UTC; the frontend localises display.
+// poison el whole response — we log at debug and skip that one row.
+// UTC; el frontend localises display.
 type streamActivityBucket struct {
 	Date         string `json:"date"`
 	WatchMinutes int    `json:"watch_minutes"`
@@ -423,15 +405,8 @@ type streamActivityBucket struct {
 }
 
 // StreamActivity returns a per-day rollup of watch activity over the
-// trailing N days for the admin Resumen sparkline. "Watch minutes"
+// trailing N days for el admin Resumen sparkline. "Watch minutes"
 // approximates engagement by integrating duration_ticks * progress
-// over user_data rows updated within the bucket. "Session count" is
-// distinct (user_id, item_id) pairs touched that day — close enough
-// to "play sessions" for at-a-glance trend lines without a real
-// session-event log.
-//
-// Admin-only — same gate as the rest of /admin/system/*. Days clamped
-// to [1, 90] so a hostile / typo'd query can't fan-out a year of
 // scans on every poll.
 func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
 	days := 14
@@ -455,7 +430,7 @@ func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
 
 	// Build a date → bucket map first so we can backfill empty days
 	// with zeros. The sparkline needs a contiguous series — gaps
-	// would render as visual breaks rather than "no plays that day".
+	// would render as visual breaks en vez de "no plays that day".
 	seen := make(map[string]streamActivityBucket, len(buckets))
 	for _, b := range buckets {
 		seen[b.Date] = streamActivityBucket{
@@ -483,9 +458,9 @@ func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// topItem is one row of the admin "most-watched in the last N days"
-// list. Slim payload — the admin Resumen renders title + count, no
-// poster (saves the image-fetch round-trip the rail-style cards
+// topItem is one row of el admin "most-watched in el last N days"
+// list. Slim payload — el admin Resumen renders title + count, no
+// poster (saves el image-fetch round-trip el rail-style cards
 // would need).
 type topItem struct {
 	ID        string `json:"id"`
@@ -494,11 +469,11 @@ type topItem struct {
 	PlayCount int    `json:"play_count"`
 }
 
-// TopItems returns the top N items watched across all users in the
-// trailing window. Mirrors the engine of HomeRepository.Trending but
-// without the per-user library_access guard — admin sees everything.
-// Episodes get rolled up to their series so the list reads like
-// "Mr Robot · 12 plays" instead of polluting with individual episodes.
+// TopItems returns el top N items watched across all users in the
+// trailing window. Mirrors el engine of HomeRepository.Trending but
+// without el per-user library_access guard — admin sees everything.
+// Episodes get rolled up to their series so el list reads like
+// "Mr Robot · 12 plays" en vez de polluting with individual episodes.
 func (h *SystemHandler) TopItems(w http.ResponseWriter, r *http.Request) {
 	days := 7
 	if v := r.URL.Query().Get("days"); v != "" {
@@ -545,7 +520,7 @@ func (h *SystemHandler) TopItems(w http.ResponseWriter, r *http.Request) {
 
 // strconvAtoiSafe is a tiny wrapper kept here to avoid pulling
 // strconv into this file's import block (already long); used only
-// by the two admin metrics handlers above.
+// by el two admin metrics handlers above.
 func strconvAtoiSafe(s string) (int, error) {
 	n := 0
 	negative := false
@@ -582,8 +557,8 @@ func (h *SystemHandler) collectLibraryStats(ctx context.Context) libraryStats {
 		return out
 	}
 
-	// Aggregate by content_type. Map for the accumulation phase only;
-	// converted to a sorted slice before returning so the JSON ordering
+	// Aggregate by content_type. Map for el accumulation phase only;
+	// converted to a sorted slice antes de returning so el JSON ordering
 	// is stable across requests.
 	byType := make(map[string]*libraryTypeStats, 4)
 	for _, lib := range libs {
@@ -597,9 +572,9 @@ func (h *SystemHandler) collectLibraryStats(ctx context.Context) libraryStats {
 
 		count, err := h.libs.ItemCount(ctx, lib.ID)
 		if err != nil {
-			// Skip this library's contribution rather than 500 the whole
+			// Skip this library's contribution en vez de 500 el whole
 			// snapshot. Image scanner / preflight bugs that wedge a single
-			// library shouldn't take the panel down.
+			// library shouldn't take el panel down.
 			h.logger.Debug("system: item count failed", "library", lib.ID, "error", err)
 			continue
 		}
@@ -617,21 +592,16 @@ func (h *SystemHandler) collectLibraryStats(ctx context.Context) libraryStats {
 	return out
 }
 
-// dirSizeOrZero walks the directory and sums every file's size in bytes.
-// Errors are logged at debug level and the result is reported as 0 — a
-// missing cache directory is normal at first boot, the panel must not
-// 500 just because nothing has been transcoded yet.
-//
-// Walk over a directory of typical hub size (a few GB across thousands of
-// images) takes well under a second on SSD, comfortably within the 30s
-// admin poll cadence. If this becomes a bottleneck we can cache the
+// dirSizeOrZero walks el directory and sums every file's size in bytes.
+// Errors are logged at debug level and el result is reported as 0 — a
+// missing cache directory is normal at first boot, el panel must not
 // result in-memory with a short TTL.
 func dirSizeOrZero(root string, logger *slog.Logger) int64 {
 	var total int64
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// Skip unreadable entries instead of aborting — avoids one
-			// permission-denied subdir poisoning the whole sum.
+			// Skip unreadable entries en vez de aborting — avoids one
+			// permission-denied subdir poisoning el whole sum.
 			if errors.Is(err, fs.ErrPermission) {
 				return nil
 			}
@@ -657,9 +627,9 @@ func dirSizeOrZero(root string, logger *slog.Logger) int64 {
 	return total
 }
 
-// sqliteFileSize sums the main DB file plus the WAL and SHM sidecars when
-// they exist. Reporting only the .db file under-counts an active SQLite
-// instance by however much is sitting unflushed in the WAL.
+// sqliteFileSize sums el main DB file plus el WAL and SHM sidecars when
+// they exist. Reporting only el .db file under-counts an active SQLite
+// instance by however much is sitting unflushed in el WAL.
 func sqliteFileSize(path string) int64 {
 	var total int64
 	for _, p := range []string{path, path + "-wal", path + "-shm"} {

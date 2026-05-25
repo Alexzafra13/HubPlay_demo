@@ -80,12 +80,8 @@ type channelLister interface {
 	ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
 }
 
-// NewProberWorker wires a worker around the building blocks. Logger
-// es required (un worker silencioso es pesadilla de debug); devuelve
-// error si cualquier dep es nil — consistente con el resto del repo
-// (`federation.NewManager` también devuelve `(nil, err)` y `main.go`
-// hace fail-soft). Cierra olor F14-4-a del audit 2026-05-14 — el
-// `panic()` previo violaba la convención.
+// NewProberWorker construye el worker. Devuelve error si cualquier
+// dep es nil (logger requerido para debug).
 func NewProberWorker(prober *Prober, libraries libraryLister, channels channelLister, logger *slog.Logger) (*ProberWorker, error) {
 	if prober == nil || libraries == nil || channels == nil || logger == nil {
 		return nil, errors.New("iptv.NewProberWorker: nil dependency")

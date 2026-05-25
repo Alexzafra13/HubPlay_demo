@@ -27,17 +27,9 @@ import (
 // skips recording it as a job-level error.
 var ErrRefreshInProgress = errors.New("refresh already in progress")
 
-// Service manages IPTV libraries: M3U import, EPG sync, channel
-// operations.
-//
-// Cierre del olor CC del audit 2026-05-14 (god-service de 45 métodos
-// en 11 sub-features). En CC fase 1 (PR #390) se extrajeron Favorites,
-// WatchHistory y Health. En CC fase 2 (esta sesión) se extrae
-// ChannelOrderOps — los 16 métodos del bloque "orden / visibilidad /
-// logo" (per-user overlay + library admin curation + logo overrides +
-// iptv-org refresh). Lo que queda en el core son M3U import + EPG
-// sync + EPG sources + channel overrides + el lifecycle de refresh
-// (httpClient + mu + refreshes map + bgCtx) — tightly-coupled.
+// Service gestiona libraries IPTV: M3U import, EPG sync, canales.
+// Los sub-services (FavoritesOps, WatchHistoryOps, HealthOps,
+// ChannelOrderOps) se promueven vía embedding.
 type Service struct {
 	*FavoritesOps
 	*WatchHistoryOps
@@ -56,44 +48,27 @@ type Service struct {
 
 	httpClient *http.Client
 
-	// httpInsecureClient is built lazily the first time a library
-	// with TLSInsecure=true triggers a fetch. Cached so repeat
-	// refreshes don't pay the transport-construction cost. Guarded
-	// by httpInsecureOnce.
+	// httpInsecureClient — lazy, cacheado para no reconstruir el transport.
 	httpInsecureClient *http.Client
 	httpInsecureOnce   sync.Once
 
-	// pub es el contenedor compartido del *event.Bus opcional. Service,
-	// HealthOps (ChannelHealthChanged events) y futuros sub-services
-	// que publiquen tienen un puntero al mismo `*publisher`, así un
-	// único `SetEventBus(bus)` muta los publishers de todos a la vez
-	// sin que cada uno exponga su propio setter.
+	// pub — contenedor compartido del *event.Bus opcional.
+	// Un único SetEventBus muta los publishers de todos los sub-services.
 	pub *publisher
 
-	// proberWorker is wired post-construction (the worker depends on
-	// the service for the ChannelHealthReporter interface, so we'd
-	// otherwise have a circular dep at construction time). Nil-safe:
-	// service methods that auto-trigger a probe (RefreshM3U) check
-	// before calling.
+	// proberWorker — post-construcción para evitar dep circular. Nil-safe.
 	proberWorker proberRunner
 
-	// bgCtx / bgCancel / bgWG forman el lifecycle de las goroutines
-	// detached que el service lanza desde RefreshM3U (auto-EPG +
-	// auto-probe) y desde los handlers de iptv_admin. Antes usaban
-	// context.Background() y no se drenaban: shutdown durante un
-	// refresh escribía contra una DB ya cerrada (audit olores DD +
-	// GGGG). Patrón replica `library.Service`.
+	// bgCtx / bgCancel / bgWG — lifecycle de goroutines detached
+	// (auto-EPG, auto-probe). Se drenan en Shutdown para no
+	// escribir contra DB cerrada.
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 	bgWG     sync.WaitGroup
 }
 
-// publisher es el contenedor compartido del *event.Bus opcional. Los
-// sub-services que publican (HealthOps con ChannelHealthChanged,
-// Service con PlaylistRefreshed/EPGUpdated) tienen un puntero al
-// mismo `*publisher`, así un único `Service.SetEventBus(bus)` mutate
-// el campo de todos a la vez. Patrón replica del split QQ
-// (auth.Service).
+// publisher — contenedor compartido del *event.Bus. Un puntero
+// compartido entre Service y sub-services.
 type publisher struct {
 	bus *event.Bus
 }
@@ -112,39 +87,27 @@ func (p *publisher) setBus(bus *event.Bus) {
 	p.bus = bus
 }
 
-// proberRunner is the minimal capability surface the service needs
-// from a prober worker. Defined on the consumer side (sink pattern)
-// so the *Service has no dependency on the worker's internals.
+// proberRunner — interfaz mínima del prober worker (sink pattern).
 type proberRunner interface {
 	ProbeNow(ctx context.Context, libraryID string) (ProbeSummary, error)
 }
 
-// SetEventBus wires an event bus so the service publishes PlaylistRefreshed
-// / EPGUpdated events at the end of the respective refresh. También
-// hace que HealthOps publique ChannelHealthChanged. Nil-safe.
+// SetEventBus cablea el bus para publicar PlaylistRefreshed / EPGUpdated
+// y ChannelHealthChanged. Nil-safe.
 func (s *Service) SetEventBus(bus *event.Bus) {
 	s.pub.setBus(bus)
 }
 
-// SetIPTVOrgLogos lo expone ChannelOrderOps vía method promotion —
-// el setter externo `service.SetIPTVOrgLogos(l)` resuelve a
-// `service.ChannelOrderOps.SetIPTVOrgLogos(l)` sin que el facade lo
-// declare.
-
-// SetProberWorker wires the active prober worker. Optional: a service
-// without one still works, it just won't auto-probe channels after an
-// M3U refresh — the periodic worker tick will catch them eventually.
+// SetProberWorker cablea el prober worker. Opcional: sin él no hay
+// auto-probe post-import (el tick periódico los cubrirá).
 func (s *Service) SetProberWorker(w proberRunner) { s.proberWorker = w }
 
-// publish es un atajo intra-paquete a `pub.publish`. Los métodos del
-// Service que publican (M3U → PlaylistRefreshed, EPG → EPGUpdated)
-// lo llaman sin saber que es un wrapper sobre el publisher
-// compartido.
+// publish — atajo intra-paquete a pub.publish.
 func (s *Service) publish(e event.Event) {
 	s.pub.publish(e)
 }
 
-// NewService creates a new IPTV service.
+// NewService crea un nuevo servicio IPTV.
 func NewService(
 	channels *db.ChannelRepository,
 	epgPrograms *db.EPGProgramRepository,
@@ -162,11 +125,7 @@ func NewService(
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	pub := &publisher{}
 	return &Service{
-		// Sub-services con sus deps específicas. HealthOps comparte el
-		// `pub` con Service así un único SetEventBus muta ambos.
-		// ChannelOrderOps lleva los 4 repos del bloque order/visibility/
-		// logo + el lookup iptv-org (post-construction setter via
-		// method promotion).
+		// Sub-services con sus deps específicas.
 		FavoritesOps:    newFavoritesOps(favorites),
 		WatchHistoryOps: newWatchHistoryOps(channels, watchHistory),
 		HealthOps:       newHealthOps(channels, pub, iptvLogger),
@@ -183,26 +142,16 @@ func NewService(
 		bgCtx:       bgCtx,
 		bgCancel:    bgCancel,
 		httpClient: &http.Client{
-			// 5 min ceiling: large M3U providers (e.g. MEGAOTT,
-			// 8k+ channels) can take 1–2 min to stream the full
-			// playlist over a residential connection. 60s used to
-			// trip on these. Matches the upstream-refresh ctx
-			// budget used elsewhere in this package.
+			// 5 min: proveedores grandes (MEGAOTT, 8k+ canales) pueden
+			// tardar 1-2 min en streaming residencial.
 			Timeout: 5 * time.Minute,
 		},
 	}
 }
 
-// SpawnBackground lanza fn como goroutine de background del service.
-// fn recibe un ctx que se cancela en Shutdown y que tiene como
-// padre el bgCtx del service (no context.Background) — el caller
-// puede aplicarle un WithTimeout si quiere acotar la operación.
-// El service trackea la goroutine en bgWG para drenarla en Shutdown
-// (audit olores DD + GGGG).
-//
-// Exportado para que handlers del paquete `api/handlers` (en
-// particular iptv_admin.go) puedan usar el mismo lifecycle en lugar
-// de spawn-and-forget con context.Background().
+// SpawnBackground lanza fn como goroutine del service con bgCtx
+// (no context.Background). Se drena en Shutdown. Exportado para
+// handlers que necesiten el mismo lifecycle.
 func (s *Service) SpawnBackground(fn func(ctx context.Context)) {
 	s.bgWG.Add(1)
 	go func() {
@@ -211,19 +160,14 @@ func (s *Service) SpawnBackground(fn func(ctx context.Context)) {
 	}()
 }
 
-// BackgroundContext devuelve el ctx de background del service para
-// que los callers que necesiten encadenar timeouts puedan partir de
-// él. No usar context.Background — se rompe el drain de Shutdown.
+// BackgroundContext devuelve el bgCtx del service. No usar
+// context.Background directo — rompe el drain de Shutdown.
 func (s *Service) BackgroundContext() context.Context {
 	return s.bgCtx
 }
 
-// Shutdown cancela el bgCtx y espera a que terminen las goroutines
-// detached lanzadas vía SpawnBackground (auto-EPG / auto-probe tras
-// import M3U, refresh async desde handlers admin). Antes era no-op
-// y el shutdown corría contra una DB que se cerraba a mitad —
-// "sql: database is closed" en logs y, en patológico, writes
-// parciales (audit olores DD + GGGG).
+// Shutdown cancela bgCtx y espera a que terminen las goroutines
+// detached lanzadas vía SpawnBackground.
 func (s *Service) Shutdown() {
 	s.bgCancel()
 	s.bgWG.Wait()

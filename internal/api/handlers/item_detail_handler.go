@@ -19,14 +19,6 @@ import (
 //
 //	GET /items/{id}            → Get (200 JSON con tu detail JSON
 //	                              completo + gate de content-rating
-//	                              per-profile)
-//	GET /items/{id}/children   → Children (episodios de una series,
-//	                              episodios de una season, etc., con
-//	                              enrich batched de posters + episode
-//	                              counts + overview metadata)
-//
-// Las 10 deps del struct son las que la responsabilidad detail
-// realmente usa — antes vivían en el ItemHandler monolítico con 13
 // deps que cubrían 4 responsabilidades distintas.
 type ItemDetailHandler struct {
 	lib         LibraryService
@@ -78,7 +70,7 @@ func newItemDetailHandler(
 	}
 }
 
-// callerCapRating mirrors the LibraryHandler helper. nil-safe: cuando
+// callerCapRating mirrors el LibraryHandler helper. nil-safe: cuando
 // el handler se cablea sin UserService (test rigs que no se preocupan
 // del rating gate), el cap colapsa a "" y AllowedRating devuelve true
 // para todo.
@@ -350,12 +342,6 @@ func (h *ItemDetailHandler) attachChapters(ctx context.Context, resp map[string]
 // attachSegments escribe markers intro / outro / recap cuando el
 // segment detector ha corrido para este item. El repo puede devolver
 // múltiples filas del mismo kind (sources distintos — chapter y
-// fingerprint pueden ambos disparar); colapsamos a una fila por kind
-// pickeando el highest-confidence source. Ordering estable: recap →
-// intro → outro, así el player puede iterar en orden de playback.
-//
-// Mismo contrato nil/empty que attachChapters: no field at all cuando
-// nada aplica. Devuelve ticks-as-seconds (float) para el frontend,
 // que habla `video.currentTime` nativo.
 func (h *ItemDetailHandler) attachSegments(ctx context.Context, resp map[string]any, id string) {
 	if h.segments == nil {
@@ -454,7 +440,7 @@ func (h *ItemDetailHandler) attachExternalIDs(ctx context.Context, resp map[stri
 // attachSeriesContext walks episode → season → series y folds los
 // breadcrumb fields del show y (cuando el episode no tiene) los
 // image URLs en la respuesta del detail. Best-effort: cualquier DB
-// error along the way deja resp untouched — la página sigue
+// error along el way deja resp untouched — la página sigue
 // renderizando, sólo con la bare episode data que el caller ya tenía.
 func (h *ItemDetailHandler) attachSeriesContext(ctx context.Context, resp map[string]any, seasonID string) {
 	season, err := h.lib.GetItem(ctx, seasonID)
@@ -482,10 +468,6 @@ func (h *ItemDetailHandler) attachSeriesContextFromSeries(ctx context.Context, r
 	// episode/season pueda fall back a ellas cuando su propio still
 	// / poster está missing. Misma wire shape que `poster_url` /
 	// `backdrop_url` / `logo_url` — el cliente trata `series_*`
-	// como la "usa esta si la mía está empty" alternativa.
-	// También fold el backdrop palette de la series en
-	// `backdrop_colors` cuando el item actual no tiene palette
-	// propio (típico para filas season: TMDb les da poster pero no
 	// backdrop, así el gradient leans en la series).
 	seriesImgs, err := h.lib.GetItemImages(ctx, series.ID)
 	if err != nil {

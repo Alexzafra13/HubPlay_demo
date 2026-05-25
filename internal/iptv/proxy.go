@@ -20,22 +20,14 @@ import (
 	"hubplay/internal/clock"
 )
 
-// ChannelHealthReporter lets the proxy flag upstream outcomes without
-// pulling the DB layer into this package. Nil-safe at the call sites:
-// a proxy constructed without a reporter simply doesn't record health
-// (tests that don't care can pass nil; main.go always wires the real
-// one).
-//
-// Success/failure are routed here from the proxy; the implementation
-// is expected to persist quickly (single-row UPDATE) so the hot path
-// isn't stalled.
+// ChannelHealthReporter — interfaz para que el proxy registre
+// outcomes upstream sin importar db. Nil-safe en call sites.
 type ChannelHealthReporter interface {
 	RecordProbeSuccess(ctx context.Context, channelID string)
 	RecordProbeFailure(ctx context.Context, channelID string, err error)
 }
 
-// StreamProxy proxies IPTV streams to clients and counts concurrent listeners
-// per channel (for observability).
+// StreamProxy proxea streams IPTV y cuenta listeners concurrentes por canal.
 type StreamProxy struct {
 	mu       sync.Mutex
 	relays   map[string]*relay // keyed by channel ID
@@ -45,28 +37,22 @@ type StreamProxy struct {
 	breaker  *channelBreaker
 }
 
-// SetHealthReporter wires the reporter after construction so main.go
-// can build the proxy before the IPTV service exists (the reporter
-// lives on the service). Nil is allowed and turns health tracking off.
+// SetHealthReporter cablea el reporter post-construcción. nil desactiva tracking.
 func (p *StreamProxy) SetHealthReporter(reporter ChannelHealthReporter) {
 	p.reporter = reporter
 }
 
-// relay tracks how many concurrent clients are watching a channel. Kept as a
-// listener counter for ActiveRelays/observability; the upstream is NOT shared
-// — each client opens its own connection (trivial to reason about, matches
-// the behaviour of every HLS CDN we talk to).
+// relay — contador de listeners concurrentes per canal.
+// El upstream NO se comparte: cada cliente abre su propia conexión.
 type relay struct {
 	channelID string
 	streamURL string
 	listeners int
 }
 
-// proxyTimeouts bounds upstream interactions so a dead CDN can't pin a
-// goroutine + socket indefinitely. Only the handshake/header phase uses a
-// wall-clock timeout; the body is read as long as the client stays connected
-// (streaming = long-lived by design, but stalls are caught by TCP keepalive
-// + the per-response ResponseHeaderTimeout).
+// proxyTimeouts — timeouts de transporte para que un CDN muerto
+// no bloquee goroutines indefinidamente. Solo handshake/header
+// tienen wall-clock timeout; el body vive mientras el cliente conecte.
 var proxyTimeouts = struct {
 	dial           time.Duration
 	tlsHandshake   time.Duration
@@ -79,7 +65,7 @@ var proxyTimeouts = struct {
 	idleConn:       90 * time.Second,
 }
 
-// NewStreamProxy creates a new stream proxy with sane network timeouts.
+// NewStreamProxy crea un proxy con timeouts de red razonables.
 func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
@@ -98,20 +84,16 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 		breaker: newChannelBreaker(clock.New()),
 		client: &http.Client{
 			Transport: transport,
-			// No client-level timeout — it also clocks the body read, which
-			// would kill every stream after N seconds. Timeouts are at the
-			// transport level above.
+			// Sin timeout de cliente: también contabilizaría la lectura del body,
+			// matando cada stream tras N segundos. Los timeouts son de transporte.
 		},
 	}
 }
 
-// ErrCircuitOpen is returned by the proxy when the per-channel
-// circuit breaker is open and refusing further upstream attempts.
-// Wrapped by a CircuitOpenError that carries the remaining cooldown.
+// ErrCircuitOpen — el circuit breaker del canal está abierto.
 var ErrCircuitOpen = errors.New("iptv: circuit open")
 
-// CircuitOpenError carries the channel and remaining cooldown so the
-// HTTP layer can render a Retry-After header.
+// CircuitOpenError lleva canal y cooldown restante para Retry-After.
 type CircuitOpenError struct {
 	ChannelID  string
 	RetryAfter time.Duration
@@ -124,8 +106,7 @@ func (e *CircuitOpenError) Error() string {
 
 func (e *CircuitOpenError) Unwrap() error { return ErrCircuitOpen }
 
-// writeCircuitOpenResponse renders a 503 with Retry-After. Only safe
-// to call before any other body has been written to w.
+// writeCircuitOpenResponse renderiza 503 con Retry-After.
 func writeCircuitOpenResponse(w http.ResponseWriter, retryAfter time.Duration) {
 	secs := int(math.Ceil(retryAfter.Seconds()))
 	if secs < 1 {
@@ -137,8 +118,7 @@ func writeCircuitOpenResponse(w http.ResponseWriter, retryAfter time.Duration) {
 	_, _ = io.WriteString(w, "upstream unavailable, retry later\n")
 }
 
-// BreakerState exposes the per-channel breaker state for observability
-// (admin dashboard). Returns ("closed", 0) for unknown channels.
+// BreakerState expone el estado del breaker para el dashboard admin.
 func (p *StreamProxy) BreakerState(channelID string) (string, time.Duration) {
 	if p.breaker == nil {
 		return "closed", 0
@@ -146,15 +126,9 @@ func (p *StreamProxy) BreakerState(channelID string) (string, time.Duration) {
 	return p.breaker.State(channelID)
 }
 
-// Breaker returns the per-channel circuit breaker as a ChannelGate so
-// callers in the same wiring (notably the TransmuxManager) can punch
-// the same gate this proxy uses. Returning the interface (not the
-// unexported *channelBreaker) keeps the cross-package contract clean
-// and lets main.go wire one breaker instance into both planes:
-// failures recorded by the transmux session manager visibly close the
-// breaker for subsequent proxy attempts on the same channel, and vice
-// versa, so a dead upstream stops getting hammered from either entry
-// point.
+// Breaker devuelve el circuit breaker como ChannelGate para que
+// el TransmuxManager comparta la misma instancia: fallos en cualquier
+// plano cierran el breaker para ambos.
 func (p *StreamProxy) Breaker() ChannelGate {
 	if p.breaker == nil {
 		return nil
@@ -162,51 +136,37 @@ func (p *StreamProxy) Breaker() ChannelGate {
 	return p.breaker
 }
 
-// reportOutcome records a proxy attempt against the channel's health.
-// Client-initiated cancellations are filtered out: if the user hit
-// stop / closed the tab, the upstream wasn't necessarily broken, and
-// counting that as a failure would pile bogus counts on every channel
-// every time a viewer clicks away. The fetchCtx is the context passed
-// to the fetch; ctx.Err() distinguishes "cancelled" (don't record)
-// from other failures.
+// reportOutcome registra un intento del proxy. Las cancelaciones
+// del cliente se filtran: un usuario que cierra pestaña no implica
+// upstream roto (no contabilizar como fallo).
 func (p *StreamProxy) reportOutcome(ctx, fetchCtx context.Context, channelID string, err error) {
 	if channelID == "" {
 		return
 	}
 	if err == nil {
-		// Tick the circuit breaker before the DB-backed reporter so a
-		// freshly recovered channel closes its breaker even if the
-		// reporter is nil (tests) or slow.
+		// Breaker antes que reporter para cerrar incluso con reporter nil.
 		p.breaker.RecordSuccess(channelID)
 		if p.reporter != nil {
 			p.reporter.RecordProbeSuccess(ctx, channelID)
 		}
 		return
 	}
-	// Client disconnect / explicit cancellation should not pollute the
-	// health counter NOR the breaker. If the fetch context was cancelled
-	// because the REQUEST context was cancelled (the viewer navigated
-	// away) we swallow the outcome — counting it would punish zapping.
+	// Desconexión del cliente no debe contaminar health ni breaker.
 	if errors.Is(err, context.Canceled) || errors.Is(fetchCtx.Err(), context.Canceled) {
 		return
 	}
-	// A DeadlineExceeded we DO count — it means upstream took longer
-	// than our transport timeout, which is a real operational issue.
+	// DeadlineExceeded SÍ cuenta — upstream superó nuestro timeout.
 	p.breaker.RecordFailure(channelID)
 	if p.reporter != nil {
 		p.reporter.RecordProbeFailure(ctx, channelID, err)
 	}
 }
 
-// ErrUnsafeUpstream is returned when a proxy fetch target resolves to a
-// blocked address (loopback, link-local, RFC1918 private, multicast,
-// unspecified). Protects against SSRF from user-supplied proxy URLs and from
-// upstream CDNs that redirect to an internal address.
+// ErrUnsafeUpstream — protección SSRF: la URL resuelve a dirección
+// bloqueada (loopback, link-local, privada, multicast).
 var ErrUnsafeUpstream = errors.New("iptv: unsafe upstream address")
 
-// isSafeUpstream reports whether the given URL resolves entirely to
-// internet-routable addresses. Called before every upstream fetch. Follows
-// the same ruleset as imaging.BlockedIP (the image SafeGet helper).
+// isSafeUpstream verifica que la URL resuelva solo a direcciones públicas.
 func isSafeUpstream(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -219,15 +179,14 @@ func isSafeUpstream(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrUnsafeUpstream)
 	}
-	// If the host is a literal IP we can check it directly without a DNS
-	// lookup; literal IPv6 in URL is bracketed and Hostname() strips it.
+	// IP literal: verificar directo sin DNS.
 	if ip := net.ParseIP(host); ip != nil {
 		if blockedIP(ip) {
 			return fmt.Errorf("%w: %s", ErrUnsafeUpstream, ip)
 		}
 		return nil
 	}
-	// Hostname — resolve and check every returned address.
+	// Hostname — resolver y verificar cada dirección.
 	addrs, err := net.LookupIP(host)
 	if err != nil {
 		return fmt.Errorf("resolve %s: %w", host, err)
@@ -240,28 +199,18 @@ func isSafeUpstream(rawURL string) error {
 	return nil
 }
 
-// blockedIP is overridable at test time so httptest.NewServer (on 127.0.0.1)
-// stays usable. Production path returns true for any address that must not
-// be reached from outbound fetches. Mirrors the logic in imaging.DefaultBlockedIP.
+// blockedIP — overridable en tests para que httptest.NewServer funcione.
 var blockedIP = func(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsUnspecified() || ip.IsMulticast() || ip.IsInterfaceLocalMulticast() ||
 		ip.IsPrivate()
 }
 
-// ProxyStream streams an IPTV channel to the HTTP response writer.
-//
-// Each client opens its own upstream connection; the per-channel counter is
-// only used by ActiveRelays for observability. Previous versions kept a
-// shared context.CancelFunc on the relay but it was never plumbed into the
-// upstream fetch, so disconnects by the first listener would (harmlessly)
-// cancel a context nobody used. That dead code is gone.
+// ProxyStream transmite un canal IPTV al HTTP response writer.
+// Cada cliente abre su propia conexión upstream.
 func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
-	// Circuit breaker gate. If a channel has been failing upstream
-	// repeatedly, refuse THIS request fast (503 + Retry-After) instead
-	// of opening yet another doomed connection. With 100 concurrent
-	// viewers on a dead CDN, this is the difference between 100 retry
-	// loops hammering the upstream and 100 immediate 503s.
+	// Circuit breaker: rechazar rápido (503) en vez de abrir conexiones
+	// condenadas contra un CDN muerto.
 	if allowed, retryAfter := p.breaker.Allow(channelID); !allowed {
 		writeCircuitOpenResponse(w, retryAfter)
 		return &CircuitOpenError{ChannelID: channelID, RetryAfter: retryAfter}
@@ -285,7 +234,7 @@ func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, ch
 	return p.streamWithReconnect(ctx, w, channelID, streamURL)
 }
 
-// streamWithReconnect handles upstream connection with exponential backoff reconnection.
+// streamWithReconnect maneja reconexión upstream con backoff exponencial.
 func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
 	attempt := 0
@@ -317,13 +266,8 @@ func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWr
 	}
 }
 
-// fetchUpstream performs an HTTP GET with proper headers for IPTV streams.
-// Returns the response and the final URL after any redirects.
-//
-// Security: every hop is validated against isSafeUpstream — the initial URL
-// AND every redirect target. Without the redirect check a malicious upstream
-// could 302 us to http://169.254.169.254/ (cloud metadata) or
-// http://127.0.0.1/admin (a local service) and bypass the initial guard.
+// fetchUpstream hace GET con headers IPTV. Cada hop (incluso redirects)
+// se valida contra isSafeUpstream para prevenir SSRF vía 302.
 func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*http.Response, string, error) {
 	if err := isSafeUpstream(targetURL); err != nil {
 		return nil, "", err
@@ -333,20 +277,18 @@ func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*htt
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 
-	// Set headers that many IPTV CDNs expect
+	// Headers que muchos CDNs IPTV esperan
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Connection", "keep-alive")
 
-	// Set Referer from the origin of the URL (some CDNs check this)
+	// Referer desde el origin de la URL (algunos CDNs lo verifican)
 	if parsed, err := url.Parse(targetURL); err == nil {
 		req.Header.Set("Referer", parsed.Scheme+"://"+parsed.Host+"/")
 		req.Header.Set("Origin", parsed.Scheme+"://"+parsed.Host)
 	}
 
-	// Route redirects through a validator so we don't follow a CDN into a
-	// private-range target. Uses the request-scoped client because the
-	// shared p.client has no redirect policy installed.
+	// Validar redirects para no seguir a CDN hacia rango privado.
 	redirectingClient := *p.client
 	redirectingClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -365,8 +307,7 @@ func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*htt
 		return nil, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 
-	// Get the final URL after redirects (Go's http.Client follows them automatically).
-	// This is crucial for resolving relative URLs in HLS playlists.
+	// URL final post-redirects: crucial para resolver URLs relativas en HLS.
 	finalURL := targetURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
@@ -375,9 +316,9 @@ func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*htt
 	return resp, finalURL, nil
 }
 
-// looksLikeHLSPlaylist checks if the body content looks like an m3u8 playlist.
+// looksLikeHLSPlaylist verifica si el cuerpo parece un playlist m3u8.
 func looksLikeHLSPlaylist(body []byte) bool {
-	// Check first 1KB for HLS markers
+	// Buscar marcadores HLS en el primer 1KB
 	check := body
 	if len(check) > 1024 {
 		check = check[:1024]
@@ -387,7 +328,7 @@ func looksLikeHLSPlaylist(body []byte) bool {
 		bytes.Contains(check, []byte("#EXTINF:"))
 }
 
-// isHLSContentType checks if the content type indicates an HLS playlist.
+// isHLSContentType verifica si el content-type indica playlist HLS.
 func isHLSContentType(contentType string) bool {
 	ct := strings.ToLower(contentType)
 	return strings.Contains(ct, "mpegurl") ||
@@ -395,28 +336,24 @@ func isHLSContentType(contentType string) bool {
 		strings.Contains(ct, "x-mpegurl")
 }
 
-// isHLSURL checks if the URL looks like an HLS playlist.
+// isHLSURL verifica si la URL parece un playlist HLS.
 func isHLSURL(streamURL string) bool {
 	lower := strings.ToLower(streamURL)
-	// Strip query params for extension check
+	// Quitar query params para verificar extensión
 	if idx := strings.IndexByte(lower, '?'); idx >= 0 {
 		lower = lower[:idx]
 	}
 	return strings.HasSuffix(lower, ".m3u8") || strings.HasSuffix(lower, ".m3u")
 }
 
-// IsHLSURL is the exported view of isHLSURL for code outside the
-// proxy that needs the same dispatch decision (the channel-stream
-// handler uses it to choose between proxy passthrough and HLS
-// transmux). Keeping the lowercase form private inside the proxy
-// preserves the existing internal call sites unchanged.
+// IsHLSURL — versión exportada para código fuera del proxy (el handler
+// de channel-stream la usa para decidir entre passthrough y transmux).
 func IsHLSURL(streamURL string) bool { return isHLSURL(streamURL) }
 
-// hlsURLPattern matches absolute URLs in m3u8 playlists.
+// hlsURLPattern matchea URLs absolutas en playlists m3u8.
 var hlsURLPattern = regexp.MustCompile(`(?i)(https?://[^\s\r\n"]+)`)
 
-// rewriteHLSPlaylist rewrites URLs in an m3u8 playlist to route through our proxy.
-// baseURL is the final URL of the playlist (after redirects) used to resolve relative paths.
+// rewriteHLSPlaylist reescribe URLs del m3u8 para enrutar por nuestro proxy.
 func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 	base, err := url.Parse(baseURL)
 	if err != nil {
@@ -434,14 +371,14 @@ func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 			continue
 		}
 
-		// Handle EXT tags that may contain URIs
+		// Procesar tags EXT que pueden contener URIs
 		if strings.HasPrefix(trimmed, "#") {
 			rewritten := line
-			// First handle URI="..." attributes (may contain relative paths)
+			// Primero URI="..." (puede contener paths relativos)
 			if strings.Contains(strings.ToUpper(rewritten), "URI=\"") {
 				rewritten = rewriteURIAttribute(rewritten, base, proxyPrefix)
 			}
-			// Then rewrite any remaining absolute URLs
+			// Luego reescribir URLs absolutas restantes
 			rewritten = hlsURLPattern.ReplaceAllStringFunc(rewritten, func(u string) string {
 				if strings.Contains(u, "/proxy?url=") {
 					return u
@@ -452,7 +389,7 @@ func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 			continue
 		}
 
-		// Non-comment line = segment or playlist URL
+		// Línea no-comentario = URL de segmento o playlist
 		resolved := resolveURL(base, trimmed)
 		result = append(result, proxyPrefix+url.QueryEscape(resolved))
 	}
@@ -460,7 +397,7 @@ func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 	return []byte(strings.Join(result, "\n"))
 }
 
-// resolveURL resolves a potentially relative URL against a base URL.
+// resolveURL resuelve una URL potencialmente relativa contra la base.
 func resolveURL(base *url.URL, rawURL string) string {
 	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
 		return rawURL
@@ -472,30 +409,28 @@ func resolveURL(base *url.URL, rawURL string) string {
 	return base.ResolveReference(ref).String()
 }
 
-// uriAttrPattern matches URI="value" in EXT tags (case-insensitive).
+// uriAttrPattern matchea URI="value" en tags EXT (case-insensitive).
 var uriAttrPattern = regexp.MustCompile(`(?i)URI="([^"]+)"`)
 
-// rewriteURIAttribute rewrites URI="..." attributes in EXT tags.
+// rewriteURIAttribute reescribe atributos URI="..." en tags EXT.
 func rewriteURIAttribute(line string, base *url.URL, proxyPrefix string) string {
 	return uriAttrPattern.ReplaceAllStringFunc(line, func(match string) string {
-		// Extract the URI value (skip 'URI="' prefix and '"' suffix)
+		// Extraer valor URI (saltar prefijo 'URI="' y sufijo '"')
 		inner := match[5 : len(match)-1]
 		if !strings.HasPrefix(inner, "http://") && !strings.HasPrefix(inner, "https://") {
 			inner = resolveURL(base, inner)
 		}
 		// Preserve original case of URI=
-		prefix := match[:4] // "URI=" (preserving case)
+		prefix := match[:4] // "URI=" (preservar case)
 		return prefix + `"` + proxyPrefix + url.QueryEscape(inner) + `"`
 	})
 }
 
-// streamOnceWithChannel connects to upstream. For HLS content, rewrites the playlist.
+// streamOnceWithChannel conecta upstream. Para HLS, reescribe el playlist.
 func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	resp, finalURL, err := p.fetchUpstream(ctx, streamURL)
-	// Record the outcome against the channel's health. Only this path
-	// reports — ProxyURL (HLS segments) fires dozens of times per minute
-	// and would flood the DB; the master playlist fetch is the one-shot
-	// signal that matters for "is this upstream reachable".
+	// Solo este path reporta health — ProxyURL (segmentos HLS) es
+	// demasiado frecuente y floodearía la DB.
 	p.reportOutcome(context.Background(), ctx, channelID, err)
 	if err != nil {
 		return err
@@ -507,12 +442,12 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 		ct = "video/mp2t"
 	}
 
-	// For HLS: detect by content-type, URL extension, or body content
+	// HLS: detectar por content-type, extensión URL, o contenido
 	if channelID != "" && (isHLSContentType(ct) || isHLSURL(finalURL)) {
 		return p.serveRewrittenPlaylist(w, resp, channelID, finalURL, ct)
 	}
 
-	// For streams with unknown content-type, peek at the body to check for HLS
+	// Para content-type ambiguo, peek del body para detectar HLS
 	if channelID != "" && isAmbiguousStreamCT(ct) {
 		peek, isHLS, peekErr := peekForHLS(resp.Body)
 		if peekErr != nil {
@@ -522,7 +457,7 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 			return p.absorbAndRewriteHLS(w, peek, resp.Body, channelID, finalURL)
 		}
 
-		// Not HLS — write the peeked data and continue streaming.
+		// No es HLS — escribir los datos ya leídos y seguir.
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		w.Header().Set("Connection", "keep-alive")
@@ -535,7 +470,7 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 		return p.pipeStream(w, resp.Body)
 	}
 
-	// Otherwise, pipe raw bytes (TS streams, segments, etc.)
+	// Caso contrario: pipe de bytes crudos (TS, segmentos, etc.)
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Connection", "keep-alive")
@@ -543,9 +478,8 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 	return p.pipeStream(w, resp.Body)
 }
 
-// isAmbiguousStreamCT reports whether the Content-Type is generic enough
-// that we should peek at the body to decide if it's actually an HLS
-// playlist served under a non-HLS label (common on free IPTV CDNs).
+// isAmbiguousStreamCT — content-type tan genérico que debemos peek
+// el body (común en CDNs IPTV gratuitos que sirven HLS con label erróneo).
 func isAmbiguousStreamCT(ct string) bool {
 	switch ct {
 	case "video/mp2t", "application/octet-stream", "text/plain", "binary/octet-stream":
@@ -554,10 +488,8 @@ func isAmbiguousStreamCT(ct string) bool {
 	return false
 }
 
-// peekForHLS reads up to 512 bytes from body and reports whether those
-// bytes look like an HLS playlist. Returns the bytes consumed so the
-// caller can either keep reading (HLS path — concatenate with the rest)
-// or write them first then stream the remainder (raw path).
+// peekForHLS lee hasta 512 bytes y reporta si parece HLS.
+// Devuelve los bytes consumidos para que el caller los use.
 func peekForHLS(body io.Reader) (peek []byte, isHLS bool, err error) {
 	buf := make([]byte, 512)
 	n, readErr := io.ReadAtLeast(body, buf, 1)
@@ -568,9 +500,8 @@ func peekForHLS(body io.Reader) (peek []byte, isHLS bool, err error) {
 	return peek, looksLikeHLSPlaylist(peek), nil
 }
 
-// absorbAndRewriteHLS reads the rest of the body, prepends any
-// already-peeked bytes, and serves the whole thing as a rewritten
-// HLS playlist.
+// absorbAndRewriteHLS lee el resto del body, prepende los bytes
+// peek y sirve como playlist HLS reescrito.
 func (p *StreamProxy) absorbAndRewriteHLS(w http.ResponseWriter, head []byte, tail io.Reader, channelID, baseURL string) error {
 	rest, err := io.ReadAll(io.LimitReader(tail, 2*1024*1024))
 	if err != nil {
@@ -580,7 +511,7 @@ func (p *StreamProxy) absorbAndRewriteHLS(w http.ResponseWriter, head []byte, ta
 	return p.serveRewrittenPlaylistBody(w, body, channelID, baseURL)
 }
 
-// pipeStream copies data from reader to HTTP response with flushing.
+// pipeStream copia datos del reader al HTTP response con flush.
 func (p *StreamProxy) pipeStream(w http.ResponseWriter, body io.Reader) error {
 	flusher, canFlush := w.(http.Flusher)
 	buf := make([]byte, 32*1024)
@@ -589,7 +520,7 @@ func (p *StreamProxy) pipeStream(w http.ResponseWriter, body io.Reader) error {
 		n, readErr := body.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return nil // Client disconnected
+				return nil // Cliente desconectado
 			}
 			if canFlush {
 				flusher.Flush()
@@ -604,7 +535,7 @@ func (p *StreamProxy) pipeStream(w http.ResponseWriter, body io.Reader) error {
 	}
 }
 
-// serveRewrittenPlaylist reads the full m3u8 body, rewrites URLs, and serves it.
+// serveRewrittenPlaylist lee el m3u8 completo, reescribe URLs y lo sirve.
 func (p *StreamProxy) serveRewrittenPlaylist(w http.ResponseWriter, resp *http.Response, channelID, finalURL, ct string) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 	if err != nil {
@@ -621,7 +552,7 @@ func (p *StreamProxy) serveRewrittenPlaylist(w http.ResponseWriter, resp *http.R
 	return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
 }
 
-// serveRewrittenPlaylistBody rewrites and serves an m3u8 playlist body.
+// serveRewrittenPlaylistBody reescribe y sirve un body m3u8.
 func (p *StreamProxy) serveRewrittenPlaylistBody(w http.ResponseWriter, body []byte, channelID, baseURL string) error {
 	proxyPrefix := "/api/v1/channels/" + channelID + "/proxy?url="
 	rewritten := rewriteHLSPlaylist(body, baseURL, proxyPrefix)
@@ -640,12 +571,10 @@ func (p *StreamProxy) serveRewrittenPlaylistBody(w http.ResponseWriter, body []b
 	return err
 }
 
-// ProxyURL fetches an arbitrary upstream URL and pipes the response to the client.
-// Used for proxying HLS segments and sub-playlists.
+// ProxyURL descarga una URL upstream y pipe al cliente.
+// Para segmentos HLS y sub-playlists.
 func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, channelID, rawURL string) error {
-	// Circuit breaker gate — same logic as ProxyStream. Segment
-	// fetches fire dozens of times per minute per viewer; on a dead
-	// CDN this saves the most network noise.
+	// Circuit breaker — misma lógica que ProxyStream.
 	if allowed, retryAfter := p.breaker.Allow(channelID); !allowed {
 		writeCircuitOpenResponse(w, retryAfter)
 		return &CircuitOpenError{ChannelID: channelID, RetryAfter: retryAfter}
@@ -656,7 +585,7 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 		return fmt.Errorf("invalid url: %w", err)
 	}
 
-	// Validate it's an HTTP(S) URL
+	// Validar que sea URL HTTP(S)
 	parsed, err := url.Parse(upstream)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("invalid upstream URL scheme")
@@ -667,18 +596,11 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 	resp, finalURL, err := p.fetchUpstream(ctx, upstream)
 	if err != nil {
 		p.logger.Warn("proxy URL fetch failed", "channel", channelID, "url", upstream, "error", err)
-		// Flag the channel for the health system. Without this, a
-		// channel whose master playlist works but whose variants fail
-		// upstream (Pluto stitcher with bad embedPartner, expired
-		// session tokens, geo-blocked CDN edges …) keeps showing as
-		// "ok" forever because ProxyStream never re-runs after the
-		// initial handshake. We do NOT record success on the happy
-		// path of this handler — segment 200s don't prove the channel
-		// is healthy, and counting them would let a flaky variant
-		// reset the counter between failures. The prober's next pass
-		// is the canonical "healthy again" signal.
-		// Skip ctx-cancel — that's the user changing channel, not
-		// upstream rot, and counting it would punish zapping.
+		// Registrar fallo en health: sin esto, un canal cuyo master
+		// funciona pero cuyos variants fallan quedaría como "ok"
+		// indefinidamente. NO registramos success de segmentos (el
+		// prober es la señal canónica de "sano de nuevo").
+		// Skip ctx-cancel: el usuario cambió de canal, no es fallo upstream.
 		if !errors.Is(ctx.Err(), context.Canceled) {
 			// Breaker tracks segment-level failures: a fetch that
 			// reaches the network and 5xx's means the URL is dead
@@ -749,7 +671,7 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 		return err
 	}
 
-	// Raw segment — pipe through
+	// Segmento crudo — pipe directo
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -777,22 +699,16 @@ func (p *StreamProxy) removeListener(channelID string) {
 	}
 }
 
-// ActiveRelays returns the number of active stream relays.
+// ActiveRelays devuelve el número de relays activos.
 func (p *StreamProxy) ActiveRelays() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.relays)
 }
 
-// ClearRelays vacía el map de contadores de listeners por canal.
-// NO drena las goroutines `ProxyStream` / `streamWithReconnect` en
-// vuelo: éstas se cancelan vía el ctx del request HTTP cuando
-// `http.Server.Shutdown` corta los requests del cliente.
-//
-// Antes este método se llamaba `Shutdown`, lo cual sugería falsamente
-// que aquí ocurría el drain — el drain real vive en el http.Server
-// del binario. Renombrado para alinear nombre con efecto (audit
-// olor EE).
+// ClearRelays vacía el map de listeners. NO drena goroutines en
+// vuelo: se cancelan vía el ctx del request cuando http.Server.Shutdown
+// corta los requests.
 func (p *StreamProxy) ClearRelays() {
 	p.mu.Lock()
 	for id := range p.relays {

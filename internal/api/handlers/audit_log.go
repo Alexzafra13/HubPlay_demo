@@ -22,22 +22,6 @@ type AuditLogStore interface {
 // unificado (PR5).
 //
 //   GET /api/v1/admin/audit-log
-//     query params:
-//       type   string  prefix-matching ("auth." engancha todos los
-//                      eventos de auth). vacío = sin filtro.
-//       actor  string  user id exacto.
-//       from   string  RFC3339, lower bound inclusive.
-//       to     string  RFC3339, upper bound inclusive.
-//       q      string  search libre (target_id + payload + ip + ua).
-//       limit  int     default 50, cap 500.
-//       offset int     paginación.
-//
-//   GET /api/v1/admin/audit-log/types
-//     devuelve la lista de event_type distintos presentes en la
-//     tabla, para que el frontend pueda poblar el dropdown sin
-//     hardcodear la lista (que crece cada vez que un productor
-//     añade un evento).
-//
 // Gate: en el router, owner-OR-can_view_audit.
 type AuditLogHandler struct {
 	store  AuditLogStore
@@ -55,12 +39,6 @@ func NewAuditLogHandler(store AuditLogStore, logger *slog.Logger) *AuditLogHandl
 //
 // La respuesta:
 //   {
-//     "data": {
-//       "rows":   [ {id, actor_user_id, event_type, ...}, ... ],
-//       "total":  1234,
-//       "limit":  50,
-//       "offset": 0
-//     }
 //   }
 func (h *AuditLogHandler) Query(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

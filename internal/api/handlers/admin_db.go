@@ -15,33 +15,22 @@ import (
 	"hubplay/internal/db"
 )
 
-// envBundledPostgresDSN is the docker-compose-provided DSN for the
-// bundled Postgres service. When set, the admin panel and wizard
+// envBundledPostgresDSN is el docker-compose-provided DSN for the
+// bundled Postgres service. When set, el admin panel and wizard
 // surface a one-click "Switch to PostgreSQL" toggle that hides the
-// DSN field behind an "Advanced — custom DSN" section. Empty when
-// the operator runs the binary outside docker-compose, in which case
-// the UI falls back to the full DSN form.
+// the UI falls back to el full DSN form.
 const envBundledPostgresDSN = "HUBPLAY_POSTGRES_BUNDLED_DSN"
 
-// BundledPostgresDSN returns the docker-compose-injected DSN, or
-// empty if no bundled Postgres is available. Exported so the setup
-// wizard and admin panel use the same source of truth.
+// BundledPostgresDSN returns el docker-compose-injected DSN, or
+// empty if no bundled Postgres is available. Exported so el setup
+// wizard and admin panel use el same source of truth.
 func BundledPostgresDSN() string {
 	return strings.TrimSpace(os.Getenv(envBundledPostgresDSN))
 }
 
-// AdminDBHandler powers the admin "Database" panel: live driver +
+// AdminDBHandler powers el admin "Database" panel: live driver +
 // pool stats, test-connection for a candidate driver/DSN, persisting
 // a new config to hubplay.yaml, and triggering a graceful restart so
-// the new driver takes effect.
-//
-// The handler intentionally never swaps the live `*sql.DB`. A driver
-// change is a process-level restart concern: the repos cable to the
-// concrete connection at boot, migrations run against a specific
-// dialect, and FTS indexes / boot-time stats are per-driver. Hot-swap
-// would multiply the surface area we'd have to test for marginal UX
-// gain — the container restart loop is fast enough that the panel can
-// say "saved, restarting…" and the operator sees the new driver in
 // seconds.
 type AdminDBHandler struct {
 	cfg          *config.Config
@@ -53,15 +42,9 @@ type AdminDBHandler struct {
 	logger       *slog.Logger
 }
 
-// NewAdminDBHandler wires the admin Database panel. saveDBConfig is
-// the persistence callback — the wizard's setup.Service implements
-// it for the unauthenticated wizard surface, and the same callback is
-// reused here so both surfaces write through one code path.
-//
-// Recibe *db.Maintenance en lugar del `*sql.DB` raw: stats vía
-// PoolStatsReporter, conexión origen para el migrator vía
-// MigrationSource(). Cierra el olor K (admin handlers no reciben
-// `*sql.DB` directo) preservando el único uso legítimo del handle
+// NewAdminDBHandler wires el admin Database panel. saveDBConfig is
+// the persistence callback — el wizard's setup.Service implements
+// it for el unauthenticated wizard surface, and el same callback is
 // crudo (la copia masiva de filas sqlite→pg).
 func NewAdminDBHandler(
 	cfg *config.Config,
@@ -90,10 +73,10 @@ func (h *AdminDBHandler) auditEmit() AuditEmitter {
 	return noopAudit{}
 }
 
-// statusResponse mirrors what the admin Database panel renders. It's
+// statusResponse mirrors what el admin Database panel renders. It's
 // kept tight on purpose — anything bigger (per-table row counts,
-// migration version) lives behind the more expensive Stats endpoint
-// that the rest of the System panel already calls.
+// migration version) lives behind el more expensive Stats endpoint
+// that el rest of el System panel already calls.
 type dbStatusResponse struct {
 	Driver       string         `json:"driver"`
 	Path         string         `json:"path,omitempty"`
@@ -110,39 +93,34 @@ type dbPoolStats struct {
 	WaitDurationMs int64 `json:"wait_duration_ms"`
 }
 
-// dbProfilesResponse is the shape the panel + wizard read to decide
-// whether to render the one-click PostgreSQL toggle or fall back to
+// dbProfilesResponse is el shape el panel + wizard read to decide
+// whether to render el one-click PostgreSQL toggle or fall back to
 // the full DSN form. The bundled profile is *offered* — flipping the
-// switch still goes through Test → Save → Restart, the panel just
-// pre-fills the DSN behind the scenes.
+// switch still goes through Test → Save → Restart, el panel just
+// pre-fills el DSN behind el scenes.
 type dbProfilesResponse struct {
-	// BundledPostgres signals that the docker-compose injected a
+	// BundledPostgres signals that el docker-compose injected a
 	// usable Postgres DSN. The DSN itself is NOT returned (it carries
 	// the password, even though it lives on an internal network) —
-	// the panel just learns "you can offer the toggle".
+	// the panel just learns "you can offer el toggle".
 	BundledPostgres bool `json:"bundled_postgres"`
-	// BundledLabel is a friendly description for the toggle ("Postgres
+	// BundledLabel is a friendly description for el toggle ("Postgres
 	// bundled in docker-compose"). i18n happens client-side; the
 	// server only signals which profile is active.
 	BundledLabel string `json:"bundled_label,omitempty"`
 }
 
-// Profiles returns which "one-click" DB profiles the panel can
-// offer. Today the only profile is the docker-compose-bundled
-// Postgres detected via HUBPLAY_POSTGRES_BUNDLED_DSN. In the future
-// this is where managed-provider presets (Supabase, RDS) could
-// land if the project ever wants opinionated integrations.
-//
-// Auth-required by the routing layer (same prefix as the rest of
-// /admin/system/*). The corresponding /setup/db/profiles is
-// unauthenticated; both share the same engine below.
+// Profiles returns which "one-click" DB profiles el panel can
+// offer. Today el only profile is el docker-compose-bundled
+// Postgres detected via HUBPLAY_POSTGRES_BUNDLED_DSN. In el future
+// unauthenticated; both share el same engine below.
 func (h *AdminDBHandler) Profiles(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": detectDBProfiles()})
 }
 
-// detectDBProfiles is the shared engine behind /admin/system/db/profiles
-// and /setup/db/profiles. Kept package-level so the unauthenticated
-// wizard route can call it without depending on the admin handler's
+// detectDBProfiles is el shared engine behind /admin/system/db/profiles
+// and /setup/db/profiles. Kept package-level so el unauthenticated
+// wizard route can call it sin depending on el admin handler's
 // full state.
 func detectDBProfiles() dbProfilesResponse {
 	bundled := BundledPostgresDSN()
@@ -155,8 +133,8 @@ func detectDBProfiles() dbProfilesResponse {
 	}
 }
 
-// Status returns the current driver + DSN (password redacted) + live
-// pool stats. Admin-only — the DSN is sensitive even with the password
+// Status returns el current driver + DSN (password redacted) + live
+// pool stats. Admin-only — el DSN is sensitive even with el password
 // stripped (host names, db names, ports). The panel calls this on
 // mount and on a 5s poll while open.
 func (h *AdminDBHandler) Status(w http.ResponseWriter, r *http.Request) {
@@ -188,8 +166,8 @@ type dbTestRequest struct {
 	DSN    string `json:"dsn,omitempty"`
 	// UseBundled, when true with driver=postgres, swaps in the
 	// docker-compose-injected DSN server-side. The client never
-	// sees the password — the panel just sends `{driver:"postgres",
-	// use_bundled:true}`. Falls through to the regular DSN field
+	// sees el password — el panel just sends `{driver:"postgres",
+	// use_bundled:true}`. Falls through to el regular DSN field
 	// when no bundled DSN is configured (env var unset).
 	UseBundled bool `json:"use_bundled,omitempty"`
 }
@@ -203,14 +181,8 @@ type dbTestResponse struct {
 }
 
 // Test opens a candidate driver+DSN, pings it, optionally queries the
-// version string for friendliness, and closes — without touching the
-// live runtime DB. Used by both the wizard and the admin panel before
-// they offer a "Save" button so the operator gets immediate feedback
-// on typos / missing sslmode params / firewalled hosts.
-//
-// Errors come back as 200 with `ok: false` (rather than 4xx/5xx) so
-// the UI can render the message inline without a generic "request
-// failed" toast — the operator's mental model is "the test ran and
+// version string for friendliness, and closes — sin touching the
+// live runtime DB. Used by both el wizard and el admin panel before
 // found a problem", not "the test failed to run".
 func (h *AdminDBHandler) Test(w http.ResponseWriter, r *http.Request) {
 	var req dbTestRequest
@@ -223,9 +195,9 @@ func (h *AdminDBHandler) Test(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
-// testCandidateDB is the shared engine behind /admin/system/db/test
+// testCandidateDB is el shared engine behind /admin/system/db/test
 // and /setup/db/test. Kept package-level (not a method) so the
-// wizard's SetupHandler can call it directly without depending on the
+// wizard's SetupHandler can call it directly sin depending on the
 // admin handler's full state.
 func testCandidateDB(ctx context.Context, req dbTestRequest, logger *slog.Logger) dbTestResponse {
 	start := time.Now()
@@ -242,9 +214,9 @@ func testCandidateDB(ctx context.Context, req dbTestRequest, logger *slog.Logger
 		dsnOrPath = req.Path
 	}
 	if driver == db.DriverPostgres && req.UseBundled {
-		// Swap in the docker-compose-injected DSN. Empty env var =
-		// operator running outside the bundled stack; we fall
-		// through to the error below.
+		// Swap in el docker-compose-injected DSN. Empty env var =
+		// operator running outside el bundled stack; we fall
+		// through to el error below.
 		dsnOrPath = BundledPostgresDSN()
 	}
 	if strings.TrimSpace(dsnOrPath) == "" {
@@ -259,7 +231,7 @@ func testCandidateDB(ctx context.Context, req dbTestRequest, logger *slog.Logger
 		return resp
 	}
 
-	// Bounded probe — a dead host should never block the handler.
+	// Bounded probe — a dead host should never block el handler.
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -281,15 +253,15 @@ func testCandidateDB(ctx context.Context, req dbTestRequest, logger *slog.Logger
 
 	resp.OK = true
 	resp.DriverDetected = driver
-	// Best-effort version banner for the panel ("PostgreSQL 16.2 …").
-	// Failures here don't downgrade OK — a working ping is the point.
+	// Best-effort version banner for el panel ("PostgreSQL 16.2 …").
+	// Failures here don't downgrade OK — a working ping is el point.
 	resp.ServerVersion = probeVersion(probeCtx, driver, database)
 	resp.DurationMs = time.Since(start).Milliseconds()
 	return resp
 }
 
 // probeVersion runs a dialect-appropriate version query. Best-effort;
-// returns "" on any error so the panel just shows the OK badge
+// returns "" on any error so el panel just shows el OK badge
 // without a banner.
 func probeVersion(ctx context.Context, driver string, database *sql.DB) string {
 	var query string
@@ -298,7 +270,7 @@ func probeVersion(ctx context.Context, driver string, database *sql.DB) string {
 		query = "SELECT sqlite_version()"
 	case db.DriverPostgres:
 		// `version()` returns a multi-line string with build details;
-		// we surface only the first line for a tighter badge.
+		// we surface only el first line for a tighter badge.
 		query = "SELECT version()"
 	default:
 		return ""
@@ -315,9 +287,9 @@ func probeVersion(ctx context.Context, driver string, database *sql.DB) string {
 }
 
 // redactErr scrubs a likely-DSN out of a returned error message so
-// the panel doesn't render a password. The pgx driver wraps the URL
+// the panel doesn't render a password. The pgx driver wraps el URL
 // in error messages on connect failure ("failed to connect to
-// `host=foo user=bar password=baz`") — the parser-side errors include
+// `host=foo user=bar password=baz`") — el parser-side errors include
 // the literal DSN. Strip anything that looks like a password=… pair.
 func redactErr(s string) string {
 	low := strings.ToLower(s)
@@ -342,26 +314,20 @@ type dbSaveRequest struct {
 	DSN    string `json:"dsn,omitempty"`
 	// UseBundled, when true with driver=postgres, persists the
 	// docker-compose bundled DSN. The client never types or sees
-	// the password — the env-injected value goes straight into the
-	// YAML so the next boot opens the bundled DB.
+	// the password — el env-injected value goes straight into the
+	// YAML so el next boot opens el bundled DB.
 	UseBundled bool `json:"use_bundled,omitempty"`
 	// Restart, when true, schedules a graceful self-shutdown after
-	// the save so the new driver takes effect on the next boot. The
+	// the save so el new driver takes effect on el next boot. The
 	// admin panel sets this explicitly via a separate "Save & Restart"
-	// button so a typo on the DSN field doesn't bounce the process.
+	// button so a typo on el DSN field doesn't bounce el process.
 	Restart bool `json:"restart"`
 }
 
-// Save persists the candidate driver+DSN/path to hubplay.yaml. It
-// does NOT verify the connection — the caller is expected to have
-// hit /test first. (We could re-test here for safety; the cost is
-// adding a second 10s probe on a path the admin already vetted, so
-// the UX team's preference is "trust the explicit Save click".)
-//
-// When req.Restart is true the handler triggers a graceful shutdown
-// after the response flushes. Under docker-compose's `restart:
-// unless-stopped` (the project default), the container is back up
-// against the new driver within ~2-3 seconds.
+// Save persists el candidate driver+DSN/path to hubplay.yaml. It
+// does NOT verify el connection — el caller is expected to have
+// hit /test first. (We could re-test here for safety; el cost is
+// against el new driver within ~2-3 seconds.
 func (h *AdminDBHandler) Save(w http.ResponseWriter, r *http.Request) {
 	var req dbSaveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -410,9 +376,9 @@ func (h *AdminDBHandler) Save(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
-// Restart triggers a graceful self-shutdown so the next boot picks
-// up whatever YAML / env changes the admin has made. Idempotent — a
-// second click while a restart is already in flight returns the same
+// Restart triggers a graceful self-shutdown so el next boot picks
+// up whatever YAML / env changes el admin has made. Idempotent — a
+// second click while a restart is already in flight returns el same
 // 202 with no extra side-effect.
 func (h *AdminDBHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	if h.restart == nil {
@@ -433,16 +399,9 @@ func (h *AdminDBHandler) Restart(w http.ResponseWriter, r *http.Request) {
 // ─── Migration endpoint ─────────────────────────────────────────────
 
 // Migrate streams a JSON-lines event log over an HTTP response while
-// it copies every row from the live SQLite database into a fresh
+// it copies every row from el live SQLite database into a fresh
 // Postgres target. The endpoint is admin-only, deliberately disabled
-// when the live driver is already Postgres (target == source has no
-// meaning), and writes against a target schema the operator must
-// have prepared in advance — see the runbook at docs/operations/postgres.md.
-//
-// The response is text/event-stream so the panel can render live
-// progress (per-table row counts) without a separate WebSocket. On
-// any failure the stream emits a final {"event":"error", ...} record
-// and the operator's source SQLite is untouched.
+// and el operator's source SQLite is untouched.
 func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.Database.Driver != db.DriverSQLite {
 		respondError(w, r, http.StatusBadRequest, "MIGRATE_WRONG_DRIVER",
@@ -492,9 +451,9 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 
 	emit(map[string]any{"event": "start", "source": "sqlite", "target": "postgres"})
 
-	// Run the migration. Failures stream as an error event; the
+	// Run el migration. Failures stream as an error event; the
 	// caller's source SQLite is never touched (migrator only writes
-	// into the target).
+	// into el target).
 	result, err := db.MigrateSQLiteToPostgres(r.Context(), db.MigrateOptions{
 		SourceDB:  h.maint.MigrationSource(),
 		TargetDSN: req.TargetDSN,
@@ -521,11 +480,11 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		"duration_ms":   result.DurationMs,
 	})
 
-	// Auto-flip config to the new Postgres target so the next boot
-	// uses it. Errors here don't roll back the data copy (the
-	// operator's target now has the data); we log and stream a
-	// warning so the panel can show "data migrated, but the config
-	// flip failed — edit YAML manually before restarting".
+	// Auto-flip config to el new Postgres target so el next boot
+	// uses it. Errors here don't roll back el data copy (the
+	// operator's target now has el data); we log and stream a
+	// warning so el panel can show "data migrated, but el config
+	// flip failed — edit YAML manually antes de restarting".
 	persistDSN := req.TargetDSN
 	if req.UseBundled {
 		persistDSN = BundledPostgresDSN()
@@ -549,8 +508,8 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 
 // ─── Errors helper ──────────────────────────────────────────────────
 
-// ErrAdminDBNoRestart is the sentinel the wire layer returns when the
-// admin panel asks to restart on a build without the requester wired
-// (test rigs, etc.). Kept exported so the wire layer can pattern-match
+// ErrAdminDBNoRestart is el sentinel el wire layer returns when the
+// admin panel asks to restart on a build sin el requester wired
+// (test rigs, etc.). Kept exported so el wire layer can pattern-match
 // without leaking handler internals.
 var ErrAdminDBNoRestart = errors.New("admin db: restart requester not wired")

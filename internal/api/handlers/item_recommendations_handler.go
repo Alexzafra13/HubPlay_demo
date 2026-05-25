@@ -38,11 +38,6 @@ func newRecommendationsHandler(lib LibraryService, externalIDs ExternalIDsReposi
 // (powered by `/movie/{id}/recommendations` o `/tv/{id}/recommendations`
 // de TMDb). Cada candidato se cross-referencia con la library local
 // para que el frontend pueda marcar "in library" con deep-link al
-// item local, mientras genuinamente-nuevos surface como posters
-// externos.
-//
-// Lista vacía es respuesta válida (item sin match TMDb, o TMDb sin
-// recomendaciones). 503 cuando no hay provider — el frontend oculta
 // el rail en ambos casos.
 func (h *RecommendationsHandler) Recommendations(w http.ResponseWriter, r *http.Request) {
 	if h.providers == nil {

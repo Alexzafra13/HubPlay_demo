@@ -1,29 +1,6 @@
-// Package model contains the iptv-domain types (Channel, EPGProgram,
-// IPTVScheduledJob, etc.) the rest of the codebase consumes.
-//
-// Vive en su propio sub-paquete leaf — en lugar de en `internal/iptv/`
-// directo — para romper el ciclo de dependencias:
-//
-//   internal/iptv         imports internal/db          (for repo concretes)
-//   internal/db           imports internal/iptv/model  (for return types)
-//   internal/iptv         imports internal/iptv/model  (for types it also uses)
-//
-// `iptv/model` es un leaf (sin imports más allá de stdlib) → ciclo
-// imposible. Mismo patrón que `internal/auth/model/` (sub-bloque
-// auth de Iter. 3 ya cerrado en commit ac60ba0).
-//
-// Cierra "Opción B" del olor A para el feature iptv: tipos del
-// dominio viven en el feature, no en `internal/db/`. Audit
-// 2026-05-14 § F2 (olor A) + § Plan de intervención final
-// (Iteración 3 · Migración Opción B incremental).
-//
-// Cero cambios de wire HTTP, de tabla SQL ni de migraciones — los
-// tipos son copia verbatim de las definiciones previas en
-// `internal/db/{channel,channel_favorites,channel_overrides,epg,
-// library_channel_order,library_epg_sources,user_channel_order,
-// iptv_schedule}_repository.go`. Los campos `time.Time` con valor
-// cero (LastProbeAt, LastRefreshedAt, etc.) se preservan tal cual;
-// un refactor a `*time.Time` puro queda fuera de scope.
+// Package model contiene los tipos del dominio IPTV (Channel,
+// EPGProgram, etc.). Sub-paquete leaf para romper el ciclo:
+//   iptv → db → iptv/model (leaf sin imports beyond stdlib).
 package model
 
 import "time"

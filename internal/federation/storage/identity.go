@@ -11,9 +11,7 @@ import (
 	"hubplay/internal/federation"
 )
 
-// GetIdentity returns the singleton row, or (nil, nil) if none yet.
-// nil-without-error is the contract the IdentityStore expects so it
-// can decide whether to bootstrap a fresh keypair.
+// GetIdentity devuelve la fila singleton o (nil, nil) si no existe.
 func (r *Repository) GetIdentity(ctx context.Context) (*federation.Identity, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetServerIdentity(ctx)
@@ -69,8 +67,7 @@ func identityFromPgRow(row sqlc_pg.GetServerIdentityRow) *federation.Identity {
 	return id
 }
 
-// InsertIdentity persists the singleton. Idempotency guard: errors
-// on a second call (CHECK(id=1) + UNIQUE on server_uuid).
+// InsertIdentity persiste el singleton. Error en segunda llamada.
 func (r *Repository) InsertIdentity(ctx context.Context, id *federation.Identity) error {
 	var err error
 	if r.useSQLite() {
@@ -96,9 +93,7 @@ func (r *Repository) InsertIdentity(ctx context.Context, id *federation.Identity
 	return nil
 }
 
-// UpdateIdentityProfile actualiza el nombre visible + el color hex
-// elegidos por el admin. Solo toca esos dos campos para que el
-// uploader de foto sea idempotente con respecto a estos.
+// UpdateIdentityProfile actualiza nombre visible + color hex.
 func (r *Repository) UpdateIdentityProfile(ctx context.Context, name, avatarColor string) error {
 	if r.useSQLite() {
 		if err := r.sq.UpdateServerIdentityProfile(ctx, sqlc.UpdateServerIdentityProfileParams{

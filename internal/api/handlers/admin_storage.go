@@ -21,10 +21,6 @@ import (
 //
 // Por que un endpoint dedicado y no añadirlo a /admin/system/stats:
 // el panel /admin/system es "salud del proceso" (CPU/RAM/sesiones/
-// DB), refresca cada 30s; storage es "que ocupa esto", cambia solo
-// cuando hay scan. Cadencia distinta justifica endpoint distinto -
-// el dashboard puede polling 60s en lugar de 30s. Tambien aisla la
-// dependencia a gopsutil/disk para que un crash de statfs (raro
 // pero posible en bind-mounts exoticos) no rompa /system/stats.
 type AdminStorageHandler struct {
 	libraries StorageLibraryService
@@ -85,12 +81,6 @@ type libraryDiskWire struct {
 //
 // Eficiencia:
 //   - 1 query SQL (SumItemSizesByLibrary, indexed por library_id).
-//   - 1 call a disk.Partitions (cached internamente por gopsutil).
-//   - N calls a disk.Usage(mount) - 1 por mount unico. Cada call es
-//     un syscall statfs (sub-ms). Tipicamente N = 1-3.
-//   - O(L*M) longest-prefix match donde L=libraries, M=mounts.
-//     Trivial.
-//
 // Total: <50ms incluso en servidores con 50+ bibliotecas.
 func (h *AdminStorageHandler) Disks(w http.ResponseWriter, r *http.Request) {
 	libs, err := h.libraries.List(r.Context())

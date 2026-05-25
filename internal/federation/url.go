@@ -80,13 +80,9 @@ func validatePeerURL(rawURL string) error {
 	return nil
 }
 
-// blockedPeerIP reports whether ip is in a range we refuse to talk to
-// from federation outbound calls. Narrower than imaging.BlockedIP
-// (which also blocks RFC1918) because federation legitimately runs on
-// LANs and inside docker bridges.
-//
-// Test seam: assigned via a var so tests that hit an httptest.Server
-// on 127.0.0.1 can swap it. Production callers MUST NOT reassign.
+// blockedPeerIP reporta si la IP esta en un rango bloqueado para outbound.
+// Mas estrecho que imaging.BlockedIP (no bloquea RFC1918).
+// Var para que tests puedan swapear (produccion NO reasignar).
 var blockedPeerIP = defaultBlockedPeerIP
 
 func defaultBlockedPeerIP(ip net.IP) bool {

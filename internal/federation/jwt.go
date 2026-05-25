@@ -27,17 +27,12 @@ type PeerClaims struct {
 // largo para absorber clock skew sin reemision excesiva.
 const peerTokenTTL = 5 * time.Minute
 
-// peerTokenSkew is the clock-skew tolerance when validating expiry.
-// One minute either side of the issuer's nominal expiry covers
-// well-synced NTP between two home servers without weakening replay
-// resistance materially.
+// peerTokenSkew: tolerancia de clock-skew al validar expiry (1 min).
 const peerTokenSkew = time.Minute
 
-// IssuePeerToken signs a fresh peer JWT for an outbound request from
-// us to `peerServerUUID`. The token's iss is our server_uuid (the
-// receiver looks up our pubkey in their peers table to verify),
-// aud is the target peer's server_uuid (so a stolen token replayed
-// against a third server is rejected for wrong audience).
+// IssuePeerToken firma un JWT para un request outbound. iss = nuestro
+// server_uuid, aud = server_uuid del peer destino (token robado
+// contra tercero se rechaza por audience incorrecto).
 func IssuePeerToken(clk clock.Clock, ourPriv ed25519.PrivateKey, ourServerUUID, peerServerUUID string) (string, error) {
 	if len(ourPriv) != ed25519.PrivateKeySize {
 		return "", fmt.Errorf("federation: private key wrong size (%d)", len(ourPriv))
@@ -63,28 +58,15 @@ func IssuePeerToken(clk clock.Clock, ourPriv ed25519.PrivateKey, ourServerUUID, 
 	return signed, nil
 }
 
-// PeerLookup resolves an inbound JWT issuer (the peer's server_uuid)
-// to the peer's pinned pubkey + status. Implemented by the Manager so
-// validation has a clean dependency boundary in tests.
+// PeerLookup resuelve un issuer JWT inbound al pubkey pineado del peer.
+// Implementado por Manager para frontera limpia de deps en tests.
 type PeerLookup interface {
 	LookupByServerUUID(serverUUID string) (*Peer, error)
 }
 
-// ValidatePeerToken parses an inbound peer JWT and verifies:
-//
-//  1. Algorithm is EdDSA (no algorithm-confusion attack).
-//  2. The issuer (claims.iss) maps to a known, paired peer.
-//  3. The signature verifies against that peer's pinned pubkey.
-//  4. The audience (claims.aud) is OUR server_uuid.
-//  5. iat/exp are within tolerance of clk.Now().
-//
-// Returns the parsed PeerClaims + the matching *Peer on success.
-// Returns one of the domain sentinel errors on failure so the API
-// layer can map to the correct HTTP status.
-//
-// Replay protection is the *caller's* responsibility — a token is
-// individually valid; the per-nonce cache lives in the Manager so it
-// can scope nonces by peer + window.
+// ValidatePeerToken parsea y verifica un JWT inbound: algoritmo EdDSA,
+// issuer conocido + paired, firma contra pubkey pineado, audience = nosotros,
+// iat/exp dentro de tolerancia. Replay protection es del caller (nonce cache).
 func ValidatePeerToken(clk clock.Clock, lookup PeerLookup, ourServerUUID, raw string) (*PeerClaims, *Peer, error) {
 	var foundPeer *Peer
 
@@ -114,7 +96,7 @@ func ValidatePeerToken(clk clock.Clock, lookup PeerLookup, ourServerUUID, raw st
 	}, jwt.WithLeeway(peerTokenSkew))
 
 	if err != nil {
-		// Map jwt library errors into domain sentinels for clean API mapping.
+		// Mapear errores de la libreria jwt a sentinels del dominio.
 		switch {
 		case errors.Is(err, jwt.ErrTokenExpired):
 			return nil, nil, domain.ErrTokenExpired
@@ -134,8 +116,7 @@ func ValidatePeerToken(clk clock.Clock, lookup PeerLookup, ourServerUUID, raw st
 	if !ok || !parsed.Valid {
 		return nil, nil, domain.ErrInvalidToken
 	}
-	// Audience must be us — defends against a stolen token being
-	// replayed against a third peer.
+	// Audience debe ser nosotros (defensa contra replay a tercer peer).
 	audOk := false
 	for _, a := range claims.Audience {
 		if a == ourServerUUID {

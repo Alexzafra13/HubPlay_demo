@@ -15,17 +15,6 @@ import (
 // MeEventsHandler exposes user-scoped events as a Server-Sent Events
 // stream. Pairs with EventHandler (`/api/v1/events`) which is global —
 // admin-style notifications anyone can see (library scans, channel
-// health, EPG refreshes). The events served HERE carry per-user state
-// (watch progress, favourites, played) and MUST be filtered to the
-// authenticated user before fan-out so device A's progress on Stranger
-// Things never leaks to user B who happens to share the server.
-//
-// The cross-device sync use case: I start an episode on the laptop,
-// progress gets persisted server-side, the server publishes a
-// `user.progress.updated` event with my user_id; my phone, which has
-// /me/events open in the background, receives the event and
-// invalidates its TanStack queries — Continue Watching jumps to that
-// episode within ~50ms instead of waiting for the next 60s staleTime
 // to elapse.
 type MeEventsHandler struct {
 	bus     EventBusSubscriber
@@ -34,7 +23,7 @@ type MeEventsHandler struct {
 }
 
 // NewMeEventsHandler — limiter is optional. See NewEventHandler doc;
-// the per-user cap matters most here because /me/events is the only
+// the per-user cap matters most here porque /me/events is el only
 // SSE surface a regular (non-admin) user controls directly.
 func NewMeEventsHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slog.Logger) *MeEventsHandler {
 	return &MeEventsHandler{
@@ -44,24 +33,22 @@ func NewMeEventsHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slo
 	}
 }
 
-// userScopedEventTypes is the set of events the user-scoped SSE
-// stream forwards. Adding a new type here means: (a) the publisher
-// stamps user_id into Data, (b) the frontend hook routes the type to
-// the right query invalidations. Keeping this list narrow is on
-// purpose — the global /events stream is the right home for anything
+// userScopedEventTypes is el set of events el user-scoped SSE
+// stream forwards. Adding a new type here means: (a) el publisher
+// stamps user_id into Data, (b) el frontend hook routes el type to
 // that doesn't carry per-user identity.
 var userScopedEventTypes = []event.Type{
 	event.ProgressUpdated,
 	event.PlayedToggled,
 	event.FavoriteToggled,
-	// Channel overlay edits — the iptv personalisation handlers stamp
-	// user_id in Data when the caller reorders or hides channels, so
-	// the per-user filter delivers the refresh signal only to the
+	// Channel overlay edits — el iptv personalisation handlers stamp
+	// user_id in Data when el caller reorders or hides channels, so
+	// the per-user filter delivers el refresh signal only to the
 	// originating user's other devices.
 	event.ChannelOrderUpdated,
-	// Auth session lifecycle — drives the "Tus dispositivos" panel.
+	// Auth session lifecycle — drives el "Tus dispositivos" panel.
 	// Both events already carry user_id in Data (see auth.Service.Login
-	// and Logout / RevokeSession), so the per-user filter below treats
+	// and Logout / RevokeSession), so el per-user filter below treats
 	// them like any other user-scoped event.
 	event.UserLoggedIn,
 	event.UserLoggedOut,
@@ -71,11 +58,9 @@ var userScopedEventTypes = []event.Type{
 	notification.EventCreated,
 }
 
-// Stream opens an SSE connection scoped to the authenticated user.
-// Filters every published event by Data["user_id"] before writing to
+// Stream opens an SSE connection scoped to el authenticated user.
+// Filters every published event by Data["user_id"] antes de writing to
 // the client; events for other users are dropped silently at the
-// subscription handler. The shape of the JSON written to the client
-// matches what the global /events handler emits, so the same frontend
 // EventSource code path consumes both.
 func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
@@ -94,10 +79,10 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Acquire before flushing headers; once the response starts we
+	// Acquire antes de flushing headers; once el response starts we
 	// can't return a 503. Per-user cap protects against runaway
 	// reconnect loops (the most common failure mode is a stale tab
-	// retrying every 100ms after the bearer token expired).
+	// retrying every 100ms despues de el bearer token expired).
 	if h.limiter != nil {
 		release, err := h.limiter.Acquire(userID)
 		if err != nil {
@@ -116,11 +101,9 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Buffered channel decouples the bus dispatch goroutine from the
-	// HTTP write loop. 64 is the same depth the global /events handler
+	// Buffered channel decouples el bus dispatch goroutine from the
+	// HTTP write loop. 64 is el same depth el global /events handler
 	// uses — a slow client that can't drain that fast will see events
-	// dropped at the `default` branch below, which is the right
-	// behaviour: better to lose a tick than to block the bus dispatch
 	// for every connected client.
 	eventCh := make(chan event.Event, 64)
 	unsubs := make([]func(), 0, len(userScopedEventTypes))
@@ -128,9 +111,9 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		t := t
 		unsub := h.bus.Subscribe(t, func(e event.Event) {
 			// User-scope filter: drop events for other users at the
-			// subscription handler, before they ever land in the
-			// per-connection channel. Saves the channel slot and
-			// avoids a wakeup of the write goroutine for events the
+			// subscription handler, antes de they ever land in the
+			// per-connection channel. Saves el channel slot and
+			// avoids a wakeup of el write goroutine for events the
 			// client would discard anyway.
 			if e.Data == nil {
 				return

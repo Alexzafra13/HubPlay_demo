@@ -15,12 +15,6 @@ import (
 // requests recibe POSTs de servidores remotos sin auth previa).
 //
 // Reutiliza federation.RateLimiter usando la IP como bucket key -
-// el patron es identico al per-peer limit que ya teniamos.
-//
-//   - 429 + Retry-After: 60 cuando se agotan los tokens.
-//   - El IP se extrae de RemoteAddr (chi.RealIP no esta wireado
-//     globalmente; la idea es que esto vive detras de un trusted
-//     proxy en produccion y el operador puede añadir el middleware
 //     RealIP si quiere honrar X-Forwarded-For).
 func IPRateLimitMiddleware(limiter *federation.RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

@@ -285,12 +285,8 @@ func (r *Repository) ListSharedItems(ctx context.Context, peerID, libraryID stri
 	return out, int(total), nil
 }
 
-// ListRecentSharedItems returns the most recently added items across
-// every library shared with `peerID` (CanBrowse gate). Powers the
-// consumer-side "Recently added on peers" rail: each paired peer
-// answers with its top-N freshest titles and the consumer fan-out
-// merges them. library_id is included on each row so the consumer
-// can route a click into /peers/{peerID}/libraries/{libraryID}/items/{id}.
+// ListRecentSharedItems devuelve los items mas recientes de todas las
+// bibliotecas compartidas con el peer. library_id incluido para routing.
 func (r *Repository) ListRecentSharedItems(ctx context.Context, peerID string, limit int) ([]*federation.SharedItem, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
@@ -363,9 +359,7 @@ func (r *Repository) attachPrimaryImageColors(ctx context.Context, items []*fede
 		placeholders[i] = "?"
 		args[i] = it.ID
 	}
-	// BOOLEAN predicate `is_primary` (truthy) is portable across
-	// dialects. The placeholder rewrite has to happen AFTER building
-	// the IN list so the counter sees every `?`.
+	// Rewrite de placeholders DESPUES de construir IN list.
 	q := db.RewritePlaceholders(r.driver, `SELECT item_id, dominant_color, dominant_color_muted
 		      FROM images
 		      WHERE type = 'primary' AND is_primary
@@ -396,20 +390,9 @@ func (r *Repository) attachPrimaryImageColors(ctx context.Context, items []*fede
 	return nil
 }
 
-// SearchSharedItems runs a full-text query across libraries the calling
-// peer has CanBrowse on. Reuses the items_fts virtual table (SQLite)
-// or the search_vector tsvector column (Postgres) that powers local
-// search; ACL gate is the JOIN against federation_library_shares so a
-// peer cannot match titles in libraries not shared with them.
-//
-// Implemented as raw SQL because sqlc parses neither FTS5 MATCH nor
-// tsvector @@ to_tsquery. Same precedent as item_repository.go's
-// List path. The query parameter is appended with '*' for prefix
-// matching (SQLite); the Postgres variant runs through `toTSQueryPrefix`.
-//
-// Caller is expected to apply a sensible per-peer limit; the function
-// caps at 100 defensively so a runaway query cannot stream a peer's
-// whole catalog.
+// SearchSharedItems ejecuta FTS across bibliotecas compartidas.
+// Raw SQL porque sqlc no parsea FTS5 MATCH ni tsvector @@.
+// Cap defensivo de 100 para evitar dump del catalogo.
 func (r *Repository) SearchSharedItems(ctx context.Context, peerID, query string, limit int) ([]*federation.SharedItem, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25

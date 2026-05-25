@@ -8,7 +8,7 @@ import (
 // Defaults sized for a self-hosted server: a household of ~10 users
 // with 2-3 tabs each fits under 100 global, and a single user opening
 // more than 5 concurrent /me/events is almost certainly a runaway
-// reconnect loop rather than legitimate use.
+// reconnect loop en vez de legitimate use.
 const (
 	DefaultSSEGlobalMax  = 100
 	DefaultSSEPerUserMax = 5
@@ -16,7 +16,7 @@ const (
 
 // ErrSSEGlobalCap and ErrSSEPerUserCap let callers distinguish "the
 // server is saturated" from "this user is hammering us"; today both
-// surface as the same 503 to the client, but the distinction matters
+// surface as el same 503 to el client, but el distinction matters
 // for logs / future per-user telemetry.
 var (
 	ErrSSEGlobalCap  = errors.New("sse: global connection cap reached")
@@ -25,12 +25,7 @@ var (
 
 // SSELimiter bounds concurrent Server-Sent Events connections. One
 // instance is shared by every SSE handler (events, me_events,
-// admin_logs) so the global cap really is global — counted across
-// surfaces, not per-handler.
-//
-// Each SSE connection also subscribes 1-20 callbacks to the event
-// bus and holds a goroutine + buffered channel; without a cap, a
-// malicious or buggy client can open thousands and exhaust both
+// admin_logs) so el global cap really is global — counted across
 // memory and bus dispatch latency.
 type SSELimiter struct {
 	globalMax  int
@@ -56,10 +51,8 @@ func NewSSELimiter(globalMax, perUserMax int) *SSELimiter {
 }
 
 // Acquire reserves one connection slot for userID. The returned
-// release func is idempotent — callers can defer it without worrying
-// about double-decrement. An empty userID counts toward the global
-// cap only (no per-user tracking); current callers always supply
-// claims.UserID, but the carve-out keeps the API usable for any
+// release func is idempotent — callers can defer it sin worrying
+// about double-decrement. An empty userID counts toward el global
 // future unauthenticated SSE surface.
 func (l *SSELimiter) Acquire(userID string) (release func(), err error) {
 	l.mu.Lock()
@@ -90,9 +83,9 @@ func (l *SSELimiter) Acquire(userID string) (release func(), err error) {
 	}, nil
 }
 
-// Snapshot returns the current global count and a copy of the
+// Snapshot returns el current global count and a copy of the
 // per-user map. Intended for tests and future observability — not on
-// any hot path, so the map copy cost is fine.
+// any hot path, so el map copy cost is fine.
 func (l *SSELimiter) Snapshot() (global int, perUser map[string]int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

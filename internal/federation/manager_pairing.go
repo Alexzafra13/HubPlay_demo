@@ -1,39 +1,9 @@
 package federation
 
-// Manager methods que implementan el flujo "Steam-style" de
-// pairing requests (sin codigo de invitacion). El flujo legacy
-// (Invite + AcceptInvite + /peer/handshake) sigue intacto en
-// manager_handshake.go - este vive en paralelo para que cada
-// admin elija el que prefiera.
-//
-// Protocolo de 4 pasos:
-//
-//   1. A.SendPairingRequest(B_url): A probea B/federation/info para
-//      obtener su ServerInfo (sobre todo el pubkey, que pinea), y
-//      POSTea B/federation/pairing-requests con su propio ServerInfo
-//      + un request_token nuevo. A persiste OUTGOING pending.
-//      B persiste INCOMING pending y notifica al inbox de sus admins.
-//
-//   2. B.AcceptPairingRequest(request_id) o B.DeclinePairingRequest:
-//      admin B (tras comparar huella OOB con A) lo acepta. B marca
-//      su pending como accepted/declined. Si acepta, crea Peer paired.
-//      Luego POSTea A/federation/pairing-requests/{id}/callback con
-//      su ServerInfo + outcome firmado con B.privkey.
-//
-//   3. A.HandlePairingCallback: A valida la firma con el pubkey que
-//      pineo en step 1. Si accepted, marca su outgoing como accepted +
-//      crea Peer paired. Si declined, marca como declined.
-//
-//   4. Cancel / expiry: A puede cancelar su outgoing en cualquier
-//      momento (best-effort POST a B/federation/pairing-requests/{id}/
-//      cancel para limpiar el inbox de B). El job periodico mueve
-//      pendientes con expires_at < ahora a 'expired'.
-//
-// MITM: la unica defensa criptografica fuerte es la firma Ed25519
-// del callback en step 3 (verificada con el pubkey pineado en step 1).
-// MITM del wire en step 1 NO esta cubierto - de ahi que la huella
-// se compare OOB antes del accept en step 2, igual que en el flow
-// legacy.
+// Flujo "Steam-style" de pairing requests (sin invite). Protocolo:
+// 1) A probea B, POSTea request. 2) B acepta/declina, POSTea callback.
+// 3) A valida firma Ed25519 del callback. 4) Cancel/expiry.
+// MITM del step 1 se mitiga comparando huella OOB antes del accept.
 
 import (
 	"bytes"
@@ -53,15 +23,11 @@ import (
 	"hubplay/internal/event"
 )
 
-// PairingRequestTTL es cuanto vive una peticion antes de expirar.
-// 7 dias: el admin invitador puede pulsar "enviar" y olvidarse; el
-// invitado tiene una semana razonable para verle la huella, comparar
-// y aceptar sin que la peticion se vaya. Misma ventana que muchas
-// apps tipo Slack/Discord para invitaciones a workspaces.
+// PairingRequestTTL: 7 dias. Ventana razonable para que el admin
+// remoto compare huella y acepte.
 const PairingRequestTTL = 7 * 24 * time.Hour
 
-// Eventos publicados al EventBus. Los subs (notifications service)
-// los consumen para crear notificaciones en el inbox del usuario.
+// Eventos publicados al bus para notificaciones admin.
 const (
 	EventPairingRequestReceived event.Type = "federation.pairing_request_received"
 	EventPairingRequestAccepted event.Type = "federation.pairing_request_accepted"
@@ -83,8 +49,7 @@ type pairingCallbackBody struct {
 	Signature    string      `json:"signature"`     // base64(Ed25519(B.priv, signedMessage))
 }
 
-// signedMessage para el callback. Cubrir request_id + outcome +
-// pubkey de A en bytes evita reply attack cross-pair.
+// signedMessage para el callback. Evita reply attack cross-pair.
 func pairingCallbackSignedMessage(requestID, outcome string, aPubkey []byte) []byte {
 	buf := bytes.Buffer{}
 	buf.WriteString("hubplay-federation-pairing-callback-v1\n")
@@ -108,41 +73,30 @@ type pairingCancelBody struct {
 // Outbound (A side): send request, handle callback from B
 // ────────────────────────────────────────────────────────────────────
 
-// SendPairingRequest envia una peticion al servidor en `baseURL`.
-// Probea su /federation/info para pinear su identidad, genera un
-// token, POSTea el body, y persiste como OUTGOING pending. El admin
-// puede entonces seguir el estado en su panel "Peticiones enviadas".
-//
-// Errores:
-//   - domain.ErrAlreadyExists si ya estamos paired o ya hay una
-//     pending con ese server_uuid.
-//   - PEER_PROBE_FAILED si no podemos conectar a `baseURL`.
-//   - validacion (URL invalida, SSRF) - mismo guard que AcceptInvite.
+// SendPairingRequest envia peticion a `baseURL`. Probea, genera token,
+// POSTea, y persiste OUTGOING pending.
 func (m *Manager) SendPairingRequest(ctx context.Context, baseURL, userID string) (*PendingRequest, error) {
 	baseURL = trimSlash(baseURL)
 	if err := validatePeerURL(baseURL); err != nil {
 		return nil, err
 	}
-	// Step A: probear B para obtener su ServerInfo (sobre todo el pubkey
-	// que vamos a pinear).
+	// Probear B para obtener su ServerInfo y pinear pubkey.
 	theirs, err := m.ProbePeer(ctx, baseURL)
 	if err != nil {
 		return nil, err
 	}
-	// Ya estamos paired? Devolver conflicto explicito.
+	// Conflicto si ya estamos paired.
 	if existing, err := m.repo.GetPeerByServerUUID(ctx, theirs.ServerUUID); err == nil && existing != nil {
 		return nil, fmt.Errorf("%w: server_uuid already paired", domain.ErrAlreadyExists)
 	}
-	// Hay ya una outgoing pending con este server_uuid? Devolverla
-	// (idempotencia para que pulsar "enviar" dos veces no llene la
-	// tabla con duplicados).
+	// Idempotencia: si ya hay outgoing pending, devolverla.
 	if existing, found, err := m.repo.GetActivePendingRequestByPeer(ctx, PendingDirectionOutgoing, theirs.ServerUUID); err != nil {
 		return nil, err
 	} else if found {
 		return existing, nil
 	}
 
-	// Genera secreto compartido + UUID de request.
+	// Generar secreto compartido + UUID.
 	token, err := randomToken()
 	if err != nil {
 		return nil, err
@@ -164,10 +118,7 @@ func (m *Manager) SendPairingRequest(ctx context.Context, baseURL, userID string
 		Status:             PendingStatusPending,
 	}
 
-	// Step B: POST a B/federation/pairing-requests con nuestro
-	// ServerInfo. Si falla NO persistimos local (no hay nada que
-	// el admin pueda hacer con una peticion que el remoto no
-	// recibio).
+	// POST a B. Si falla, no persistimos local.
 	ours := m.PublicServerInfo()
 	body := pairingRequestBody{
 		RequestID:    requestID,
@@ -178,19 +129,15 @@ func (m *Manager) SendPairingRequest(ctx context.Context, baseURL, userID string
 		return nil, err
 	}
 
-	// Step C: persistir local. Si esto falla tras el POST de B,
-	// B tiene un huerfano en su inbox - se purgara via expiry.
+	// Persistir local. Si falla, B tiene huerfano que expira solo.
 	if err := m.repo.InsertPendingRequest(ctx, pending); err != nil {
 		return nil, err
 	}
 	return pending, nil
 }
 
-// HandlePairingCallback consume el callback que B nos envia tras
-// accept/decline. Verifica firma + token + estado, y aplica la
-// transicion local (crear Peer paired si accept; marcar declined
-// si decline). Tambien emite eventos al bus para alimentar el
-// inbox de notificaciones del admin local.
+// HandlePairingCallback consume el callback de B. Verifica firma +
+// token, y aplica la transicion (crear Peer o marcar declined).
 func (m *Manager) HandlePairingCallback(ctx context.Context, requestID, outcome, token string, accepter *ServerInfo, signature []byte) error {
 	pending, err := m.repo.GetPendingRequestByID(ctx, requestID)
 	if err != nil {
@@ -208,9 +155,7 @@ func (m *Manager) HandlePairingCallback(ctx context.Context, requestID, outcome,
 	if accepter == nil || accepter.ServerUUID != pending.PeerServerUUID {
 		return fmt.Errorf("federation: callback server_uuid mismatch")
 	}
-	// Verificar firma: usamos el pubkey que pineamos en SendPairingRequest.
-	// Si la firma valida pero el accepter trae un pubkey distinto al
-	// pineado, lo rechazamos como sustituto de identidad.
+	// Verificar firma con pubkey pineado. Rechazar si difiere.
 	if !bytes.Equal(accepter.PublicKey, pending.PeerPublicKey) {
 		return fmt.Errorf("federation: callback pubkey doesn't match pinned key")
 	}
@@ -225,9 +170,7 @@ func (m *Manager) HandlePairingCallback(ctx context.Context, requestID, outcome,
 		if err := m.repo.MarkPendingRequestResponded(ctx, requestID, PendingStatusAccepted, "", now); err != nil {
 			return err
 		}
-		// Crear Peer paired - capturamos el branding actualizado del
-		// accepter (puede haber cambiado entre nuestro probe inicial y
-		// el accept).
+		// Crear Peer paired con branding actualizado del accepter.
 		peer := &Peer{
 			ID:                 uuid.NewString(),
 			ServerUUID:         accepter.ServerUUID,
@@ -272,9 +215,7 @@ func (m *Manager) HandlePairingCallback(ctx context.Context, requestID, outcome,
 	return nil
 }
 
-// CancelPairingRequest la marca cancelled local + (best-effort)
-// notifica a B para que limpie su inbox. Si B no responde, el
-// barrido de expiry hara la limpieza eventual.
+// CancelPairingRequest marca cancelled local y notifica a B (best-effort).
 func (m *Manager) CancelPairingRequest(ctx context.Context, requestID, userID string) error {
 	pending, err := m.repo.GetPendingRequestByID(ctx, requestID)
 	if err != nil {
@@ -306,13 +247,8 @@ func (m *Manager) CancelPairingRequest(ctx context.Context, requestID, userID st
 // Inbound (B side): receive request, accept/decline
 // ────────────────────────────────────────────────────────────────────
 
-// HandleIncomingPairingRequest valida el body del POST de A y lo
-// persiste como INCOMING pending. Tambien emite evento para que el
-// notification service notifique a todos los admins.
-//
-// Idempotente sobre (direction, peer_server_uuid): si A reenvia
-// mientras la primera sigue pending, devolvemos la misma id sin
-// duplicar (el indice unico parcial lo bloquearia igualmente).
+// HandleIncomingPairingRequest valida y persiste como INCOMING pending.
+// Idempotente sobre (direction, peer_server_uuid).
 func (m *Manager) HandleIncomingPairingRequest(ctx context.Context, requestID, requestToken string, requester *ServerInfo) (*PendingRequest, error) {
 	if requester == nil || requester.ServerUUID == "" || len(requester.PublicKey) == 0 {
 		return nil, domain.NewValidationError(map[string]string{"requester": "missing or malformed"})
@@ -323,27 +259,22 @@ func (m *Manager) HandleIncomingPairingRequest(ctx context.Context, requestID, r
 	if requestID == "" || requestToken == "" {
 		return nil, domain.NewValidationError(map[string]string{"request_id": "id+token required"})
 	}
-	// Admin toggle: si "no aceptar peticiones" esta activado,
-	// rechazamos aqui antes de tocar ningun guard mas pesado.
+	// Toggle admin: rechazar si peticiones deshabilitadas.
 	if !m.AcceptingPairingRequests(ctx) {
 		return nil, domain.ErrPairingRequestsDisabled
 	}
-	// Defense-in-depth contra flood: cap el numero de incoming
-	// pending. Si esta por encima del umbral, rechazamos. Aun con
-	// rate-limit por IP burlado (botnet), la tabla no crece sin
-	// limite.
+	// Cap defensivo contra flood de incoming pending.
 	if cap := m.cfg.MaxIncomingPendingRequests; cap > 0 {
 		count, err := m.repo.CountUnreadIncomingPendingRequests(ctx)
 		if err == nil && count >= cap {
 			return nil, domain.ErrPairingRequestQuotaExceeded
 		}
 	}
-	// Si ya estamos paired con este server_uuid, conflicto.
+	// Conflicto si ya paired con este server_uuid.
 	if existing, err := m.repo.GetPeerByServerUUID(ctx, requester.ServerUUID); err == nil && existing != nil {
 		return nil, fmt.Errorf("%w: server_uuid already paired", domain.ErrAlreadyExists)
 	}
-	// Idempotencia: si ya hay una incoming pendiente con este server_uuid,
-	// devolverla.
+	// Idempotencia: devolver incoming existente.
 	if existing, found, err := m.repo.GetActivePendingRequestByPeer(ctx, PendingDirectionIncoming, requester.ServerUUID); err != nil {
 		return nil, err
 	} else if found {
@@ -378,8 +309,7 @@ func (m *Manager) HandleIncomingPairingRequest(ctx context.Context, requestID, r
 }
 
 // AcceptPairingRequest finaliza una incoming pending: crea Peer paired
-// + (best-effort) notifica callback al remitente. El admin debe haber
-// comparado la huella OOB antes - este metodo confia en eso.
+// + notifica callback al remitente (best-effort).
 func (m *Manager) AcceptPairingRequest(ctx context.Context, requestID, userID string) (*Peer, error) {
 	return m.resolveIncoming(ctx, requestID, userID, "accepted")
 }
@@ -401,7 +331,7 @@ func (m *Manager) resolveIncoming(ctx context.Context, requestID, userID, outcom
 		return nil, fmt.Errorf("federation: request already %s", pending.Status)
 	}
 	if !pending.IsActive(m.clock.Now()) {
-		// Edge: expirada entre la GET y el marcado.
+		// Expirada entre GET y marcado.
 		return nil, domain.ErrNotFound
 	}
 
@@ -442,8 +372,7 @@ func (m *Manager) resolveIncoming(ctx context.Context, requestID, userID, outcom
 		})
 	}
 
-	// Best-effort callback al remitente. Si falla por red, A vera la
-	// peticion como pendiente en su panel hasta que expire (~7 dias).
+	// Best-effort callback. Si falla, A ve pendiente hasta expiry.
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), m.cfg.HTTPTimeout)
 		defer cancel()
@@ -456,30 +385,27 @@ func (m *Manager) resolveIncoming(ctx context.Context, requestID, userID, outcom
 	return peer, nil
 }
 
-// ListPendingRequests devuelve ambas direcciones, mas reciente primero.
+// ListPendingRequests devuelve ambas direcciones, reciente primero.
 func (m *Manager) ListPendingRequests(ctx context.Context, limit int) ([]*PendingRequest, error) {
 	return m.repo.ListPendingRequests(ctx, limit)
 }
 
-// GetPendingRequest devuelve una sola.
+// GetPendingRequest devuelve una peticion por ID.
 func (m *Manager) GetPendingRequest(ctx context.Context, id string) (*PendingRequest, error) {
 	return m.repo.GetPendingRequestByID(ctx, id)
 }
 
-// CountIncomingPending para el badge admin.
+// CountIncomingPending para el badge del panel admin.
 func (m *Manager) CountIncomingPending(ctx context.Context) (int, error) {
 	return m.repo.CountUnreadIncomingPendingRequests(ctx)
 }
 
-// SweepExpiredPairingRequests es lo que llama el job periodico
-// (lo cableamos en main.go).
+// SweepExpiredPairingRequests llamado por el job periodico de main.go.
 func (m *Manager) SweepExpiredPairingRequests(ctx context.Context) (int, error) {
 	return m.repo.ExpirePendingRequests(ctx, m.clock.Now())
 }
 
-// CancelIncomingPairingRequest la marca cancelled (lado B, cuando
-// A nos avisa que cancela). No notifica a A - el cancel viene
-// precisamente de A.
+// CancelIncomingPairingRequest marca cancelled (lado B). No notifica a A.
 func (m *Manager) CancelIncomingPairingRequest(ctx context.Context, requestID string) error {
 	return m.repo.MarkPendingRequestResponded(ctx, requestID, PendingStatusCancelled, "", m.clock.Now())
 }
@@ -502,8 +428,7 @@ func (m *Manager) postPairingCallback(ctx context.Context, pending *PendingReque
 		return err
 	}
 	ours := m.PublicServerInfo()
-	// Firmamos el callback con nuestra privkey. El receptor (A) verifica
-	// con el pubkey que pineo en SendPairingRequest.
+	// Firmar con nuestra privkey; A verifica con el pubkey pineado.
 	signed := pairingCallbackSignedMessage(pending.ID, outcome, pending.PeerPublicKey)
 	sig := m.identity.Current().Sign(signed)
 	body := pairingCallbackBody{
@@ -551,9 +476,7 @@ func (m *Manager) postJSON(ctx context.Context, url string, body any, label stri
 // Helpers
 // ────────────────────────────────────────────────────────────────────
 
-// randomToken genera 16 bytes de aleatoriedad y los devuelve hex.
-// 128 bits = mas que suficiente para que un atacante no pueda
-// adivinar el token de un callback en una ventana razonable.
+// randomToken genera 16 bytes aleatorios en hex. 128 bits.
 func randomToken() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -570,12 +493,9 @@ func trimSlash(s string) string {
 }
 
 func encodeBase64(b []byte) string {
-	// Usamos base64.StdEncoding aquí para coincidir con
-	// EncodePublicKey/DecodePublicKey del paquete.
+	// base64.StdEncoding para coincidir con EncodePublicKey.
 	return EncodePublicKey(b)
 }
 
-// ErrPairingRequestNotFound es un sentinel para conveniencia en
-// handlers (evita usar errors.Is con un literal de domain.ErrNotFound
-// disperso). Aliased.
+// ErrPairingRequestNotFound sentinel para conveniencia en handlers.
 var ErrPairingRequestNotFound = errors.New("federation: pairing request not found")

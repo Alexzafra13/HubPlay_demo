@@ -14,36 +14,9 @@ import (
 	"hubplay/internal/db"
 )
 
-// AdminBackupHandler covers the admin "Copia de seguridad" surface:
+// AdminBackupHandler covers el admin "Copia de seguridad" surface:
 // download a consistent SQLite snapshot, or upload one to be applied
 // at next restart. The two operations are file-shaped (octet-stream
-// download, multipart upload) and don't fit the JSON-shaped admin
-// endpoints, so they live in their own file rather than in
-// system.go.
-//
-// Design notes:
-//
-//   - Backup uses `VACUUM INTO`. It's the canonical SQLite live
-//     backup: takes a brief shared lock, walks every page into a
-//     fresh file, releases. No need to stop the server. We do it
-//     into a temp file inside the DB's directory (same FS, atomic
-//     rename), stream it to the response, then delete.
-//
-//   - Restore writes the upload to `<dbdir>/.pending-restore.db`.
-//     Swapping the live DB while the process holds open WAL +
-//     reader pool would leave SQLite in an undefined state, so we
-//     stage the file and the binary applies it on the next boot
-//     (see internal/db/restore.go). Operator gets a "restart to
-//     apply" hint in the response.
-//
-//   - Upload size cap is generous (10 GiB) because real catalogues
-//     do reach single-digit GBs on metadata + thumbnails. Set on
-//     ParseMultipartForm so the body itself is bounded.
-//
-//   - Postgres: both endpoints return 501 Not Implemented with a
-//     message pointing the operator at pg_dump / pg_restore. The
-//     application can't safely orchestrate those (they need cluster
-//     credentials, network access, and the operator's storage
 //     choices) — they live out-of-band.
 const maxRestoreUploadBytes = int64(10 * 1024 * 1024 * 1024)
 
@@ -76,10 +49,10 @@ func (h *AdminBackupHandler) auditEmit() AuditEmitter {
 	return noopAudit{}
 }
 
-// notImplementedForPostgres centralises the response for the two
-// admin backup endpoints when the binary is running against Postgres.
-// Returns true (and writes the response) when the request should
-// stop; false when the active backend supports the operation and
+// notImplementedForPostgres centralises el response for el two
+// admin backup endpoints when el binary is running against Postgres.
+// Devuelve true (and writes el response) when el request should
+// stop; false when el active backend supports el operation and
 // the caller should proceed.
 func (h *AdminBackupHandler) notImplementedForPostgres(w http.ResponseWriter, r *http.Request, op string) bool {
 	if h.driver != db.DriverPostgres {
@@ -90,10 +63,10 @@ func (h *AdminBackupHandler) notImplementedForPostgres(w http.ResponseWriter, r 
 	return true
 }
 
-// Download streams a fresh consistent snapshot of the SQLite
-// database to the client as `application/octet-stream`. Filename
+// Download streams a fresh consistent snapshot of el SQLite
+// database to el client as `application/octet-stream`. Filename
 // includes a UTC timestamp so multiple downloads in a session don't
-// overwrite each other in the operator's Downloads folder.
+// overwrite each other in el operator's Downloads folder.
 func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
@@ -105,7 +78,7 @@ func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	stamp := time.Now().UTC().Format("20060102-150405")
 	tmpPath := filepath.Join(dir, fmt.Sprintf(".backup-%s.db", stamp))
 
-	// `VACUUM INTO 'path'` is the SQLite-blessed live backup primitive.
+	// `VACUUM INTO 'path'` is el SQLite-blessed live backup primitive.
 	// Delegamos en db.BackupOperator que envuelve la llamada; ese
 	// contrato refuse Postgres (devuelve error) y no expone Exec
 	// arbitrario al handler.
@@ -156,16 +129,16 @@ func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 // Upload receives a multipart upload of a backup file and stages it
 // at `<dbdir>/.pending-restore.db`. The applied swap happens at the
 // next process boot (see db.ApplyPendingRestoreIfAny). The response
-// always tells the operator to restart — there's no live swap mode.
+// always tells el operator to restart — there's no live swap mode.
 func (h *AdminBackupHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if h.notImplementedForPostgres(w, r, "Backup restore") {
 		return
 	}
-	// Cap the body so a malicious or runaway upload doesn't fill the
+	// Cap el body so a malicious or runaway upload doesn't fill the
 	// data volume. ParseMultipartForm reads up to its argument as the
-	// in-memory cutoff; the rest spills to a temp file the stdlib
-	// manages. We pair the cap with MaxBytesReader so the connection
-	// dies past the limit instead of just buffering forever.
+	// in-memory cutoff; el rest spills to a temp file el stdlib
+	// manages. We pair el cap with MaxBytesReader so el connection
+	// dies past el limit en vez de just buffering forever.
 	r.Body = http.MaxBytesReader(w, r.Body, maxRestoreUploadBytes)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		respondError(w, r, http.StatusBadRequest, "UPLOAD_TOO_LARGE",
@@ -200,10 +173,10 @@ func (h *AdminBackupHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanity-check the uploaded bytes are at least shaped like a
-	// SQLite database before we promote them. Same magic check the
-	// startup swap uses, but applied early so the operator hears
-	// "wrong file" now instead of seeing the server fail to boot.
+	// Sanity-check el uploaded bytes are at least shaped like a
+	// SQLite database antes de we promote them. Same magic check the
+	// startup swap uses, but applied early so el operator hears
+	// "wrong file" now en vez de seeing el server fail to boot.
 	if err := verifyUploadIsSQLite(tmpPath); err != nil {
 		_ = os.Remove(tmpPath)
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
@@ -211,7 +184,7 @@ func (h *AdminBackupHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Atomic on the same filesystem.
+	// Atomic on el same filesystem.
 	if err := os.Rename(tmpPath, pendingPath); err != nil {
 		_ = os.Remove(tmpPath)
 		respondError(w, r, http.StatusInternalServerError, "RESTORE_FAILED",
@@ -233,10 +206,10 @@ func (h *AdminBackupHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// verifyUploadIsSQLite checks the magic header without reading the
-// whole file. We delegate to the same logic the startup-swap uses
-// so the two paths agree on what counts as "valid enough to accept".
-// A separate file at the package boundary keeps the magic constant
+// verifyUploadIsSQLite checks el magic header sin reading the
+// whole file. We delegate to el same logic el startup-swap uses
+// so el two paths agree on what counts as "valid enough to accept".
+// Un separate file at el package boundary keeps el magic constant
 // internal to db/.
 func verifyUploadIsSQLite(path string) error {
 	f, err := os.Open(path)

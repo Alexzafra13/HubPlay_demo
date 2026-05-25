@@ -25,11 +25,6 @@ import (
 //
 // Endpoints:
 //
-//   PUT    /channels/{channelId}/logo            body: {logo_url: "..."}
-//   POST   /channels/{channelId}/logo/upload     multipart: file=...
-//   DELETE /channels/{channelId}/logo
-//
-// El handler GET /channels/{channelId}/logo (proxy) consulta el
 // override antes de caer al tvg-logo del M3U; ver IPTVHandler.ChannelLogo.
 
 // channelLogosSubdir es la carpeta bajo imageDir donde se guardan los
@@ -45,9 +40,6 @@ type setChannelLogoRequest struct {
 // canal. Sustituye cualquier override previo (URL o archivo subido) —
 // si había archivo lo borra del disco para no dejar huérfanos.
 //
-// La URL se valida superficialmente (esquema http/https + parseable);
-// la validación profunda (que devuelva una imagen) la hace el cache
-// remoto en la próxima petición de GET /channels/{id}/logo. URLs rotas
 // caen al fallback de iniciales como cualquier otro fallo de fetch.
 func (h *IPTVHandler) SetChannelLogo(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")

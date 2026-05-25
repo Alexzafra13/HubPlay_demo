@@ -11,13 +11,10 @@ import (
 	"hubplay/internal/domain"
 )
 
-// peerCtxKey is the context key under which the validated Peer is
-// stashed by RequirePeerJWT for downstream handlers to read.
+// peerCtxKey: clave de contexto del Peer validado.
 type peerCtxKey struct{}
 
-// PeerFromContext returns the *Peer the middleware validated for
-// this request. Nil if the request didn't go through the middleware
-// (handler called outside the auth chain).
+// PeerFromContext devuelve el *Peer validado. Nil si no paso por el middleware.
 func PeerFromContext(ctx context.Context) *Peer {
 	p, _ := ctx.Value(peerCtxKey{}).(*Peer)
 	return p
@@ -115,8 +112,7 @@ func RequirePeerJWT(mgr *Manager) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Wrap the response writer so we can capture status + bytes
-			// for the audit log AFTER the handler runs.
+			// Wrapper para capturar status + bytes para audit.
 			rec := &peerResponseRecorder{ResponseWriter: w, status: http.StatusOK}
 			ctx := withPeer(r.Context(), peer)
 
@@ -165,8 +161,7 @@ func (r *peerResponseRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Flush proxies http.Flusher so SSE endpoints in the peer surface
-// (Phase 5+) work correctly.
+// Flush proxea http.Flusher para SSE.
 func (r *peerResponseRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
@@ -192,9 +187,7 @@ func extractBearerToken(r *http.Request) (string, error) {
 	return tok, nil
 }
 
-// mapValidationError maps a JWT validation error to an HTTP status
-// and an error code. The codes line up with the rest of the API so
-// the failing peer's logs can correlate.
+// mapValidationError mapea error JWT a status HTTP + codigo.
 func mapValidationError(err error) (int, string) {
 	switch {
 	case errors.Is(err, domain.ErrPeerKeyMismatch):
@@ -240,9 +233,7 @@ func looksLikeUUID(s string) bool {
 	return true
 }
 
-// writePeerError emits a small JSON body so the calling peer's HTTP
-// client surfaces a meaningful failure. Avoids the {"data":...} wrap
-// of admin endpoints because peer-to-peer expects bare objects.
+// writePeerError emite JSON de error para peers.
 func writePeerError(w http.ResponseWriter, _ *http.Request, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

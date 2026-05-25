@@ -79,13 +79,6 @@ func (h *CorsOriginsHandler) auditEmit() AuditEmitter {
 // hace.
 //
 // Shape de la respuesta:
-//   {
-//     "data": {
-//       "statics":  ["https://app.example.com", "http://localhost:5173"],
-//       "dynamics": [
-//         { "origin": "...", "created_by": "u-1", "created_at": "...", "note": "..." }
-//       ]
-//     }
 //   }
 func (h *CorsOriginsHandler) List(w http.ResponseWriter, r *http.Request) {
 	dynamics, err := h.store.List(r.Context())
@@ -120,8 +113,6 @@ type AddCorsOriginRequest struct {
 //   1. ValidateCorsOrigin pasa (scheme http/https, sin path, etc.).
 //   2. El origen ya no es uno de los STATICS (sería redundante y
 //      confundiría al operador). Devuelve 409 ALREADY_STATIC.
-//   3. INSERT atómico; si la unique key choca, 409 ALREADY_EXISTS.
-// Tras éxito, recarga el registry y devuelve la lista completa (igual
 // que List) para que el frontend repintene sin pedir GET separado.
 func (h *CorsOriginsHandler) Add(w http.ResponseWriter, r *http.Request) {
 	var req AddCorsOriginRequest

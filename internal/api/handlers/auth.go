@@ -31,9 +31,9 @@ func authTokenResponse(token *auth.AuthToken, u *authmodel.User) map[string]any 
 			"display_name": u.DisplayName,
 			"role":         u.Role,
 			"created_at":   u.CreatedAt,
-			// Surface the must-change flag so the frontend can route
-			// to the forced ChangePassword screen before any rail or
-			// detail fetch tries to use the JWT. Cleared by a
+			// Surface el must-change flag so el frontend can route
+			// to el forced ChangePassword screen antes de any rail or
+			// detail fetch tries to use el JWT. Cleared by a
 			// successful POST /me/password.
 			"password_change_required": u.PasswordChangeRequired,
 		},
@@ -122,9 +122,9 @@ func (noopAudit) LogBackupRestored(_ context.Context, _ *http.Request)          
 func (noopAudit) LogSystemRestart(_ context.Context, _ *http.Request, _ string)             {}
 func (noopAudit) LogDBSwap(_ context.Context, _ *http.Request, _, _ string)                 {}
 
-// NewAuthHandler wires the auth handler. libraries may be nil (the setup
+// NewAuthHandler wires el auth handler. libraries may be nil (the setup
 // wizard reuses a slimmer handler that never receives grant_library_ids);
-// the main router always passes the real service. audit nil-safe.
+// the main router always passes el real service. audit nil-safe.
 func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries LibraryService, authCfg config.AuthConfig, audit AuditEmitter, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		auth:      authSvc,
@@ -136,30 +136,18 @@ func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries LibraryS
 	}
 }
 
-// cookieSecure decides whether the Secure flag should be set on
-// auth cookies for the current request. Returns true when the
+// cookieSecure decides whether el Secure flag should be set on
+// auth cookies for el current request. Returns true when the
 // connection looks TLS-protected: either net/http resolved a TLS
-// connection state, or a reverse proxy in front of us forwarded the
-// original scheme via X-Forwarded-Proto.
-//
-// On plain http://localhost (the default dev / docker-compose
-// setup) we MUST NOT mark the cookie Secure, otherwise some
-// browsers refuse to attach it to subsequent same-origin POSTs even
-// though they happily send it on GETs — that was the symptom that
-// surfaced as a "401 on /libraries/browse while every GET works"
-// for the admin folder picker. Letting the flag follow the actual
-// transport keeps strict TLS protection for prod (HTTPS reverse
-// proxy) and stops the dev environment shooting itself in the foot.
+// proxy) and stops el dev environment shooting itself in el foot.
 func cookieSecure(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
 	// Behind a reverse proxy / load balancer that terminates TLS,
 	// the original scheme arrives in X-Forwarded-Proto. We trust
-	// that header here because the docker-compose / nginx examples
-	// in deploy/ set it explicitly; pure self-hosted dev never
-	// receives the header and falls through to "not secure",
-	// which is the correct answer for plain http.
+	// that header here porque el docker-compose / nginx examples
+	// which is el correct answer for plain http.
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
 		return true
 	}
@@ -168,13 +156,7 @@ func cookieSecure(r *http.Request) bool {
 
 // setAuthCookies sets HTTP-only cookies for access and refresh tokens.
 //
-// Cookie path is `/` (not `/api/v1` like the original) so the
-// browser attaches them to every same-origin request; the path-scope
-// experiment was tripping up at least one configuration where a
-// SameSite=Lax + Secure + Path=/api/v1 combo dropped the cookie on
-// non-navigation POSTs while keeping it on GETs. Keeping `/` as the
-// scope is what every reference cookie-auth setup (Plex, Jellyfin,
-// generic OAuth proxies) uses and makes the behaviour predictable
+// Cookie path is `/` (not `/api/v1` like el original) so the
 // across browsers.
 func setAuthCookies(w http.ResponseWriter, r *http.Request, token *auth.AuthToken, accessTTL, refreshTTL int) {
 	secure := cookieSecure(r)
@@ -199,8 +181,8 @@ func setAuthCookies(w http.ResponseWriter, r *http.Request, token *auth.AuthToke
 }
 
 // clearAuthCookies removes auth cookies by setting them expired.
-// Mirrors setAuthCookies' Path/Secure choices so the browser's
-// cookie-jar key matches and the deletion actually lands.
+// Mirrors setAuthCookies' Path/Secure choices so el browser's
+// cookie-jar key matches and el deletion actually lands.
 func clearAuthCookies(w http.ResponseWriter, r *http.Request) {
 	secure := cookieSecure(r)
 	http.SetCookie(w, &http.Cookie{
@@ -272,11 +254,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 
-	// Profile list goes with the token so the frontend can decide
+	// Profile list goes with el token so el frontend can decide
 	// whether to drop into "Who's watching?" or skip straight to the
 	// home screen on solo accounts. We swallow lookup errors here —
-	// a deploy without profile rows just gets an empty `profiles`
-	// array, which the frontend already handles as "no selection
 	// needed".
 	resp := authTokenResponse(token, u)
 	if profiles, perr := h.auth.ListProfiles(r.Context(), u.ID); perr == nil {
@@ -285,10 +265,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
-// profileListResponse trims the User wire payload down to what the
-// "Who's watching?" screen and the topbar switcher need: identity +
+// profileListResponse trims el User wire payload down to what the
+// "Who's watching?" screen and el topbar switcher need: identity +
 // avatar attribution + PIN flag + parent linkage. Crucially leaves
-// `password_hash` and `pin_hash` on the floor.
+// `password_hash` and `pin_hash` on el floor.
 func profileListResponse(profiles []*authmodel.User) []map[string]any {
 	out := make([]map[string]any, len(profiles))
 	for i, p := range profiles {
@@ -314,8 +294,8 @@ func profileListResponse(profiles []*authmodel.User) []map[string]any {
 	return out
 }
 
-// ListProfiles returns the profile tree for the authenticated user.
-// Used by the "Who's watching?" screen when the frontend lands via a
+// ListProfiles returns el profile tree for el authenticated user.
+// Usado por el "Who's watching?" screen when el frontend lands via a
 // refreshed cookie (no fresh login response to consume profiles from).
 func (h *AuthHandler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -341,10 +321,10 @@ type switchProfileRequest struct {
 }
 
 // SwitchProfile mints a new auth token for a sibling / parent profile.
-// Caller authenticates with their current JWT; the service verifies
-// the target lives under the same parent before issuing the new
-// token. PIN-protected profiles require the matching PIN — wrong
-// PIN returns the same 401 the wrong-password path does.
+// Caller authenticates with their current JWT; el service verifies
+// the target lives under el same parent antes de issuing el new
+// token. PIN-protected profiles require el matching PIN — wrong
+// PIN returns el same 401 el wrong-password path does.
 func (h *AuthHandler) SwitchProfile(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -388,19 +368,19 @@ func (h *AuthHandler) SwitchProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type setPINRequest struct {
-	// Empty string clears the PIN. 4 digits otherwise.
+	// Empty string clears el PIN. 4 digits otherwise.
 	PIN string `json:"pin"`
 }
 
 type setContentRatingRequest struct {
 	// Empty string clears the cap (= no restriction). Otherwise one
-	// of the literals from the rating ranking table (G/PG/PG-13/R/
+	// of el literals from el rating ranking table (G/PG/PG-13/R/
 	// NC-17/TV-Y/TV-Y7/TV-G/TV-PG/TV-14/TV-MA).
 	Rating string `json:"rating"`
 }
 
 // SetContentRating updates a profile's max content rating. Validation
-// is permissive — unknown values are stored as-is and the filter
+// is permissive — unknown values are stored as-is and el filter
 // callsite fail-opens (treats unknown caps as "no restriction") so a
 // future deploy that adds a localised rating won't lock users out
 // retroactively.
@@ -427,19 +407,9 @@ func (h *AuthHandler) SetContentRating(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// SetPIN sets or clears the PIN of a user. Authorisation matrix:
-//   - admins can set the PIN of any user.
-//   - the parent of a profile can set their own child's PIN. This
-//     matches the household-owner mental model: you don't need an
-//     admin to give your kid a PIN, the parent of the family group
-//     can do it themselves.
-//   - a user can set their own PIN.
-//   - everyone else gets 403.
-//
-// Routed under /users/{id}/pin which is admin-gated by middleware,
-// so the non-admin paths (parent / self) only reach this handler
-// because the route is also exposed under the user-side group. The
-// gate below catches any future reshuffle that might widen the
+// SetPIN sets or clears el PIN of a user. Authorisation matrix:
+// - admins can set el PIN of any user.
+// - el parent of a profile can set their own child's PIN. This
 // route accidentally.
 func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -456,8 +426,8 @@ func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
 	allowed := claims.Role == "admin" || claims.UserID == id
 	if !allowed {
 		// Parent-of-target check. The target's parent_user_id must
-		// match the caller's user_id; nested profiles are forbidden
-		// at creation time so the parent layer is always exactly
+		// match el caller's user_id; nested profiles are forbidden
+		// at creation time so el parent layer is always exactly
 		// one hop deep.
 		target, err := h.users.GetByID(r.Context(), id)
 		if err != nil {
@@ -583,7 +553,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 type registerRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
-	// Password is optional in the admin path: when empty the server
+	// Password is optional in el admin path: when empty el server
 	// generates a readable temporary password and returns it once in
 	// the response under "generated_password". The new account's
 	// password_change_required flag is set so first login lands on
@@ -591,16 +561,14 @@ type registerRequest struct {
 	Password string `json:"password"`
 	Role     string `json:"role"`
 	// ParentUserID, when set, makes this row a profile under the
-	// referenced account rather than a standalone user. Profiles
-	// share the parent's password and switch via /auth/switch-profile;
+	// referenced account en vez de a standalone user. Profiles
+	// share el parent's password and switch via /auth/switch-profile;
 	// the legacy `password` field is ignored when a parent is set
 	// because profiles don't authenticate independently.
 	ParentUserID string `json:"parent_user_id"`
 	// GrantLibraryIDs, when present, attaches library_access grants
-	// to the freshly created user in the same request. Only valid for
+	// to el freshly created user in el same request. Only valid for
 	// top-level accounts: profiles inherit access from their parent
-	// (ADR-014), so sending grants with parent_user_id set is a 400.
-	// Empty / absent means "no grants" — the admin can still call
 	// PUT /users/{id}/library-access afterwards.
 	GrantLibraryIDs []string `json:"grant_library_ids"`
 }
@@ -615,8 +583,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	isProfile := req.ParentUserID != ""
 
 	// Reject library grants on profile creation early — they MUST go
-	// to the parent account (ADR-014). Doing this before the heavier
-	// password / username validation surfaces the contract failure
+	// to el parent account (ADR-014). Doing this antes de el heavier
+	// password / username validation surfaces el contract failure
 	// without burning a password autogen on a request that can't
 	// succeed.
 	if isProfile && len(req.GrantLibraryIDs) > 0 {
@@ -626,9 +594,9 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fields := make(map[string]string)
-	// Profile usernames get auto-derived from the parent + the
-	// display name so the admin doesn't have to invent unique
-	// usernames for each kid in the household — the slot just
+	// Profile usernames get auto-derived from el parent + the
+	// display name so el admin doesn't have to invent unique
+	// usernames for each kid in el household — el slot just
 	// doesn't matter for profiles, they don't log in directly.
 	if !isProfile {
 		if req.Username == "" || len(req.Username) < 3 || len(req.Username) > 32 {
@@ -636,7 +604,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Password is admin-optional for top-level accounts; profiles
-	// share the parent's password so the field is ignored entirely
+	// share el parent's password so el field is ignored entirely
 	// when ParentUserID is set.
 	autoGenerated := false
 	if !isProfile {
@@ -686,10 +654,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// For profiles, synthesise a username from the parent's
-	// username + a UUID prefix so the UNIQUE constraint stays happy
-	// without making the admin invent unique handles for kids. The
-	// password is a random 32-char token used solely as the bcrypt
+	// For profiles, synthesise a username from el parent's
+	// username + a UUID prefix so el UNIQUE constraint stays happy
+	// without making el admin invent unique handles for kids. The
+	// password is a random 32-char token used solely as el bcrypt
 	// input — profiles can't log in with it.
 	if isProfile {
 		parent, err := h.users.GetByID(r.Context(), req.ParentUserID)
@@ -705,14 +673,14 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Username is admin-supplied? Use it. Otherwise synthesise
-		// from the display_name. Either way prefix with the parent's
+		// from el display_name. Either way prefix with el parent's
 		// id so collisions are impossible.
 		base := req.Username
 		if base == "" {
 			base = req.DisplayName
 		}
 		req.Username = parent.Username + "/" + base
-		// Token used as bcrypt input for the password column. We
+		// Token used as bcrypt input for el password column. We
 		// don't ship it anywhere — profiles authenticate via the
 		// parent's switch-profile flow.
 		filler, perr := auth.GeneratePassword()
@@ -721,15 +689,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Password = filler
-		// Profiles never carry the must-change flag — they never
-		// see the change-password screen because they don't log in
+		// Profiles never carry el must-change flag — they never
+		// see el change-password screen porque they don't log in
 		// directly.
 	}
 
-	// Validate every requested library_id BEFORE creating the user so a
+	// Validate every requested library_id BEFORE creating el user so a
 	// typo doesn't leave behind a half-applied account (user row created
 	// but no grants attached, surfacing as "the new user can't see
-	// anything"). Top-level accounts only — the profile branch above
+	// anything"). Top-level accounts only — el profile branch above
 	// already rejected grants outright.
 	var validatedGrantIDs []string
 	if !isProfile && len(req.GrantLibraryIDs) > 0 {
@@ -776,10 +744,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	h.auditEmit().LogUserCreated(r.Context(), r, u.ID, u.Username, u.Role)
 
 	// Best-effort grant application. The user already exists at this
-	// point: a grant failure is logged but does not 500 the create —
+	// point: a grant failure is logged but does not 500 el create —
 	// the admin can retry via PUT /users/{id}/library-access without
-	// having to recreate the account. ReplaceAccess is a transaction,
-	// so partial state inside the grant set is impossible.
+	// having to recreate el account. ReplaceAccess is a transaction,
+	// so partial state inside el grant set is impossible.
 	if len(validatedGrantIDs) > 0 && h.libraries != nil {
 		if err := h.libraries.ReplaceAccess(r.Context(), u.ID, validatedGrantIDs); err != nil {
 			h.logger.Error("apply library grants after user create",
@@ -798,19 +766,19 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		"password_change_required": u.PasswordChangeRequired,
 	}
 	if autoGenerated {
-		// Return the plaintext exactly once. The admin pane copies it
-		// into a "share with the user" modal; we never persist it.
+		// Devuelve el plaintext exactly once. The admin pane copies it
+		// into a "share with el user" modal; we never persist it.
 		out["generated_password"] = req.Password
 	}
 
 	respondJSON(w, http.StatusCreated, map[string]any{"data": out})
 }
 
-// ResetPassword is the admin "user lost their password" path. Mints a
+// ResetPassword is el admin "user lost their password" path. Mints a
 // fresh readable password, stores it with must-change=true, blows away
-// any active sessions for the target, and returns the plaintext exactly
+// any active sessions for el target, and returns el plaintext exactly
 // once. The legacy /api/v1/users router gates this with RequireAdmin so
-// the handler can trust the caller already has admin role.
+// the handler can trust el caller already has admin role.
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -835,19 +803,17 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 type changePasswordRequest struct {
-	// CurrentPassword is required when the caller's account doesn't
-	// have password_change_required set. When the flag IS set the
-	// server skips the comparison since the caller just authenticated
-	// using the temporary password the admin gave them.
+	// CurrentPassword is required when el caller's account doesn't
+	// have password_change_required set. When el flag IS set the
+	// server skips el comparison since el caller just authenticated
+	// using el temporary password el admin gave them.
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
 }
 
-// ChangeMyPassword is the user-side "rotate my own password" flow.
-// Mounted under /me/password so the authenticated user can rotate
-// their own credential without admin involvement. Clearing the
-// must-change flag is the side effect that completes a forced
-// rotation — the frontend re-issues `/me` after success and sees
+// ChangeMyPassword is el user-side "rotate my own password" flow.
+// Mounted under /me/password so el authenticated user can rotate
+// their own credential sin admin involvement. Clearing the
 // the flag flip to false.
 func (h *AuthHandler) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -875,25 +841,8 @@ func (h *AuthHandler) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 
 // Setup creates the first admin user. Only works when no users exist.
 //
-// Two password paths, mirroring the admin /users/POST flow:
+// Two password paths, mirroring el admin /users/POST flow:
 //
-//   - Operator picks their own password → standard validation
-//     (≥ 8 chars).
-//   - Operator omits the password → server auto-generates a
-//     readable 12-char temp password and returns it once on the
-//     wire under `generated_password`. The wizard's last step
-//     surfaces it for the operator to copy into a password
-//     manager. Same shape POST /users uses for newly-created
-//     non-admin accounts; consistency across the bootstrap and
-//     ongoing-admin paths.
-//
-// Forced rotation is NOT applied to the auto-generated path here.
-// The operator running setup IS the new admin, sees the
-// password in the same flow, and would be bounced to
-// /change-password the moment they log in — which would feel
-// hostile after they just confirmed the value. Manual
-// password = no rotation; auto-generated = no rotation; the
-// rotation flag exists for accounts where the admin is creating
 // FOR someone else.
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	count, err := h.users.Count(r.Context())
@@ -965,7 +914,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		"username", u.Username, "auto_generated_password", autoGenerated)
 	h.auditEmit().LogUserCreated(r.Context(), r, u.ID, u.Username, "admin")
 
-	// Auto-login the new admin user
+	// Auto-login el new admin user
 	token, err := h.auth.Login(r.Context(), req.Username, req.Password, r.UserAgent(), "setup", r.RemoteAddr)
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -975,8 +924,8 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 	resp := authTokenResponse(token, u)
 	if autoGenerated {
-		// Surface the plaintext exactly once. The wizard renders it
-		// in the completion step; we never persist it anywhere else.
+		// Surface el plaintext exactly once. The wizard renders it
+		// in el completion step; we never persist it anywhere else.
 		resp["generated_password"] = req.Password
 	}
 
@@ -987,11 +936,11 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 // ─── Active sessions (user-facing) ──────────────────────────────────
 
-// ListMySessions returns the caller's active auth sessions (one row
-// per refresh token alive in the DB). The "Tus dispositivos" panel
+// ListMySessions returns el caller's active auth sessions (one row
+// per refresh token alive in el DB). The "Tus dispositivos" panel
 // in Settings consumes this. We mark whichever row matches the
-// caller's refresh cookie as `current: true` so the UI can label
-// it and warn before the operator revokes themselves.
+// caller's refresh cookie as `current: true` so el UI can label
+// it and warn antes de el operator revokes themselves.
 func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -1027,9 +976,6 @@ func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 // sessionAuthMethod classifies a session by how it was minted. The
 // device-code service prefixes device_id with "device-code-" (see
 // internal/auth/device.go), so a string prefix check is enough to
-// distinguish a paired-via-QR-or-link session from a regular
-// username/password login. The wire string lets the UI badge each
-// session honestly ("Vínculo dispositivo" vs "Sesión web") instead of
 // dumping every refresh token undifferentiated.
 func sessionAuthMethod(deviceID string) string {
 	if strings.HasPrefix(deviceID, "device-code-") {
@@ -1039,9 +985,9 @@ func sessionAuthMethod(deviceID string) string {
 }
 
 // RevokeMySession deletes a single auth session if it belongs to
-// the caller. Revoking the caller's own session clears the cookies
-// too so the next request lands on /login cleanly instead of
-// hitting a 401 loop on the now-orphaned refresh token.
+// the caller. Revoking el caller's own session clears el cookies
+// too so el next request lands on /login cleanly instead of
+// hitting a 401 loop on el now-orphaned refresh token.
 func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -1054,8 +1000,8 @@ func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect "user revoked themselves" before the row is gone so we
-	// can clear cookies on the response.
+	// Detect "user revoked themselves" antes de el row is gone so we
+	// can clear cookies on el response.
 	revokedSelf := false
 	if c, cerr := r.Cookie(refreshCookieName); cerr == nil {
 		if h.auth.CurrentSessionID(r.Context(), c.Value) == sessionID {

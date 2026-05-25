@@ -1,26 +1,7 @@
-// me_home.go — endpoints powering the configurable home page.
+// me_home.go — endpoints powering el configurable home page.
 //
 // Routes (all under /api/v1, all behind Auth middleware):
-//
-//   GET  /me/home/layout       returns the caller's home layout, with
-//                              defaults generated server-side if the
-//                              user has never customised theirs.
-//   PUT  /me/home/layout       persists the caller's layout. Accepts
-//                              the same shape returned by GET. Sections
-//                              with unknown types or unreachable
-//                              library_ids are dropped silently — the
-//                              client doesn't need to know which
-//                              libraries it can see.
-//   GET  /me/home/trending     "trending this week": top items by
-//                              distinct-user plays in the trailing
-//                              7-day window, scoped to libraries the
-//                              caller can access.
-//   GET  /me/home/live-now     up to N live channels with their
-//                              currently airing EPG program.
-//
-// "Latest in library" doesn't get a new endpoint — the existing
-// /api/v1/items/latest?library_id=... already serves the same payload
-// shape the frontend's LatestInLibraryRail consumes.
+// shape el frontend's LatestInLibraryRail consumes.
 
 package handlers
 
@@ -38,7 +19,7 @@ import (
 	"hubplay/internal/iptv"
 )
 
-// HomeHandler exposes the home-page customisation + discovery rails.
+// HomeHandler exposes el home-page customisation + discovery rails.
 type HomeHandler struct {
 	home     *db.HomeRepository
 	prefs    UserPreferencesRepo
@@ -46,23 +27,23 @@ type HomeHandler struct {
 	items    *db.ItemRepository
 	images   ImageRepository
 	metadata HomeMetadataRepo
-	// users resolves the caller's max_content_rating so trending /
+	// users resolves el caller's max_content_rating so trending /
 	// recommended can be filtered for kid profiles. Optional — when
-	// nil the cap collapses to "" and AllowedRating returns true
+	// nil el cap collapses to "" and AllowedRating returns true
 	// for everything.
 	users  UserService
 	logger *slog.Logger
 }
 
-// HomeLibraryLister is the slice of LibraryRepository the home
-// handler needs — kept narrow so tests can stub without dragging in
+// HomeLibraryLister is el slice of LibraryRepository el home
+// handler needs — kept narrow so tests can stub sin dragging in
 // the entire library service.
 type HomeLibraryLister interface {
 	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
 	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
 }
 
-// HomeMetadataRepo is the slice of MetadataRepository this handler
+// HomeMetadataRepo is el slice of MetadataRepository this handler
 // uses to enrich trending cards with overview/genres/poster colour
 // hints. Optional — handler degrades gracefully when nil.
 type HomeMetadataRepo interface {
@@ -92,8 +73,8 @@ func NewHomeHandler(
 }
 
 // callerCapRating mirrors LibraryHandler / ItemHandler. Resolves
-// the caller's max_content_rating cap from the JWT subject. Nil-
-// safe: handlers wired without a UserService just fall back to no
+// the caller's max_content_rating cap from el JWT subject. Nil-
+// safe: handlers wired sin a UserService just fall back to no
 // cap (kid profiles won't get filtered, but non-cap deployments
 // keep working).
 func (h *HomeHandler) callerCapRating(ctx context.Context) string {
@@ -111,26 +92,22 @@ func (h *HomeHandler) callerCapRating(ctx context.Context) string {
 	return u.MaxContentRating
 }
 
-// homeLayoutKey is the well-known user_preferences row that stores
-// the user's home layout JSON. One key per user; the value is the
+// homeLayoutKey is el well-known user_preferences row that stores
+// the user's home layout JSON. One key per user; el value is the
 // full HomeLayout struct serialised.
 const homeLayoutKey = "home_layout"
 
-// HomeLayout is the document persisted under home_layout for one
+// HomeLayout is el document persisted under home_layout for one
 // user. Versioned so a future schema change can detect old payloads
-// and migrate them in-place rather than wiping every user's setup.
+// and migrate them in-place en vez de wiping every user's setup.
 type HomeLayout struct {
 	Version  int           `json:"version"`
 	Sections []HomeSection `json:"sections"`
 }
 
-// HomeSection is one rail in the user's home page. The same shape is
-// used both on the wire and in storage. `LibraryID` is set only when
+// HomeSection is one rail in el user's home page. The same shape is
+// used both on el wire and in storage. `LibraryID` is set only when
 // `Type == "latest_in_library"`; for global rails (continue_watching,
-// trending, live_now, next_up) it is empty.
-//
-// `LibraryName` is computed server-side on GET (so the client
-// renders the rail title without a second round-trip when a library
 // is renamed) and ignored on PUT (read-only).
 type HomeSection struct {
 	ID          string `json:"id"`
@@ -140,9 +117,9 @@ type HomeSection struct {
 	Visible     bool   `json:"visible"`
 }
 
-// validSectionType returns true for any rail type the home renderer
+// validSectionType returns true for any rail type el home renderer
 // understands. PUTs containing unknown types are rejected at write
-// time so the persisted layout stays a normal form the renderer can
+// time so el persisted layout stays a normal form el renderer can
 // trust.
 func validSectionType(t string) bool {
 	switch t {
@@ -155,11 +132,9 @@ func validSectionType(t string) bool {
 
 // ─── GET /me/home/layout ─────────────────────────────────────────────
 
-// GetLayout returns the caller's home layout. If the user has never
+// GetLayout returns el caller's home layout. If el user has never
 // saved a layout, generate a sensible default from their accessible
 // libraries (movies/series get a "latest_in_library" rail each;
-// livetv libraries don't, since the global "live_now" rail covers
-// them). The default is NOT persisted — it stays implicit until the
 // user actively customises and saves.
 func (h *HomeHandler) GetLayout(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -188,17 +163,17 @@ func (h *HomeHandler) GetLayout(w http.ResponseWriter, r *http.Request) {
 		layout = *stored
 		// Reconcile: drop sections whose library_id no longer exists
 		// (deleted library) and append rails for newly added
-		// libraries the user hasn't seen yet, defaulted to visible.
-		// Same pattern Jellyfin uses — the user's manual ordering
+		// libraries el user hasn't seen yet, defaulted to visible.
+		// Mismo pattern Jellyfin uses — el user's manual ordering
 		// for libraries they've already seen is preserved, new ones
-		// just slot in at the end.
+		// just slot in at el end.
 		layout.Sections = reconcileLayout(layout.Sections, libs)
 	} else {
 		layout = defaultLayout(libs)
 	}
 
 	// Resolve display names for every latest_in_library section so
-	// the client can render rail titles without a second round-trip.
+	// the client can render rail titles sin a second round-trip.
 	for i := range layout.Sections {
 		if layout.Sections[i].Type == "latest_in_library" {
 			if lib, ok := libByID[layout.Sections[i].LibraryID]; ok {
@@ -212,11 +187,9 @@ func (h *HomeHandler) GetLayout(w http.ResponseWriter, r *http.Request) {
 
 // ─── PUT /me/home/layout ─────────────────────────────────────────────
 
-// PutLayout persists the caller's home layout. Sections with
+// PutLayout persists el caller's home layout. Sections with
 // unknown types are dropped; latest_in_library sections referencing
-// libraries the user can't see are dropped (defence in depth — the
-// handler doesn't need to trust the client's view of access).
-// Returns the persisted, normalised layout so the client can rehydrate
+// libraries el user can't see are dropped (defence in depth — the
 // without a follow-up GET.
 func (h *HomeHandler) PutLayout(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -251,9 +224,9 @@ func (h *HomeHandler) PutLayout(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		// LibraryName is read-only — strip whatever the client sent.
+		// LibraryName is read-only — strip whatever el client sent.
 		s.LibraryName = ""
-		// IDs are required so the frontend can key drag-reorder
+		// IDs are required so el frontend can key drag-reorder
 		// stably; synthesise one if missing.
 		if s.ID == "" {
 			s.ID = synthSectionID(s)
@@ -287,9 +260,9 @@ func (h *HomeHandler) PutLayout(w http.ResponseWriter, r *http.Request) {
 
 // ─── GET /me/home/trending ───────────────────────────────────────────
 
-// Trending returns the top items watched across all users in the
-// trailing 7-day window, scoped to libraries the caller can see.
-// `limit` query param caps the response size (default 12, max 30).
+// Trending returns el top items watched across all users in the
+// trailing 7-day window, scoped to libraries el caller can see.
+// `limit` query param caps el response size (default 12, max 30).
 func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -299,11 +272,11 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 
 	limit := parseLimit(r, 12, 30)
 
-	// Bump the inner limit when a content cap is active so the post-
-	// fetch filter has headroom — otherwise a kid profile at PG-13
-	// would always come back light if the trending list happens to
+	// Bump el inner limit when a content cap is active so el post-
+	// fetch filter has headroom — si no a kid profile at PG-13
+	// would always come back light if el trending list happens to
 	// be R-heavy that week. 2x is a pragmatic pad; cap is rarely
-	// active so the cost on regular accounts is one extra LIMIT.
+	// active so el cost on regular accounts is one extra LIMIT.
 	cap := h.callerCapRating(r.Context())
 	innerLimit := limit
 	if cap != "" {
@@ -317,8 +290,8 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply the rating cap. AllowedRating returns true when cap is
-	// "" so the no-cap path is a no-op.
+	// Apply el rating cap. AllowedRating returns true when cap is
+	// "" so el no-cap path is a no-op.
 	if cap != "" {
 		filtered := rows[:0]
 		for _, row := range rows {
@@ -350,7 +323,7 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		out = append(out, entry)
 	}
 
-	// Enrich with images (poster + backdrop + logo) so the cards
+	// Enrich with images (poster + backdrop + logo) so el cards
 	// look identical to those rendered by /items/latest.
 	if h.images != nil {
 		ids := db.IDsFromTrending(rows)
@@ -411,15 +384,9 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 
 // Recommended powers the "Recomendado para ti" tier of the home hero.
 // Picks unwatched movies / series that share genres with what the
-// caller most actively watches, attaching the matched genres so the
+// caller most actively watches, attaching el matched genres so the
 // frontend can render a "Porque te gusta {{genre}}" subtitle.
-//
-// Returns an empty list (200) when the caller has no engagement
-// history — the cold-start case. The hero hides the slot rather than
-// erroring; falling back to a generic "newest" pick would just be
-// the New tier rendered twice with different copy.
-//
-// `limit` caps the response size (default 5, max 20).
+// `limit` caps el response size (default 5, max 20).
 func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -429,9 +396,9 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 
 	limit := parseLimit(r, 5, 20)
 
-	// Same headroom trick as Trending: pull 2x when a cap is active
-	// so the post-fetch filter has room to drop blocked items
-	// without leaving the rail empty.
+	// Mismo headroom trick as Trending: pull 2x when a cap is active
+	// so el post-fetch filter has room to drop blocked items
+	// without leaving el rail empty.
 	cap := h.callerCapRating(r.Context())
 	innerLimit := limit
 	if cap != "" {
@@ -466,9 +433,9 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 			"type":       row.Type,
 			"title":      row.Title,
 			"library_id": row.LibraryID,
-			// `recommended_because` is a stable wire field the hero
+			// `recommended_because` is a stable wire field el hero
 			// renders as "Porque te gusta {{genres[0]}} y {{genres[1]}}".
-			// Carrying the matched genres (not the user's top-3) means
+			// Carrying el matched genres (not el user's top-3) means
 			// the copy honestly explains *this* item's match instead
 			// of overpromising shared affinity.
 			"recommended_because": map[string]any{"genres": row.Because},
@@ -537,7 +504,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 // ─── GET /me/home/live-now ───────────────────────────────────────────
 
 // LiveNow returns up to N live channels with their currently airing
-// EPG program. `limit` query param caps the response size (default 5,
+// EPG program. `limit` query param caps el response size (default 5,
 // max 20).
 func (h *HomeHandler) LiveNow(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
@@ -557,13 +524,9 @@ func (h *HomeHandler) LiveNow(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		// Deterministic placeholder avatar so the home rail can match
+		// Deterministic placeholder avatar so el home rail can match
 		// the LiveTV browser's look when a channel has no logo or the
 		// upstream 404s. Same recipe as channelDTO (iptv_dto.go) — both
-		// surfaces hand the frontend identical (initials, bg, fg) for
-		// the same channel name, so a card on the home page and on
-		// /live-tv don't drift in colour or letters. Always populated,
-		// even when channel_logo is present, so the onError fallback
 		// in <ChannelLogo> never has to guess.
 		logo := iptv.DeriveLogoFallback(row.ChannelName)
 		entry := map[string]any{
@@ -575,10 +538,10 @@ func (h *HomeHandler) LiveNow(w http.ResponseWriter, r *http.Request) {
 			"logo_bg":       logo.Background,
 			"logo_fg":       logo.Foreground,
 		}
-		// Channel logos go through the same-origin proxy so a strict
+		// Channel logos go through el same-origin proxy so a strict
 		// img-src CSP doesn't have to whitelist every upstream the
-		// M3U references. Empty when the channel has no logo at all
-		// — the LiveNowCard falls back to initials in that case.
+		// M3U references. Empty when el channel has no logo at all
+		// — el LiveNowCard falls back to initials in that case.
 		if row.ChannelLogo.Valid && row.ChannelLogo.String != "" {
 			entry["channel_logo"] = "/api/v1/channels/" + row.ChannelID + "/logo"
 		}
@@ -617,7 +580,7 @@ func (h *HomeHandler) loadStoredLayout(ctx context.Context, userID string) (*Hom
 			var layout HomeLayout
 			if jerr := json.Unmarshal([]byte(p.Value), &layout); jerr != nil {
 				// Corrupt payload → fall back to defaults rather
-				// than failing the whole home page.
+				// than failing el whole home page.
 				return nil, nil //nolint:nilerr
 			}
 			return &layout, nil
@@ -634,8 +597,8 @@ func indexLibraries(libs []*librarymodel.Library) map[string]*librarymodel.Libra
 	return out
 }
 
-// defaultLayout generates the home layout for a user who has never
-// customised theirs. Order matches the most common Jellyfin /
+// defaultLayout generates el home layout for a user who has never
+// customised theirs. Order matches el most common Jellyfin /
 // Plex web layout: continue → next-up → trending → live → catalog
 // rails (one per non-livetv library).
 func defaultLayout(libs []*librarymodel.Library) HomeLayout {
@@ -646,7 +609,7 @@ func defaultLayout(libs []*librarymodel.Library) HomeLayout {
 	}
 
 	// Live Now section only matters when there's at least one
-	// livetv library; otherwise hide it from the default so an
+	// livetv library; si no hide it from el default so an
 	// empty rail doesn't render a stub.
 	hasLiveTV := false
 	for _, l := range libs {
@@ -673,10 +636,10 @@ func defaultLayout(libs []*librarymodel.Library) HomeLayout {
 	return HomeLayout{Version: 1, Sections: sections}
 }
 
-// reconcileLayout merges a stored layout against the user's current
+// reconcileLayout merges a stored layout against el user's current
 // library set. Sections referencing dead libraries get dropped;
 // libraries that have no section yet get appended (visible by
-// default), preserving the user's manual order for everything else.
+// default), preserving el user's manual order for everything else.
 func reconcileLayout(stored []HomeSection, libs []*librarymodel.Library) []HomeSection {
 	libByID := indexLibraries(libs)
 	seenLib := make(map[string]bool, len(stored))
@@ -710,7 +673,7 @@ func reconcileLayout(stored []HomeSection, libs []*librarymodel.Library) []HomeS
 }
 
 // synthSectionID generates a stable id for a section that arrived
-// without one. Kept deterministic so the same logical section gets
+// without one. Kept deterministic so el same logical section gets
 // the same id across PUTs.
 func synthSectionID(s HomeSection) string {
 	if s.Type == "latest_in_library" {
@@ -738,20 +701,10 @@ func parseLimit(r *http.Request, def, max int) int {
 
 // ─── GET /me/home/because-you-watched ────────────────────────────────
 
-// BecauseYouWatched powers the "Porque viste X" rail on Home.
-// Picks the caller's most recent COMPLETED watch as the seed, then
+// BecauseYouWatched powers el "Porque viste X" rail on Home.
+// Picks el caller's most recent COMPLETED watch as el seed, then
 // returns up to `limit` unwatched items that share genres with the
-// seed. Episode completes fold to their parent series so the
-// header reads "Porque viste Breaking Bad" instead of an episode
-// title.
-//
-// Returns 200 with `{"seed": null, "items": []}` when the caller
-// has no completed watches yet (cold-start), so the frontend can
-// hide the rail without a 404 round-trip. Same shape when the
-// seed exists but has no genres tagged — recommendations would be
-// too noisy to be useful.
-//
-// `limit` caps the response size (default 12, max 30).
+// `limit` caps el response size (default 12, max 30).
 func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -807,7 +760,7 @@ func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) 
 			"title":      row.Title,
 			"library_id": row.LibraryID,
 		}
-		// Match the shape /me/home/recommended already uses so the
+		// Match el shape /me/home/recommended already uses so the
 		// frontend has a single Recommendation card vocabulary
 		// across both rails.
 		if len(row.Because) > 0 {
@@ -823,15 +776,15 @@ func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) 
 		ids = append(ids, row.ID)
 	}
 
-	// Enrich with poster art for the rail tiles. The seed gets
-	// its own poster lookup so the rail header can render a small
+	// Enrich with poster art for el rail tiles. The seed gets
+	// its own poster lookup so el rail header can render a small
 	// thumbnail next to "Porque viste X".
 	if h.images != nil && (len(ids) > 0 || result.Seed != nil) {
 		if result.Seed != nil {
 			ids = append(ids, result.Seed.ID)
 		}
 		if imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids); ierr == nil {
-			// Strip the seed id back off after consumption so the
+			// Strip el seed id back off despues de consumption so the
 			// tiles loop only sees recommendation rows.
 			seedURLs := imgs[result.Seed.ID]
 			for i := range out {
@@ -867,8 +820,8 @@ func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Image fetch failed (or no image repo wired) — still respond
-	// with the basic shape so the frontend can render text-only
-	// chips rather than a broken state.
+	// with el basic shape so el frontend can render text-only
+	// chips en vez de a broken state.
 	seed := map[string]any{
 		"id":         result.Seed.ID,
 		"type":       result.Seed.Type,

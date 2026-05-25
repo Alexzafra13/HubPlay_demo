@@ -15,11 +15,7 @@ import (
 )
 
 // InsertPendingRequest persiste una peticion en estado 'pending'.
-// El indice unico parcial sobre (direction, peer_server_uuid) WHERE
-// status='pending' devolvera un error en la base si ya hay una
-// pendiente con el mismo (direccion, peer); el caller debe haber
-// llamado a GetActivePendingRequestByPeer antes para devolver el
-// id existente en vez de duplicar.
+// Indice unico parcial bloquea duplicados; caller debe chequear antes.
 func (r *Repository) InsertPendingRequest(ctx context.Context, p *federation.PendingRequest) error {
 	var err error
 	if r.useSQLite() {
@@ -78,8 +74,7 @@ func (r *Repository) GetPendingRequestByID(ctx context.Context, id string) (*fed
 	return pendingFromPgRow(row), nil
 }
 
-// GetActivePendingRequestByPeer devuelve (peticion, true) si hay una
-// activa para (direccion, server_uuid); (nil, false) si no.
+// GetActivePendingRequestByPeer devuelve (peticion, true) si existe activa.
 func (r *Repository) GetActivePendingRequestByPeer(ctx context.Context, direction federation.PendingRequestDirection, serverUUID string) (*federation.PendingRequest, bool, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetActivePendingRequestByPeer(ctx, sqlc.GetActivePendingRequestByPeerParams{
@@ -133,9 +128,8 @@ func (r *Repository) ListPendingRequests(ctx context.Context, limit int) ([]*fed
 	return out, nil
 }
 
-// MarkPendingRequestResponded mueve la peticion a un estado terminal.
-// Devuelve domain.ErrNotFound si ya no esta en estado pending (race:
-// otro request la acepto antes, o la barrio el job de expiry).
+// MarkPendingRequestResponded mueve a estado terminal.
+// ErrNotFound si ya no es pending (race con otro request o expiry).
 func (r *Repository) MarkPendingRequestResponded(ctx context.Context, id string, status federation.PendingRequestStatus, by string, at time.Time) error {
 	var (
 		n   int64
@@ -170,8 +164,7 @@ func (r *Repository) MarkPendingRequestResponded(ctx context.Context, id string,
 	return nil
 }
 
-// ExpirePendingRequests marca como 'expired' las pending con
-// expires_at < `before`. Devuelve cuantas se actualizaron.
+// ExpirePendingRequests marca como 'expired' las pending vencidas.
 func (r *Repository) ExpirePendingRequests(ctx context.Context, before time.Time) (int, error) {
 	var (
 		n   int64
