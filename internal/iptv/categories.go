@@ -24,7 +24,7 @@ const (
 	CategoryAdult          Category = "adult"
 )
 
-// AllCategories lists every canonical category in UI display order.
+// AllCategories en orden de UI.
 var AllCategories = []Category{
 	CategoryGeneral,
 	CategoryNews,
@@ -41,21 +41,19 @@ var AllCategories = []Category{
 	CategoryAdult,
 }
 
-// categoryKeyword is a single matcher in the normalizer pipeline.
-// Order in categoryKeywords matters: earlier entries win on ambiguous groups
-// (e.g. "sports news" is Sports, not News).
+// categoryKeyword — las entradas anteriores ganan en ambiguos
+// (ej. "sports news" → Sports, no News).
 type categoryKeyword struct {
 	cat      Category
 	keywords []string
 }
 
-// categoryKeywords holds the priority-ordered keyword table. Keywords are
-// lowercased, accent-stripped substrings — see Canonical for normalization.
+// categoryKeywords — tabla de keywords por prioridad. Minúsculas, sin acentos.
 var categoryKeywords = []categoryKeyword{
-	// Adult first: we never want a racy group misclassified as entertainment.
+	// Adult primero: evitar clasificar contenido adulto como entretenimiento.
 	{CategoryAdult, []string{"adult", "adulto", "xxx", "erotic", "erotica", "porn", "hustler", "playboy"}},
 
-	// Sports before news — "sports news" should be Sports.
+	// Deportes antes que noticias — "sports news" → Sports.
 	{CategorySports, []string{
 		"sport", "deport", "futbol", "football", "soccer", "laliga", "la liga",
 		"champions", "uefa", "fifa", "nba", "nfl", "mlb", "nhl", "ufc", "boxeo", "boxing",
@@ -64,13 +62,13 @@ var categoryKeywords = []categoryKeyword{
 		"teledeporte", "real madrid tv", "barca tv", "bein sport",
 	}},
 
-	// Kids before entertainment — "cartoon entertainment" is Kids.
+	// Kids antes que entretenimiento.
 	{CategoryKids, []string{
 		"kids", "infantil", "ninos", "cartoon", "disney", "nick", "nickelodeon",
 		"boomerang", "baby tv", "babytv", "clan", "pocoyo", "junior", "cbeebies",
 	}},
 
-	// Documentaries before culture — "history docs" is Documentaries.
+	// Documentales antes que cultura.
 	{CategoryDocumentaries, []string{
 		"documental", "documentary", "doc ", " doc", "nat geo", "natgeo",
 		"national geographic", "discovery", "history", "historia", "animal planet",
@@ -78,9 +76,8 @@ var categoryKeywords = []categoryKeyword{
 	}},
 
 	{CategoryNews, []string{
-		// "informati" covers Spanish (informativo/informativos) AND Catalan
-		// (informatiu/informatius). "telediari" covers Spanish "telediario"
-		// and Catalan "telediari". "notici" covers noticia/noticias/notícies.
+		// "informati" cubre ES (informativo/s) y CA (informatiu/s).
+		// "telediari" cubre ES y CA. "notici" cubre noticia/s/notícies.
 		"news", "noticia", "notici", "informati", "telediari", "24h", "24 horas",
 		"rne", "cnn", "bbc news", "bbc world", "euronews", "al jazeera", "bloomberg",
 		"la sexta noticias", "antena 3 noticias", "sky news",
@@ -116,22 +113,16 @@ var categoryKeywords = []categoryKeyword{
 		"divinity", "neox", "cuatro", "energy", "fdf", "paramount comedy",
 	}},
 
-	// International goes last among real categories: most group-titles that include
-	// "international" also include a stronger signal (news, sports). If nothing
-	// else matched, fall through to this.
+	// Internacional último: la mayoría de group-titles con "international"
+	// tienen señal más fuerte (news, sports). Fallback.
 	{CategoryInternational, []string{
 		"international", "internacional", "world", "mundo", "europa", "europe",
 	}},
 }
 
-// Canonical maps a raw M3U `group-title` to a canonical Category.
-// It is case-insensitive, accent-insensitive, and returns CategoryGeneral
-// for empty or unknown groups. The mapping is deterministic and safe to
-// cache or use in tests.
-//
-// The intended use is at the edge (handler/DTO), not inside the scanner —
-// the raw GroupName is preserved in M3UChannel for operators who want to
-// expose their provider's native grouping.
+// Canonical mapea un group-title crudo a una Category canónica.
+// Case/accent-insensitive. Devuelve CategoryGeneral para vacíos o
+// desconocidos. El GroupName crudo se preserva en M3UChannel.
 func Canonical(groupTitle string) Category {
 	needle := normalize(groupTitle)
 	if needle == "" {
@@ -147,10 +138,8 @@ func Canonical(groupTitle string) Category {
 	return CategoryGeneral
 }
 
-// diacriticFolder maps common Latin diacritics to their ASCII form so
-// "Películas" and "peliculas" hit the same keywords. Kept as a small,
-// stdlib-only table because the set of accented characters seen in IPTV
-// group-titles is narrow (Spanish / Catalan / French / Portuguese).
+// diacriticFolder pliega diacríticos latinos a ASCII. Tabla stdlib-only
+// porque el set de acentos en group-titles IPTV es acotado (ES/CA/FR/PT).
 var diacriticFolder = strings.NewReplacer(
 	"á", "a", "à", "a", "ä", "a", "â", "a", "ã", "a", "å", "a",
 	"é", "e", "è", "e", "ë", "e", "ê", "e",
@@ -166,14 +155,14 @@ var diacriticFolder = strings.NewReplacer(
 	"Ñ", "n", "Ç", "c",
 )
 
-// normalize lowercases, strips diacritics, and wraps in spaces so substring
-// checks against " keyword " match exact tokens as well as phrases.
+// normalize: minúsculas + strip diacríticos + wrapping en espacios
+// para que las comprobaciones por substring matcheen tokens exactos.
 func normalize(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" {
 		return s
 	}
 	s = diacriticFolder.Replace(s)
-	// Collapse whitespace so " F1 " matches " f1 " after trim.
+	// Colapsa whitespace para que " F1 " matchee " f1 ".
 	return " " + strings.Join(strings.Fields(s), " ") + " "
 }

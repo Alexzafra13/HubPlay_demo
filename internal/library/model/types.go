@@ -1,32 +1,19 @@
-// Package model contains the library-domain types (Library, Item,
-// MediaStream, Image, Chapter, EpisodeSegment, Studio, Collection,
-// ExternalID, Metadata, Person, ...) the rest of the codebase
-// consumes.
+// Package model contiene los tipos del dominio de library (Library, Item,
+// MediaStream, Image, Chapter, etc.).
 //
-// Vive en su propio sub-paquete leaf — en lugar de en `internal/library/`
-// directo — para romper el ciclo de dependencias:
-//
-//   internal/library         imports internal/db            (for repo concretes)
-//   internal/db              imports internal/library/model (for return types)
-//   internal/library         imports internal/library/model (for types it also uses)
-//
-// `library/model` es un leaf (sin imports más allá de stdlib) →
-// ciclo imposible. Tercer y último sub-bloque de Iteración 3 del
-// plan de intervención post-auditoría 2026-05-14; los sub-bloques
-// auth y iptv ya están cerrados (commits ac60ba0 y 4c686d0).
-//
-// Cierra "Opción B" del olor A para el feature library, el más grande:
-// los tipos del dominio viven en el feature, no en `internal/db/`.
+// Sub-paquete leaf para romper el ciclo de dependencias:
+//   library → db (repos concretos)
+//   db → library/model (tipos de retorno)
+//   library → library/model (tipos propios)
+// Al ser leaf (sin imports fuera de stdlib), el ciclo es imposible.
 package model
 
 import "time"
 
 // ─── core: library + item + media stream ────────────────────────────
 
-// Library es la unidad de organización top-level del catálogo: un
-// directorio (o conjunto de paths) escaneado periódicamente que
-// produce items de un único content_type. M3UURL / EPGURL solo
-// aplican cuando ContentType == "livetv".
+// Library: unidad de organización top-level del catálogo.
+// M3UURL/EPGURL solo aplican cuando ContentType == "livetv".
 type Library struct {
 	ID              string
 	Name            string
@@ -40,16 +27,15 @@ type Library struct {
 	TLSInsecure     bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	Paths           []string // populated by GetByID/List
+	Paths           []string
 }
 
-// Item es la unidad atómica del catálogo: película, serie, temporada,
-// episodio, audio, álbum o artista. Para episodios, `ParentID` apunta
-// a la temporada (que a su vez apunta a la serie). Para movies, vacío.
+// Item: unidad atómica del catálogo. ParentID apunta a la temporada
+// (episodios) o vacío (movies, series root).
 type Item struct {
 	ID              string
 	LibraryID       string
-	ParentID        string // empty if root item (movie, series)
+	ParentID        string
 	Type            string // movie, series, season, episode, audio, album, artist
 	Title           string
 	SortTitle       string
@@ -70,55 +56,38 @@ type Item struct {
 	IsAvailable     bool
 }
 
-// ItemFilter agrupa los parámetros de búsqueda + filtrado + ordenación
-// que el handler list de items pasa al repo. Optional fields zero =
-// sin restricción; AllowedContentRatings nil = sin cap (caller sin
-// profile o cap unknown — fail-open).
+// ItemFilter agrupa parámetros de búsqueda/filtrado/ordenación.
+// Campos zero = sin restricción; AllowedContentRatings nil = sin cap (fail-open).
 type ItemFilter struct {
 	LibraryID string
-	ParentID  string // filter by parent (e.g., episodes of a season)
-	Type      string // filter by type
+	ParentID  string
+	Type      string
 	Query     string // FTS search
-	Genre     string // genre name (case-insensitive); resolved against item_values
-	YearFrom  int    // inclusive lower year bound; 0 disables
-	YearTo    int    // inclusive upper year bound; 0 disables
-	MinRating float64 // inclusive lower community_rating bound; 0 disables
-	// AllowedContentRatings, when non-nil, restricts the result set
-	// to items whose `content_rating` matches one of the values.
-	// Built upstream from the caller's profile via
-	// library.AllowedRatingsAtMost(profile.max_content_rating). nil
-	// = no restriction (caller has no cap or unknown cap → fail-open).
+	Genre     string // case-insensitive, resuelto contra item_values
+	YearFrom  int
+	YearTo    int
+	MinRating float64
+	// AllowedContentRatings restringe a items cuyo content_rating esté en la lista.
+	// Construido upstream via library.AllowedRatingsAtMost. nil = sin restricción.
 	AllowedContentRatings []string
 	Limit                 int
 	Offset                int
 	SortBy                string // sort_title, added_at, year
 	SortOrder             string // asc, desc
-	Cursor                string // cursor for keyset pagination (item ID after which to fetch)
+	Cursor                string // keyset pagination
 }
 
-// LatestSeriesActivity is the rail-ready row for the "series
-// recientemente activas" home rail: an Item plus a derived
-// LatestActivityAt that climbs into season + episode descendants so
-// shows with a fresh weekly episode sort above older static ones.
+// LatestSeriesActivity: fila para el rail "series recientes". Incluye
+// LatestActivityAt (max timestamp entre serie y descendientes) y
+// NewEpisodesCount (episodios en ventana de 14 días).
 type LatestSeriesActivity struct {
 	Item
-	// LatestActivityAt is the most recent timestamp from either the
-	// series row's own added_at or any of its descendants' (seasons /
-	// episodes). Drives the rail order so a show that just received a
-	// new weekly episode sorts above a show added six months ago that
-	// hasn't moved since.
 	LatestActivityAt time.Time
-	// NewEpisodesCount is how many episodes under this series were
-	// added inside the rolling 14-day window. Zero for shows that
-	// haven't received anything in two weeks. The frontend only
-	// renders the "+N nuevos" badge when this is > 0, so the field
-	// is optional from the wire perspective.
 	NewEpisodesCount int
 }
 
-// MediaStream es una pista (video, audio, subtítulo) dentro de un
-// item. `StreamIndex` es el offset 0-based dentro del contenedor —
-// el player lo usa para mapear directamente con `-map 0:N` en ffmpeg.
+// MediaStream: pista (video, audio, subtítulo) dentro de un item.
+// StreamIndex es offset 0-based del contenedor (para `-map 0:N` en ffmpeg).
 type MediaStream struct {
 	ItemID            string
 	StreamIndex       int
@@ -142,8 +111,7 @@ type MediaStream struct {
 
 // ─── images ─────────────────────────────────────────────────────────
 
-// Image es una imagen asociada a un item (poster, backdrop, etc.).
-// `IsLocked = true` la protege de refreshes automáticos.
+// Image: imagen asociada a un item (poster, backdrop, etc.).
 type Image struct {
 	ID        string
 	ItemID    string
@@ -154,24 +122,17 @@ type Image struct {
 	Blurhash  string
 	Provider  string
 	IsPrimary bool
-	// IsLocked guards a manual choice (admin uploaded a custom poster
-	// or picked a specific candidate) from being overwritten by a
-	// scheduled or scanner-triggered refresh. Plex and Jellyfin both
-	// expose this as "lock". Default is false — refreshes work as
-	// before until the admin explicitly locks something.
+	// IsLocked protege una elección manual de ser sobrescrita por refreshes automáticos.
 	IsLocked bool
 	AddedAt  time.Time
-	// DominantColor / DominantColorMuted are pre-computed CSS rgb()
-	// strings extracted at ingest time. Empty when extraction failed
-	// (non-decodable formats, undecidable palette) — clients fall back
-	// to runtime extraction or a static colour in that case.
+	// DominantColor/DominantColorMuted: strings CSS rgb() pre-computados al ingestar.
+	// Vacíos si la extracción falló — clients hacen fallback a runtime o color estático.
 	DominantColor      string
 	DominantColorMuted string
 }
 
-// PrimaryImageRef es el "card de imagen" usado por los rails: solo
-// los campos que el frontend necesita para renderizar la poster
-// principal sin un round-trip extra al endpoint de imágenes.
+// PrimaryImageRef: "card de imagen" para rails — solo los campos que
+// el frontend necesita para renderizar la poster principal.
 type PrimaryImageRef struct {
 	Path               string
 	Blurhash           string
@@ -181,9 +142,8 @@ type PrimaryImageRef struct {
 
 // ─── chapter ────────────────────────────────────────────────────────
 
-// Chapter es un punto marcado dentro de un item (intro, opening, …).
-// `StartTicks`/`EndTicks` usan la encoding 10M-ticks-per-second que
-// el resto del schema habla (duration_ticks, etc.).
+// Chapter: punto marcado dentro de un item. StartTicks/EndTicks usan
+// la codificación 10M-ticks-por-segundo del resto del schema.
 type Chapter struct {
 	ItemID     string
 	StartTicks int64
@@ -194,9 +154,8 @@ type Chapter struct {
 
 // ─── episode segments (skip intro / outro / recap) ──────────────────
 
-// EpisodeSegmentKind enumerates the recognised segment types.
-// Mirrored as a CHECK constraint at the DB layer (migración 037)
-// so unknown values never make it past Replace().
+// EpisodeSegmentKind: tipos reconocidos de segmento.
+// Espejado como CHECK constraint en la DB (migración 037).
 type EpisodeSegmentKind string
 
 const (
@@ -205,10 +164,9 @@ const (
 	EpisodeSegmentRecap EpisodeSegmentKind = "recap"
 )
 
-// EpisodeSegmentSource is the detector that produced the segment.
-// 'chapter' is the only one wired today; 'fingerprint' is reserved
-// for the audio-fingerprint detector and 'manual' for an admin
-// override path that doesn't exist yet but will share this storage.
+// EpisodeSegmentSource: detector que produjo el segmento.
+// 'fingerprint' reservado para audio-fingerprint; 'manual' para
+// override admin futuro.
 type EpisodeSegmentSource string
 
 const (
@@ -217,15 +175,10 @@ const (
 	EpisodeSegmentSourceManual      EpisodeSegmentSource = "manual"
 )
 
-// EpisodeSegment is one detected intro / outro / recap range.
-//
-// StartTicks and EndTicks use the same 10M-ticks-per-second encoding
-// the rest of the schema speaks (chapters, items.duration_ticks).
-// Confidence is 0..1 — chapter-title matches use 0.95 because a
-// chapter literally titled "Intro" is essentially ground truth, but
-// detectors that infer from waveform similarity will surface lower
-// numbers and the player can decide whether to auto-show or hide
-// the skip button accordingly.
+// EpisodeSegment: rango detectado de intro/outro/recap.
+// StartTicks/EndTicks en 10M-ticks/s. Confidence 0..1 — chapter-title
+// usa 0.95 (quasi ground truth); detectores de waveform darán valores
+// menores y el player decide si auto-mostrar el botón skip.
 type EpisodeSegment struct {
 	ItemID     string
 	Kind       EpisodeSegmentKind
@@ -238,9 +191,7 @@ type EpisodeSegment struct {
 
 // ─── studio ─────────────────────────────────────────────────────────
 
-// Studio es una productora / red (Lucasfilm, HBO, Disney+, …).
-// `TMDBID` opcional permite re-import / dedup. `Slug` es la
-// URL-friendly version del Name.
+// Studio: productora/red (Lucasfilm, HBO, Disney+, …).
 type Studio struct {
 	ID      string
 	TMDBID  *int64
@@ -249,7 +200,7 @@ type Studio struct {
 	LogoURL string
 }
 
-// StudioListEntry es el rollup de listing — Studio + cuenta de items.
+// StudioListEntry: rollup de listing — Studio + cuenta de items.
 type StudioListEntry struct {
 	ID        string
 	Name      string
@@ -258,7 +209,7 @@ type StudioListEntry struct {
 	ItemCount int64
 }
 
-// StudioItem es el "card" de un item dentro de la página de un studio.
+// StudioItem: card de un item en la página de un studio.
 type StudioItem struct {
 	ID             string
 	Type           string
@@ -269,9 +220,8 @@ type StudioItem struct {
 
 // ─── collection ─────────────────────────────────────────────────────
 
-// Collection es una saga / franquicia (Marvel Cinematic Universe,
-// Harry Potter, …). `TMDBID` viene de provider y permite re-import
-// idempotente.
+// Collection: saga/franquicia (MCU, Harry Potter, …).
+// TMDBID permite re-import idempotente.
 type Collection struct {
 	ID          string
 	TMDBID      int64
@@ -281,7 +231,7 @@ type Collection struct {
 	BackdropURL string
 }
 
-// CollectionListEntry es el rollup de listing — Collection + cuenta.
+// CollectionListEntry: rollup de listing — Collection + cuenta.
 type CollectionListEntry struct {
 	ID          string
 	Name        string
@@ -290,26 +240,19 @@ type CollectionListEntry struct {
 	ItemCount   int64
 }
 
-// CollectionImageOverride es el override de una imagen (poster o
-// backdrop) de una colección/saga TMDb. URL o archivo, nunca ambos
-// (CHECK en la migration enforca). Clave compuesta (collection_id,
-// image_type) — una saga puede tener override sólo de uno o de ambos.
-//
-// ImageType acepta "poster" | "backdrop".
+// CollectionImageOverride: override de imagen (poster/backdrop) de una
+// colección TMDb. URL o archivo, nunca ambos (CHECK en migración).
+// Clave compuesta (collection_id, image_type).
 type CollectionImageOverride struct {
 	CollectionID string
-	ImageType    string
-	// URL externa absoluta. Vacía cuando el override es un archivo subido.
-	URL string
-	// Basename del archivo bajo <imageDir>/collection-images/. Vacío
-	// cuando el override es URL externa.
-	File      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ImageType    string // "poster" | "backdrop"
+	URL          string // vacía si override es archivo subido
+	File         string // vacío si override es URL externa
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
-// CollectionItem es el "card" de un item dentro de la página de una
-// collection.
+// CollectionItem: card de un item en la página de una collection.
 type CollectionItem struct {
 	ID             string
 	Type           string
@@ -320,9 +263,7 @@ type CollectionItem struct {
 
 // ─── external IDs ───────────────────────────────────────────────────
 
-// ExternalID asocia un Item con un id de provider externo (TMDb,
-// IMDb, TVDB, MusicBrainz). Permite resolver duplicados y enrich
-// idempotente.
+// ExternalID asocia un Item con un id de provider externo (TMDb, IMDb, TVDB, MusicBrainz).
 type ExternalID struct {
 	ItemID     string
 	Provider   string
@@ -331,10 +272,8 @@ type ExternalID struct {
 
 // ─── metadata ───────────────────────────────────────────────────────
 
-// Metadata es el blob enriquecido por providers (TMDb / Fanart) para
-// un item: descripción larga, genres, tags, trailer key y collection
-// FK. Genres y Tags se serializan como JSON arrays para evitar un
-// child table cuando solo se leen.
+// Metadata: blob enriquecido por providers (TMDb/Fanart) para un item.
+// Genres y Tags se serializan como JSON arrays para evitar child table.
 type Metadata struct {
 	ItemID     string
 	Overview   string
@@ -342,33 +281,20 @@ type Metadata struct {
 	Studio     string
 	GenresJSON string
 	TagsJSON   string
-	// TrailerKey is the platform-specific id of the best-matched
-	// trailer/teaser at scan time (typically a YouTube key from TMDb).
-	// Empty when no trailer was returned for the item — the
-	// SeriesHero treats absence as "no preview, just show the
-	// backdrop". TrailerSite is the platform name ("YouTube",
-	// "Vimeo") so the frontend picks the right embed URL.
+	// TrailerKey: id del trailer en la plataforma (ej. YouTube key de TMDb).
+	// Vacío si no hay trailer. TrailerSite = nombre de plataforma para el embed URL.
 	TrailerKey  string
 	TrailerSite string
-	// StudioLogoURL is the absolute image URL of the headline
-	// production company / network logo (Lucasfilm, HBO, Disney+, …).
-	// Built from TMDb's `production_companies[0].logo_path` at scan
-	// time using the configured image base, so the frontend renders
-	// it with a single `<img src>` and falls back to the studio text
-	// when empty (older studios with no TMDb logo, or failed match).
+	// StudioLogoURL: URL absoluta del logo de la productora principal.
+	// Construida desde TMDb production_companies[0].logo_path al escanear.
 	StudioLogoURL string
-	// CollectionID is the FK to the saga (TMDb belongs_to_collection)
-	// this movie belongs to — populated at scan time when the
-	// provider returned one. Empty / NULL means "no saga"; the
-	// detail page renders the optional "Part of: X" link only when
-	// non-empty.
+	// CollectionID: FK a la saga (TMDb belongs_to_collection). Vacío = sin saga.
 	CollectionID string
 }
 
 // ─── people ─────────────────────────────────────────────────────────
 
-// Person es un actor, director, escritor, etc. `Type` discrimina el
-// rol global; el rol específico en un item vive en ItemPersonCredit.
+// Person: actor, director, escritor, etc.
 type Person struct {
 	ID        string
 	Name      string
@@ -376,9 +302,7 @@ type Person struct {
 	ThumbPath string
 }
 
-// ItemPersonCredit es el enlace many-to-many Person × Item con el
-// rol específico (e.g., "Actor", "Director") y el character name
-// (e.g., "Walter White") cuando aplica.
+// ItemPersonCredit: enlace many-to-many Person × Item con rol y character name.
 type ItemPersonCredit struct {
 	PersonID      string
 	Name          string
@@ -389,8 +313,7 @@ type ItemPersonCredit struct {
 	SortOrder     int
 }
 
-// FilmographyEntry es una fila de la página "filmografía de X actor":
-// muestra los items en los que la person está acreditada.
+// FilmographyEntry: fila de filmografía de una persona.
 type FilmographyEntry struct {
 	ItemID         string
 	Type           string
@@ -404,9 +327,7 @@ type FilmographyEntry struct {
 
 // ─── item values (genres, tags, …) ──────────────────────────────────
 
-// GenreCount es el rollup admin "géneros del catálogo con su
-// frecuencia", usado por el panel de admin para mostrar la nube de
-// géneros y por el endpoint de búsqueda facetada.
+// GenreCount: rollup "género + frecuencia" para admin panel y búsqueda facetada.
 type GenreCount struct {
 	Name  string
 	Count int64

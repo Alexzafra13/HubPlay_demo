@@ -8,7 +8,7 @@ import (
 	"os/exec"
 )
 
-// ExtractSubtitleVTT extracts a subtitle track from a media file and converts it to WebVTT.
+// ExtractSubtitleVTT extrae un track de subtitulos y lo convierte a WebVTT.
 func ExtractSubtitleVTT(ctx context.Context, inputPath string, trackIndex int) (io.Reader, error) {
 	args := []string{
 		"-hide_banner",
@@ -32,14 +32,9 @@ func ExtractSubtitleVTT(ctx context.Context, inputPath string, trackIndex int) (
 	return &stdout, nil
 }
 
-// ConvertSubtitleToVTT pipes arbitrary subtitle bytes (typically SRT
-// or ASS as served by OpenSubtitles) through ffmpeg to produce WebVTT.
-// ffmpeg auto-detects the input container, so the caller doesn't
-// have to declare the source format. Used for the external subtitles
-// endpoint where we don't have a file on disk to extract from.
-//
-// Errors include the ffmpeg stderr, which usually pinpoints malformed
-// timestamps or unsupported codecs in less than a line.
+// ConvertSubtitleToVTT convierte bytes de subtitulos (SRT, ASS, etc.)
+// a WebVTT via ffmpeg. Usado para subtitulos externos donde no hay
+// fichero en disco del que extraer.
 func ConvertSubtitleToVTT(ctx context.Context, data []byte) ([]byte, error) {
 	args := []string{
 		"-hide_banner",

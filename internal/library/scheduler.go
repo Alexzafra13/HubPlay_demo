@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Scheduler periodically scans libraries based on their scan_interval.
+// Scheduler escanea periódicamente libraries según su scan_interval.
 type Scheduler struct {
 	service  *Service
 	logger   *slog.Logger
@@ -14,29 +14,26 @@ type Scheduler struct {
 	interval time.Duration
 }
 
-// NewScheduler creates a scheduler that checks for due scans at the given tick interval.
 func NewScheduler(service *Service, logger *slog.Logger) *Scheduler {
 	return &Scheduler{
 		service:  service,
 		logger:   logger.With("module", "scheduler"),
 		stopCh:   make(chan struct{}),
-		interval: 15 * time.Minute, // check every 15 minutes
+		interval: 15 * time.Minute,
 	}
 }
 
-// Start begins the scheduling loop in a goroutine. It performs an initial scan
-// of all auto-mode libraries on startup (like Jellyfin's scheduled task behavior).
+// Start lanza el loop de scheduling. Escanea todas las libraries auto-mode
+// al arrancar (como Jellyfin), luego comprueba periódicamente.
 func (s *Scheduler) Start(ctx context.Context) {
 	s.logger.Info("library scan scheduler started", "check_interval", s.interval)
 
-	// Scan all libraries on startup (delayed slightly to let server fully start)
 	go func() {
 		time.Sleep(5 * time.Second)
 		s.logger.Info("running startup scan for all auto-mode libraries")
 		s.service.ScanAll(ctx)
 	}()
 
-	// Periodic scan loop
 	go func() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
@@ -56,7 +53,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}()
 }
 
-// Stop gracefully stops the scheduler.
 func (s *Scheduler) Stop() {
 	close(s.stopCh)
 }
@@ -75,10 +71,9 @@ func (s *Scheduler) runDueScans(ctx context.Context) {
 
 		interval, err := time.ParseDuration(lib.ScanInterval)
 		if err != nil {
-			interval = 6 * time.Hour // default fallback
+			interval = 6 * time.Hour
 		}
 
-		// Check if enough time has passed since last scan
 		if time.Since(lib.UpdatedAt) < interval {
 			continue
 		}

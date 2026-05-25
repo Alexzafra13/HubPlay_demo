@@ -35,9 +35,9 @@ func (noopSink) TranscodeFailed()        {}
 func (noopSink) SetActiveSessions(n int) {}
 
 // Manager orquesta sesiones de streaming (direct play, remux, transcode).
-// Manager.sessions es la vista lógica (clave compuesta user+item+profile+audio+sub);
+// Manager.sessions es la vista logica (clave compuesta user+item+profile+audio+sub);
 // Transcoder.sessions es la vista del proceso ffmpeg. Ambos mapas apuntan
-// al mismo *Session — no hay duplicación, solo dos perspectivas.
+// al mismo *Session — no hay duplicacion, solo dos perspectivas.
 type Manager struct {
 	mu         sync.Mutex
 	sessions   map[string]*ManagedSession
@@ -47,11 +47,11 @@ type Manager struct {
 	cfg        config.StreamingConfig
 	logger     *slog.Logger
 	stopClean  chan struct{}
-	metrics MetricsSink
-	bus     *event.Bus // nil-safe
+	metrics    MetricsSink
+	bus        *event.Bus // nil-safe
 	// startGroup: singleflight por session key para colapsar inicios concurrentes.
 	startGroup singleflight.Group
-	// hwAccel: snapshot de detección al arranque; leído por admin stats.
+	// hwAccel: snapshot de deteccion al arranque; leido por admin stats.
 	hwAccel HWAccelResult
 	// forceDirectPlayLookup: hook a runtime settings para el toggle admin
 	// playback.force_direct_play. Nil-safe.
@@ -62,13 +62,13 @@ type Manager struct {
 type ManagedSession struct {
 	*Session
 	UserID           string
-	InputPath        string             // ruta fuente; cacheada para evitar re-query en seeks
-	AudioStreamIndex int                // per-type index de audio; -1 = auto-pick
-	BurnSubtitle     *BurnSubtitleSpec  // nil = sin burn-in
+	InputPath        string            // ruta fuente; cacheada para evitar re-query en seeks
+	AudioStreamIndex int               // per-type index de audio; -1 = auto-pick
+	BurnSubtitle     *BurnSubtitleSpec // nil = sin burn-in
 	Decision         PlaybackDecision
 	LastAccessed     time.Time
 
-	// restartMu: mutex por-sesión para serializar restarts sin bloquear m.mu.
+	// restartMu: mutex por-sesion para serializar restarts sin bloquear m.mu.
 	restartMu          sync.Mutex
 	LastRestartSegment int       // -start_number del ffmpeg actual
 	LastRestartTime    time.Time // para la ventana de coalescencia
@@ -89,9 +89,9 @@ type Deps struct {
 	Config  config.StreamingConfig
 	Logger  *slog.Logger
 
-	Metrics               MetricsSink              // nil = noopSink
-	EventBus              *event.Bus               // nil = sin eventos
-	ForceDirectPlayLookup func(context.Context) bool // nil = algoritmo estándar
+	Metrics               MetricsSink                // nil = noopSink
+	EventBus              *event.Bus                 // nil = sin eventos
+	ForceDirectPlayLookup func(context.Context) bool // nil = algoritmo estandar
 }
 
 // NewManager crea un streaming manager. Detecta HW accel y aplica auto-tune.
@@ -132,13 +132,13 @@ func NewManager(deps Deps) *Manager {
 			Libx264Preset:    cfg.TranscodePreset,
 			Logger:           logger,
 		}),
-		items:      items,
-		streams:    streams,
-		cfg:        cfg,
-		logger:     logger.With("module", "stream-manager"),
-		stopClean:  make(chan struct{}),
-		metrics:    noopSink{},
-		hwAccel:    hwResult,
+		items:     items,
+		streams:   streams,
+		cfg:       cfg,
+		logger:    logger.With("module", "stream-manager"),
+		stopClean: make(chan struct{}),
+		metrics:   noopSink{},
+		hwAccel:   hwResult,
 	}
 
 	if deps.Metrics != nil {
@@ -152,7 +152,7 @@ func NewManager(deps Deps) *Manager {
 	return m
 }
 
-// SetMetrics conecta un sink de métricas. Nil = no-op.
+// SetMetrics conecta un sink de metricas. Nil = no-op.
 func (m *Manager) SetMetrics(sink MetricsSink) {
 	if sink == nil {
 		return
@@ -163,7 +163,7 @@ func (m *Manager) SetMetrics(sink MetricsSink) {
 	m.metrics.SetActiveSessions(len(m.sessions))
 }
 
-// SetEventBus conecta un bus de eventos. Nil deshabilita publicación.
+// SetEventBus conecta un bus de eventos. Nil deshabilita publicacion.
 func (m *Manager) SetEventBus(bus *event.Bus) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -179,16 +179,16 @@ func (m *Manager) publish(e event.Event) {
 	}
 }
 
-// sessionKey: clave compuesta user+item+profile+audio+sub. Los índices
+// sessionKey: clave compuesta user+item+profile+audio+sub. Los indices
 // forman parte de la clave porque un cambio de audio o subtitle quemado
-// requiere una sesión de transcode distinta.
+// requiere una sesion de transcode distinta.
 func sessionKey(userID, itemID, profile string, audioStreamIndex, burnSubIndex int) string {
 	return userID + ":" + itemID + ":" + profile +
 		":" + strconv.Itoa(audioStreamIndex) +
 		":" + strconv.Itoa(burnSubIndex)
 }
 
-// SessionKey es el constructor canónico exportado de clave de sesión.
+// SessionKey es el constructor canonico exportado de clave de sesion.
 func SessionKey(userID, itemID, profile string, audioStreamIndex, burnSubIndex int) string {
 	return sessionKey(userID, itemID, profile, audioStreamIndex, burnSubIndex)
 }
@@ -211,7 +211,7 @@ func (m *Manager) shouldForceDirectPlay(ctx context.Context) bool {
 	return fn(ctx)
 }
 
-// StartSessionRequest agrupa los parámetros de StartSession.
+// StartSessionRequest agrupa los parametros de StartSession.
 // BurnSubIndex >=0 fuerza Transcode con burn-in; <0 = sin burn-in.
 type StartSessionRequest struct {
 	UserID           string
@@ -227,12 +227,12 @@ func (r StartSessionRequest) sessionKey() string {
 	return sessionKey(r.UserID, r.ItemID, r.ProfileName, r.AudioStreamIndex, r.BurnSubIndex)
 }
 
-// StartSession crea o reutiliza una sesión existente. Llamadas
-// concurrentes para la misma clave colapsan vía singleflight.
+// StartSession crea o reutiliza una sesion existente. Llamadas
+// concurrentes para la misma clave colapsan via singleflight.
 func (m *Manager) StartSession(ctx context.Context, req StartSessionRequest) (*ManagedSession, error) {
 	key := req.sessionKey()
 
-	// Fast path: sesión ya activa.
+	// Fast path: sesion ya activa.
 	m.mu.Lock()
 	if ms, ok := m.sessions[key]; ok {
 		ms.LastAccessed = time.Now()
@@ -258,7 +258,8 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 	startTime := req.StartTime
 	audioStreamIndex := req.AudioStreamIndex
 	burnSubIndex := req.BurnSubIndex
-	// Re-check: un Do previo pudo completar entre el fast-path miss y aquí.
+
+	// Re-check: un Do previo pudo completar entre el fast-path miss y aqui.
 	m.mu.Lock()
 	if ms, ok := m.sessions[key]; ok {
 		ms.LastAccessed = time.Now()
@@ -329,8 +330,8 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		decision = Decide(item, mediaStreams, caps, profileName)
 	}
 
-	// Burn-in necesita decoded frames → forzar Transcode si la waterfall
-	// eligió DirectPlay/DirectStream.
+	// Burn-in necesita decoded frames; forzar Transcode si la waterfall
+	// eligio DirectPlay/DirectStream.
 	if burnSub != nil {
 		if decision.Method == MethodDirectPlay {
 			decision = Decide(item, mediaStreams, caps, profileName)
@@ -353,12 +354,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return ms, nil
 	}
 
-	// Start transcode/remux session. Initial run starts at segment
-	// index 0 to match a startTime of 0 (or the seek-from-resume
-	// startTime — at which point segment numbering still begins at
-	// segmentIndex(startTime), but the canonical first-play call
-	// just passes 0 here and lets the synthesized manifest do the
-	// rest).
 	startSegment := 0
 	if startTime > 0 {
 		startSegment = int(startTime / 6) // matches -hls_time 6
@@ -419,63 +414,20 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 	return ms, nil
 }
 
-// restartCoalesceWindow is the ±N segment range within which a
-// pending restart MAY be considered to "cover" a new request. Pair
-// with restartCoalesceTimeWindow: BOTH conditions must hold for a
-// new call to be coalesced.
-//
-// We size the gates against ONE specific pattern — hls.js's
-// parallel-fanout burst on a single seek, which arrives within
-// ~100 ms across the segment containing the seek + 1-2 prefill
-// segments after it. Anything wider, and a second human click on
-// a nearby spot 1-2 s later gets silently coalesced into the
-// in-flight restart — the user sees ffmpeg keep producing from
-// the FIRST seek's offset and the player never reaches their
-// second target. Reported 2026-05-10: "click another minute, the
-// player doesn't go there; click again, sometimes works".
-//
-// 2 segments AND 300 ms cover hls.js's actual fanout (~100 ms,
-// 3 adjacent segments — the segment containing the seek + 2
-// prefill) with a comfortable jitter margin, while staying
-// well below human re-click reaction time (~500 ms minimum for
-// "click, see no movement, click again").
+// Ventana de coalescencia: colapsa el fanout paralelo de hls.js (3
+// segmentos adyacentes en ~100ms) sin tragarse un segundo seek humano.
 const restartCoalesceWindow = 2
 const restartCoalesceTimeWindow = 300 * time.Millisecond
 
-// restartRateLimit caps RestartSessionAt invocations per session per
-// minute. Healthy use lands well under this — a user dragging the
-// seek bar with the SeekBar pointerup-commit pattern fires one seek
-// per click; even a power user keyboard-scrubbing rarely tops 6/min.
-// 20 leaves headroom while still detecting a runaway client.
 const (
 	restartRateLimitWindow = 60 * time.Second
-	restartRateLimitMax    = 20
+	restartRateLimitMax    = 20 // suficiente para power-user; detecta runaway client
 )
 
-// RestartSessionAt stops the existing transcoder for `key` and
-// re-starts it at the given segment index. This is the seek-restart
-// path: the synthesized VOD manifest lists every segment up-front,
-// so when the client asks for a far-future segment that ffmpeg
-// hasn't produced yet, we restart ffmpeg at the corresponding offset
-// (segIndex * segmentDuration) so the next segment file lands within
-// a couple of seconds instead of after waiting for sequential
-// encoding to catch up.
-//
-// Concurrent calls for the same session collapse onto a single
-// restart via `ms.restartMu` plus a near-segment coverage check.
-// hls.js fans out ~3 parallel segment requests on every seek; before
-// this coalescing all three would tear down and respawn ffmpeg in
-// turn, leaving two of the three processes orphaned and writing
-// segments to the same cache dir — observable as "seek does
-// nothing, htop shows N copies of ffmpeg with the same -ss".
-//
-// Existing segment files from the previous ffmpeg run remain on disk
-// — useful for backwards seeks within an already-encoded range. The
-// new ffmpeg run uses `-start_number = segIndex` so its produced
-// files don't collide with the older ones.
-//
-// Returns ErrSessionNotFound if no session exists for the key
-// (caller should fall back to a fresh StartSession).
+// RestartSessionAt reinicia ffmpeg en el segmento dado (seek-restart).
+// Llamadas concurrentes para la misma sesion se coalescen via restartMu.
+// Los segmentos previos se conservan en disco. Devuelve ErrSessionNotFound
+// si la sesion no existe.
 func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error {
 	m.mu.Lock()
 	ms, ok := m.sessions[key]
@@ -484,22 +436,11 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		return ErrSessionNotFound
 	}
 
-	// Per-session lock: serialises restart work for THIS session
-	// without holding the manager-wide m.mu (which would block
-	// every other StreamManager operation for ~2 s while ffmpeg
-	// shuts down).
 	ms.restartMu.Lock()
 	defer ms.restartMu.Unlock()
 
-	// Coverage check, after the lock. Coalesce only when the previous
-	// restart was BOTH (a) very recent in time AND (b) at a nearby
-	// segment — that's the signature of hls.js's parallel-fanout
-	// after a seek (3 adjacent segment fetches within ~100 ms) and
-	// nothing else. A request that fails either gate is treated as
-	// a fresh seek that deserves its own restart, even if it happens
-	// to land near the previous one — humans clicking the bar twice
-	// in adjacent regions used to fall into the trap and feel
-	// "blocked" while ffmpeg encoded through the gap.
+	// Coalescencia: solo colapsar si el restart previo fue MUY reciente
+	// Y en un segmento cercano (firma del fanout de hls.js).
 	delta := segmentIndex - ms.LastRestartSegment
 	timeSinceRestart := time.Since(ms.LastRestartTime)
 	timeRecent := !ms.LastRestartTime.IsZero() && timeSinceRestart < restartCoalesceTimeWindow
@@ -514,13 +455,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		return nil
 	}
 
-	// Sliding-window rate limit. The coalesce check above absorbs
-	// the parallel-fan-out case (hls.js firing 2-3 adjacent segment
-	// requests on every seek); this cap absorbs the SEQUENTIAL case
-	// — a buggy client that keeps issuing far-apart seeks the user
-	// never asked for. The 2026-05-07 incident registered 4 restarts
-	// in 42 s for one human click; 20 in 60 s gives room for real
-	// power-user scrubbing while still detecting that pattern.
+	// Rate limit sliding-window por sesion.
 	now := time.Now()
 	if now.Sub(ms.restartWindowStart) > restartRateLimitWindow {
 		ms.restartWindowStart = now
@@ -536,16 +471,8 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		return ErrRestartRateLimited
 	}
 
-	// Stop the existing ffmpeg run. We keep the ManagedSession
-	// (and its UserID, Decision, LastAccessed) so the cap/observer
-	// state stays correct — only the underlying ffmpeg process
-	// is torn down and replaced. We deliberately do NOT use
-	// Session.Stop here because that would `os.RemoveAll` the
-	// output dir; we want the previous run's segments to stay so
-	// backwards seeks within the encoded prefix can still serve
-	// from cache. (Session is embedded as *Session in
-	// ManagedSession, so cancel / done resolve through field
-	// promotion.)
+	// Cancelar ffmpeg actual sin borrar segmentos (NO usar Session.Stop
+	// que haria RemoveAll del outputDir).
 	if ms.Session != nil && ms.cancel != nil {
 		ms.cancel()
 		select {
@@ -585,7 +512,6 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	return nil
 }
 
-// TouchSession updates the last accessed time for a session.
 func (m *Manager) TouchSession(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -594,18 +520,9 @@ func (m *Manager) TouchSession(key string) {
 	}
 }
 
-// StopSessionsByItem stops every session belonging to (userID, itemID),
-// regardless of profile or audio stream index. Used by the player
-// teardown DELETE so the client doesn't have to enumerate which
-// (quality, audio) tuples ended up cached — a single request frees
-// every active variant. Returns the count of sessions stopped.
-//
-// Without this, the per-user cap (MaxTranscodeSessionsPerUser) kept
-// gathering zombie sessions across audio-language switches and
-// quality flips, eventually returning 503 TranscodeBusy on every
-// new playback. Also: hls.js routinely fans out to multiple variants
-// during ABR probing, so a single playback can leave 4 sessions
-// behind if only one (the active variant) is explicitly stopped.
+// StopSessionsByItem detiene todas las sesiones de (userID, itemID)
+// independientemente del profile o audio index. Evita zombies en el
+// cap per-user tras cambios de calidad/idioma.
 func (m *Manager) StopSessionsByItem(userID, itemID string) int {
 	m.mu.Lock()
 	prefix := userID + ":" + itemID + ":"
@@ -622,7 +539,6 @@ func (m *Manager) StopSessionsByItem(userID, itemID string) int {
 	return len(keys)
 }
 
-// StopSession stops a specific session.
 func (m *Manager) StopSession(key string) {
 	m.mu.Lock()
 	ms, ok := m.sessions[key]
@@ -647,7 +563,6 @@ func (m *Manager) StopSession(key string) {
 	}
 }
 
-// GetSession returns a managed session by key.
 func (m *Manager) GetSession(key string) (*ManagedSession, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -658,42 +573,24 @@ func (m *Manager) GetSession(key string) (*ManagedSession, bool) {
 	return ms, ok
 }
 
-// ActiveSessions returns the count of active transcode sessions.
 func (m *Manager) ActiveSessions() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
 }
 
-// SessionSnapshot is the read-only view of an active session that the
-// admin "Now Playing" panel consumes. Returned by value from
-// ListAllSessions so the caller can serialise / iterate without
-// re-acquiring the manager mutex and without aliasing back into live
-// state. Field semantics mirror ManagedSession + its embedded
-// Session, but all fields are plain values.
-//
-// ID is the manager's session map key (the same string StopSession
-// accepts), not the embedded Session.ID — the two happen to match
-// today, but pinning the API to the map key keeps the kill endpoint
-// honest if the Session struct ever grows a separate identifier.
+// SessionSnapshot vista read-only de una sesion activa para el panel admin.
 type SessionSnapshot struct {
 	ID           string
 	UserID       string
 	ItemID       string
-	Profile      string         // empty for non-transcode sessions
-	Method       PlaybackMethod // DirectPlay / DirectStream / Transcode
+	Profile      string
+	Method       PlaybackMethod
 	StartedAt    time.Time
 	LastAccessed time.Time
 }
 
-// ListAllSessions returns a snapshot of every active session, taken
-// under m.mu so the slice is internally consistent even while the
-// manager is mutating elsewhere. Intended for the admin panel —
-// callers that hold a single key (the player handler, the segment
-// route) keep using GetSession.
-//
-// Iteration order is unspecified (Go map iteration); the admin
-// frontend sorts by StartedAt descending for display.
+// ListAllSessions devuelve un snapshot de todas las sesiones activas.
 func (m *Manager) ListAllSessions() []SessionSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -706,8 +603,6 @@ func (m *Manager) ListAllSessions() []SessionSnapshot {
 			LastAccessed: ms.LastAccessed,
 		}
 		if ms.Session != nil {
-			// Field promotion via the embedded *Session — gofmt-safe and
-			// matches the QF1008 staticcheck guidance.
 			snap.ItemID = ms.ItemID
 			snap.Profile = ms.Profile.Name
 			snap.StartedAt = ms.StartedAt
@@ -717,53 +612,33 @@ func (m *Manager) ListAllSessions() []SessionSnapshot {
 	return out
 }
 
-// MaxTranscodeSessions returns the concurrent transcode cap in
-// effect after auto-tune + YAML + app_settings overrides. 0 means
-// unlimited (an unusual operator choice but supported). Read by
-// admin endpoints to render "X of Y in use".
 func (m *Manager) MaxTranscodeSessions() int {
 	return m.cfg.MaxTranscodeSessions
 }
 
-// MaxTranscodeSessionsPerUser returns the per-user transcode cap in
-// effect after auto-tune + overrides. 0 means "no per-user cap".
-// Surfaced to the admin panel so a saturation warning can explain
-// whether the limit hit was the global pool or a single user
-// soaking their slice.
 func (m *Manager) MaxTranscodeSessionsPerUser() int {
 	return m.cfg.MaxTranscodeSessionsPerUser
 }
 
-// TranscodePreset returns the libx264 -preset value in effect after
-// auto-tune + overrides. Always non-empty post-construction (defaults
-// to "veryfast" when nothing else applies). Used by the admin panel
-// to display "Software preset: veryfast" alongside the HW status row.
 func (m *Manager) TranscodePreset() string {
 	return m.cfg.TranscodePreset
 }
 
-// HWAccelInfo returns the accelerator snapshot computed at construction.
-// Zero-value when HW acceleration is disabled in config.
 func (m *Manager) HWAccelInfo() HWAccelResult {
 	return m.hwAccel
 }
 
-// HWAccelEnabled reports whether the operator turned HW acceleration on
-// in config. Distinct from HWAccelInfo() because "enabled but no
-// accelerators detected" is a different (and actionable) state from
-// "disabled in config" — the admin panel renders different copy for each.
+// HWAccelEnabled indica si el operador activo HW accel en config.
+// Distinto de HWAccelInfo(): "enabled pero sin aceleradores" es un
+// estado diferente de "disabled en config".
 func (m *Manager) HWAccelEnabled() bool {
 	return m.cfg.HWAccel.Enabled
 }
 
-// CacheDir returns the resolved transcode cache directory. Useful for the
-// admin storage panel — same value the manager passes to the transcoder so
-// the operator sees what's actually in use, not a stale config value.
 func (m *Manager) CacheDir() string {
 	return m.cfg.EffectiveCacheDir()
 }
 
-// Shutdown stops all sessions and the cleanup loop.
 func (m *Manager) Shutdown() {
 	close(m.stopClean)
 
@@ -782,7 +657,6 @@ func (m *Manager) Shutdown() {
 	m.logger.Info("stream manager shut down", "stopped_sessions", len(sessions))
 }
 
-// cleanupLoop periodically removes idle sessions.
 func (m *Manager) cleanupLoop() {
 	idleTimeout := m.cfg.IdleTimeout
 	if idleTimeout <= 0 {

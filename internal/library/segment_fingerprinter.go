@@ -12,27 +12,21 @@ import (
 	"hubplay/internal/event"
 )
 
-// SegmentFingerprinter is Phase 2 of the skip-intro / skip-credits
-// detector. Where SegmentDetector reads chapter titles (only useful
-// for files with embedded "Intro"/"Credits" markers — usually
-// Blu-ray rips), this one analyses the audio waveform via
-// chromaprint and finds the segment that recurs across episodes of
-// the same series.
+// SegmentFingerprinter es la Fase 2 del detector skip-intro/credits.
+// Analiza el waveform de audio via chromaprint para encontrar segmentos
+// recurrentes entre episodios de la misma serie.
 //
-// Run after the chapter-based detector finishes. Both write to the
-// same `episode_segments` table but scoped to different `source`
-// values (`chapter` vs `fingerprint`), so they coexist; the API
-// handler picks the highest-confidence row per kind when serialising.
+// Corre tras el detector de chapters. Ambos escriben a episode_segments
+// con `source` distinto, coexistiendo; el handler API escoge el row
+// de mayor confidence por kind.
 //
-// Heavy work — fingerprinting one 10-min audio window takes ~5-10 s
-// on a single CPU. Cached on disk (see fingerprint.go) so re-scans
-// of unchanged files are free. We process one library at a time
-// (mutex) and one season at a time within a library; episodes
-// inside a season are fingerprinted in parallel up to a small
-// worker pool.
-// FingerprintComputer is the slice of *Fingerprinter the orchestrator
-// actually depends on. Extracted as an interface so tests can wire
-// in a stub that returns synthetic hashes without spawning fpcalc.
+// Trabajo pesado: ~5-10s por ventana de 10 min. Caché en disco hace
+// re-scans de ficheros sin cambios gratuitos. Un library a la vez
+// (mutex), una season a la vez, episodios dentro de season en paralelo
+// hasta un pool de workers.
+
+// FingerprintComputer: interfaz del Fingerprinter que el orquestador usa.
+// Extraída para que tests inyecten stub sin spawnar fpcalc.
 type FingerprintComputer interface {
 	Available() bool
 	Compute(ctx context.Context, itemID, sourcePath string, window FingerprintWindow) ([]uint32, error)
@@ -45,17 +39,13 @@ type SegmentFingerprinter struct {
 	bus      *event.Bus
 	logger   *slog.Logger
 
-	// Hard cap on concurrent fpcalc invocations. Fingerprinting is
-	// CPU-bound; saturating with > NumCPU goroutines hurts
-	// throughput and competes with active transcodes. 2 is a safe
-	// floor on every host we've tested.
+	// Tope de invocaciones concurrentes de fpcalc. Es CPU-bound;
+	// saturar compite con transcodes activos. 2 es piso seguro.
 	workers int
 
 	mu sync.Mutex
 
-	// bgWG espera a las goroutines de DetectLibrary lanzadas desde
-	// el handler del bus. Patrón paralelo al de SegmentDetector
-	// (audit olor Y).
+	// bgWG espera goroutines de DetectLibrary lanzadas desde el bus.
 	bgWG sync.WaitGroup
 }
 
@@ -76,12 +66,9 @@ func NewSegmentFingerprinter(
 	}
 }
 
-// Start suscribe a library.scan.completed. Cuando fpcalc no está
-// disponible, loggea una vez y devuelve un unsub no-op — el chapter
-// detector sigue corriendo, la instalación simplemente salta Phase 2.
-//
-// El unsub retornado, además de desuscribir del bus, drena las
-// goroutines de DetectLibrary en vuelo (audit olor Y).
+// Start suscribe a library.scan.completed. Sin fpcalc, loggea una vez
+// y devuelve unsub no-op — Fase 1 (chapters) sigue corriendo.
+// El unsub también drena goroutines en vuelo.
 func (f *SegmentFingerprinter) Start(ctx context.Context) (unsub func()) {
 	if !f.prints.Available() {
 		f.logger.Info("fpcalc not on PATH — skipping audio fingerprint detection (install chromaprint-tools to enable)")
@@ -107,13 +94,9 @@ func (f *SegmentFingerprinter) Start(ctx context.Context) (unsub func()) {
 	}
 }
 
-// DetectLibrary fingerprints every episode in the library and
-// writes any common-segment matches found within each season.
-// Episodes are grouped by season (parent_id); seasons with fewer
-// than 2 episodes are skipped (nothing to compare against).
-//
-// Exported so a future "redetect this library now" admin endpoint
-// can call it directly without piggy-backing on a fake scan event.
+// DetectLibrary fingerprinta cada episodio y escribe matches comunes
+// dentro de cada season. Seasons con <2 episodios se saltan.
+// Exportado para futuro endpoint admin "redetectar".
 func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -129,7 +112,7 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 	bySeason := make(map[string][]*librarymodel.Item, 8)
 	for _, ep := range episodes {
 		if ep.ParentID == "" {
-			continue // orphan episode without season parent — skip
+			continue
 		}
 		bySeason[ep.ParentID] = append(bySeason[ep.ParentID], ep)
 	}
@@ -166,8 +149,8 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 				segs = append(segs, toSegment(r, librarymodel.EpisodeSegmentIntro, now))
 			}
 			if r, ok := outroHits[i]; ok {
-				// outro frames are relative to the tail window, not
-				// the file start; offset by (duration - window).
+				// Frames del outro son relativos a la ventana tail,
+				// no al inicio del fichero; sumar offset.
 				offset := outroOffsetSeconds(ep.DurationTicks)
 				r.startSec += offset
 				r.endSec += offset
@@ -199,11 +182,9 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 	return nil
 }
 
-// detectSeason fingerprints every episode in the season (intro
-// window first, outro window second, both cached) and runs the
-// matcher across each set. Returns two maps keyed by the episode's
-// index in `eps` so the caller can write the right segment back to
-// the right item.
+// detectSeason fingerprinta cada episodio de la season (intro y outro,
+// ambos cacheados) y corre el matcher. Retorna maps indexados por
+// posición en `eps`.
 func (f *SegmentFingerprinter) detectSeason(
 	ctx context.Context,
 	eps []*librarymodel.Item,
@@ -235,11 +216,10 @@ func (f *SegmentFingerprinter) detectSeason(
 	return intro, outro
 }
 
-// fingerprintAll computes the requested window for every episode in
-// the season, in parallel up to f.workers. Episodes whose
-// fingerprint can't be computed (missing file, ffmpeg/fpcalc
-// failure) come back as nil — they don't contribute to matching but
-// also don't poison the pass.
+// fingerprintAll computa la ventana indicada para cada episodio en
+// paralelo hasta f.workers. Episodios sin fingerprint (fichero faltante,
+// fallo de ffmpeg/fpcalc) quedan nil — no contribuyen al matching
+// pero no envenenan el paso.
 func (f *SegmentFingerprinter) fingerprintAll(
 	ctx context.Context,
 	eps []*librarymodel.Item,
@@ -272,9 +252,8 @@ func (f *SegmentFingerprinter) fingerprintAll(
 	return out
 }
 
-// segRange is the orchestrator-side view of a matched segment:
-// seconds in the episode timeline (NOT frame indices) plus the
-// matcher's confidence verbatim.
+// segRange: vista del orquestador de un segmento matcheado — segundos
+// en timeline del episodio + confidence del matcher.
 type segRange struct {
 	startSec   float64
 	endSec     float64

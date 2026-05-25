@@ -1,24 +1,18 @@
-// Package library content-rating ranking + filter helpers.
+// Helpers de ranking + filtrado de content-rating.
 //
-// HubPlay's content rating values come from TMDb's certifications,
-// which mix MPAA (movies: G, PG, PG-13, R, NC-17) and the US TV
-// Parental Guidelines (TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA). The
-// admin Resumen + the per-profile selector both surface ratings as
-// opaque strings; the filter here turns them into a comparable
-// ordinal so we can answer "is this item above the profile's cap?".
+// Los ratings vienen de las certificaciones de TMDb: MPAA (movies) y
+// US TV Parental Guidelines. Ambos se mapean a un ordinal comparable
+// para responder "este item supera el cap del perfil?".
 //
-// Anything we don't recognise gets the highest tier — better to over-
-// restrict than to leak content the family didn't expect. A future
-// localisation (BBFC, FSK, ICAA, ...) would extend the table without
-// touching the filter callsites.
+// Ratings desconocidos reciben el tier más alto — mejor sobre-restringir
+// que filtrar contenido inesperado. Localización futura (BBFC, FSK, ICAA)
+// extiende la tabla sin tocar los callsites.
 
 package library
 
-// ratingRank assigns each known certification a tier number. Lower =
-// younger audience. Two systems share the table because in practice
-// both appear in TMDb data and a profile rated for "PG-13" should
-// also see "TV-14" content the same family-friendly tier — we map
-// them to comparable rungs.
+// ratingRank asigna un tier numérico a cada certificación conocida.
+// Menor = audiencia más joven. MPAA y TV comparten tabla porque TMDb
+// los mezcla y un perfil "PG-13" debe ver también contenido "TV-14".
 var ratingRank = map[string]int{
 	// MPAA (movies)
 	"G":     1,
@@ -36,14 +30,10 @@ var ratingRank = map[string]int{
 	"TV-MA": 4,
 }
 
-const ratingRankUnknown = 5 // pessimistic — unknown labels treated as adult
+const ratingRankUnknown = 5 // pesimista: labels desconocidos = adulto
 
-// ContentRatingRank returns the comparable tier of a rating string.
-// Empty rating means "unrated" — we treat that as the most-permissive
-// case (rank 0) so unrated items only slip through profiles with no
-// cap set; the cap comparison `itemRank > capRank` automatically
-// blocks unrated items for restricted profiles when the cap is non-
-// zero.
+// ContentRatingRank devuelve el tier comparable de un rating.
+// Rating vacío ("unrated") = rank 0: solo pasa en perfiles sin cap.
 func ContentRatingRank(rating string) int {
 	if rating == "" {
 		return 0
@@ -54,37 +44,28 @@ func ContentRatingRank(rating string) int {
 	return ratingRankUnknown
 }
 
-// AllowedRating returns true when an item with `itemRating` is below
-// or equal to the profile's `capRating`. Empty cap = "no
-// restriction"; everything passes. Empty itemRating ("unrated")
-// passes only when the profile has no cap, since we can't tell
-// whether an unrated item is family-friendly or hardcore.
+// AllowedRating indica si un item con `itemRating` está dentro del
+// cap del perfil. Cap vacío = sin restricción. itemRating vacío
+// contra cap no-vacío se deniega (contenido no clasificado puede
+// no ser apto para un perfil infantil).
 func AllowedRating(itemRating, capRating string) bool {
 	if capRating == "" {
 		return true
 	}
 	cap, ok := ratingRank[capRating]
 	if !ok {
-		// Unknown cap → fail-open to "no restriction" rather than
-		// locking the user out of everything they own. Logged
-		// elsewhere; the operator should fix the cap value.
+		// Cap desconocido → fail-open para no bloquear todo.
 		return true
 	}
 	if itemRating == "" {
-		// Unrated against a non-empty cap: deny. Unrated content in
-		// a TMDb library is usually old / international where TMDb
-		// hasn't categorised it; safer not to surface to a kid
-		// profile.
 		return false
 	}
 	return ContentRatingRank(itemRating) <= cap
 }
 
-// AllowedRatingsAtMost returns the slice of known rating literals
-// that pass the cap. Used by the SQL filter callsites that need an
-// explicit `IN (...)` list rather than a function call (SQLite can't
-// register Go callbacks safely without CGO; we materialise the
-// allowed list once).
+// AllowedRatingsAtMost devuelve los ratings que pasan el cap.
+// Usado por filtros SQL que necesitan `IN (...)` explícito
+// (SQLite sin CGO no permite registrar callbacks Go).
 func AllowedRatingsAtMost(capRating string) []string {
 	if capRating == "" {
 		return nil

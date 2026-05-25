@@ -1,16 +1,16 @@
 package stream
 
-// Profile defines a transcoding quality profile.
+// Profile define un perfil de calidad de transcodificación.
 type Profile struct {
 	Name       string
 	Width      int
 	Height     int
-	VideoBitrate string // e.g. "4000k"
-	AudioBitrate string // e.g. "192k"
+	VideoBitrate string // ej. "4000k"
+	AudioBitrate string // ej. "192k"
 	MaxFrameRate int
 }
 
-// Profiles maps profile names to their definitions.
+// Profiles mapea nombres de perfil a sus definiciones.
 var Profiles = map[string]Profile{
 	"1080p": {Name: "1080p", Width: 1920, Height: 1080, VideoBitrate: "4000k", AudioBitrate: "192k", MaxFrameRate: 30},
 	"720p":  {Name: "720p", Width: 1280, Height: 720, VideoBitrate: "2500k", AudioBitrate: "128k", MaxFrameRate: 30},

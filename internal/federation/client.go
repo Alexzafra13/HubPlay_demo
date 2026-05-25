@@ -12,35 +12,20 @@ import (
 	"time"
 )
 
-// peerFetchAttempts is how many times an idempotent GET against a
-// paired peer is retried on transport errors and 5xx. Tight ceiling
-// because a single user-facing request shouldn't tie up the HTTP
-// client for more than a handful of seconds — better to surface
-// "peer offline" than to keep retrying past the user's patience.
+// peerFetchAttempts: reintentos para GETs idempotentes contra un peer.
+// Techo bajo para no bloquear al usuario mas de unos segundos.
 const peerFetchAttempts = 3
 
-// peerFetchBackoff is the initial delay between retry attempts. The
-// backoff doubles each attempt (250ms → 500ms → 1s), so worst-case
-// total wait is ~1.75s before giving up — comfortably under the
-// 15s HTTPTimeout but generous enough to ride out a brief blip.
+// peerFetchBackoff: delay inicial entre reintentos. Se duplica cada intento
+// (250ms -> 500ms -> 1s); worst-case ~1.75s, dentro del HTTPTimeout de 15s.
 const peerFetchBackoff = 250 * time.Millisecond
 
-// Outbound peer-to-peer calls. Implemented as methods on *Manager
-// (FetchPeerLibraries, FetchPeerItems) since they share the same
-// identity, http.Client, and peer-cache state. Authentication: every
-// request sets `Authorization: Bearer <jwt>` where the token is
-// freshly minted via Manager.IssuePeerToken; the remote's
-// RequirePeerJWT middleware validates it against the pubkey it
-// pinned at handshake.
-//
-// Errors: non-2xx responses are decoded into the standard error
-// envelope and surfaced as fmt.Errorf with the remote's code+message,
-// so the caller's logs see WHY the peer rejected (rate-limited,
-// scope insufficient, peer revoked, etc.).
+// Llamadas outbound peer-to-peer. Cada request lleva Authorization: Bearer <jwt>
+// firmado con nuestra privkey; el remoto valida contra el pubkey pineado.
+// Errores non-2xx se decodifican al envelope estandar para loguear la razon.
 
-// remoteSharedLibrary mirrors the JSON the peer emits at GET
-// /peer/libraries. Kept here (rather than imported from the handlers
-// package) to avoid a federation→handlers import cycle.
+// remoteSharedLibrary espeja el JSON de GET /peer/libraries.
+// Definido aqui para evitar ciclo federation->handlers.
 type remoteSharedLibrary struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
@@ -56,13 +41,8 @@ type remoteSharedItem struct {
 	Overview  string `json:"overview,omitempty"`
 	HasPoster bool   `json:"has_poster,omitempty"`
 	LibraryID string `json:"library_id,omitempty"`
-	// Pre-extracted swatches from the peer's images table. Forwarded
-	// unchanged to consumers — they end up as `backdrop_colors` on
-	// the user-facing wire shape. Empty when the peer pre-dates the
-	// federation-side color plumbing OR when the underlying image has
-	// no extracted palette (older scans). Zero-value defaults are
-	// safe because omitempty drops them; consumer treats absence
-	// identically to "no server palette".
+	// Swatches pre-extraidos del peer. Vacios si el peer es anterior
+	// al plumbing de colores o si la imagen no tiene paleta.
 	PosterColor      string `json:"poster_color,omitempty"`
 	PosterColorMuted string `json:"poster_color_muted,omitempty"`
 }
@@ -72,10 +52,8 @@ type remoteItemsResponse struct {
 	Total int                `json:"total"`
 }
 
-// remoteErrorResponse mirrors the error envelope responseError emits
-// in the handlers package. We decode this on non-2xx so the user-
-// facing surface can show meaningful errors ("rate limited",
-// "library not found", etc.).
+// remoteErrorResponse espeja el envelope de error de los handlers.
+// Se decodifica en non-2xx para mostrar errores significativos.
 type remoteErrorResponse struct {
 	Error struct {
 		Code    string `json:"code"`
@@ -83,14 +61,8 @@ type remoteErrorResponse struct {
 	} `json:"error"`
 }
 
-// FetchPeerLibraries hits the remote's GET /peer/libraries endpoint.
-// Returns the libraries the calling peer (us) has been granted via
-// shares. Errors include rate-limit, peer-offline, etc.
-//
-// Retries transient failures (transport error, 5xx) so a single dropped
-// packet or a peer that took an extra second to come back from a
-// restart does not flash an offline state to the user. See
-// doIdempotentPeerGET for the exact policy.
+// FetchPeerLibraries obtiene las bibliotecas que el peer nos comparte.
+// Reintenta fallos transitorios (ver doIdempotentPeerGET).
 func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*SharedLibrary, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -130,18 +102,15 @@ func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*Sha
 	return out, nil
 }
 
-// SharedLibraryWithPeer pairs a SharedLibrary with the peer that
-// shares it. Powers the unified "all libraries from all peers" view
-// in the user-facing UI — fetched per-peer in parallel by
-// FetchAllPeerLibraries.
+// SharedLibraryWithPeer empareja una biblioteca con el peer que la comparte.
+// Alimenta la vista unificada "todas las bibliotecas de todos los peers".
 type SharedLibraryWithPeer struct {
 	Peer    *Peer
 	Library *SharedLibrary
 }
 
-// FetchPeerItems hits the remote's paginated catalog browse.
-// Same retry policy as FetchPeerLibraries — transient failures are
-// retried so a brief blip doesn't blank the user's catalog grid.
+// FetchPeerItems obtiene items paginados del catalogo remoto.
+// Misma politica de reintentos que FetchPeerLibraries.
 func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -186,10 +155,7 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	return out, wire.Total, nil
 }
 
-// FetchPeerRecent hits a remote peer's GET /peer/recent?limit=...
-// endpoint and returns the most recently added items (across every
-// library that peer shares with us). Same retry posture as the
-// other idempotent peer GETs.
+// FetchPeerRecent obtiene los items mas recientes del peer remoto.
 func (m *Manager) FetchPeerRecent(ctx context.Context, peerID string, limit int) ([]*SharedItem, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -236,11 +202,8 @@ func (m *Manager) FetchPeerRecent(ctx context.Context, peerID string, limit int)
 	return out, nil
 }
 
-// FetchPeerSearch hits a remote peer's GET /peer/search?q=...&limit=...
-// endpoint and returns matching items. Same retry policy as the other
-// idempotent peer GETs (transient failure → up to 3 attempts with
-// exponential backoff). The remote applies its own share ACL; we
-// take its decision at face value.
+// FetchPeerSearch busca items en el peer remoto. Misma politica de reintentos.
+// El remoto aplica su propio ACL de shares.
 func (m *Manager) FetchPeerSearch(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -294,18 +257,13 @@ func decodeRemoteError(resp *http.Response) error {
 	if err := json.Unmarshal(body, &er); err == nil && er.Error.Code != "" {
 		return fmt.Errorf("peer rejected: %d %s -- %s", resp.StatusCode, er.Error.Code, er.Error.Message)
 	}
-	// Fallback: the peer's body is not the documented error envelope —
-	// could be an upstream proxy's HTML 502, a stack trace, or anything.
-	// Trim and sanitise so an inadvertent log capture doesn't ship a
-	// kilobyte of upstream internals (or anything resembling a token).
+	// Fallback: el body no es el envelope documentado. Sanitizar para
+	// no filtrar internals del proxy upstream en logs.
 	return fmt.Errorf("peer status %d: %s", resp.StatusCode, sanitiseRemoteBody(body))
 }
 
-// sanitiseRemoteBody renders an opaque peer response body as a bounded
-// single-line excerpt safe to embed in a log message: control chars
-// replaced by '.', length capped, and a "<N bytes total>" marker when
-// the body was truncated. The original bytes are never propagated
-// beyond this function.
+// sanitiseRemoteBody extrae un excerpt acotado y seguro para log del body
+// opaco de un peer. Reemplaza control chars, trunca, y no propaga el original.
 func sanitiseRemoteBody(body []byte) string {
 	const maxExcerpt = 256
 	total := len(body)
@@ -333,23 +291,10 @@ func sanitiseRemoteBody(body []byte) string {
 	return string(clean)
 }
 
-// doIdempotentPeerGET issues an authenticated GET against `url` on the
-// peer and retries on transient failures. Suitable only for idempotent
-// operations — never call this from a code path with side effects on
-// the remote.
-//
-// Retry policy:
-//   - transport error (connection refused, EOF, deadline before TLS) → retry
-//   - 5xx response                                                    → retry
-//   - 4xx response                                                    → return immediately (auth, scope, etc.)
-//   - 2xx/3xx                                                         → return immediately
-//
-// Backoff is exponential starting at peerFetchBackoff. The loop honors
-// ctx cancellation so a user navigating away interrupts the wait.
-//
-// A fresh JWT is minted per attempt (cheap, local Ed25519 signing) so
-// a token that expires between the first attempt and a retry is
-// implicitly refreshed.
+// doIdempotentPeerGET hace GET autenticado con reintentos. Solo para
+// operaciones idempotentes. Politica: transport error/5xx reintenta,
+// 4xx/2xx/3xx retorna inmediato. Backoff exponencial. Mint JWT fresco
+// por intento (Ed25519 local, barato).
 func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url, kind string) (*http.Response, error) {
 	var lastErr error
 	backoff := peerFetchBackoff
@@ -375,8 +320,7 @@ func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url, kind str
 
 		resp, doErr := m.httpClt.Do(req)
 		if doErr != nil {
-			// Don't retry past the request context — the caller went
-			// away and any subsequent attempt would be wasted work.
+			// No reintentar si el contexto ya se cancelo.
 			if errors.Is(doErr, context.Canceled) || errors.Is(doErr, context.DeadlineExceeded) {
 				return nil, doErr
 			}
@@ -385,9 +329,7 @@ func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url, kind str
 			continue
 		}
 		if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
-			// Drain (bounded) so the connection returns to the idle
-			// pool instead of being closed; net/http requires this
-			// before another request can reuse the keep-alive socket.
+			// Drenar para devolver la conexion al pool idle (net/http).
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 			_ = resp.Body.Close()
 			m.metrics.OutboundRequest(kind, "5xx")
@@ -403,56 +345,40 @@ func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url, kind str
 		return resp, nil
 	}
 	if lastErr == nil {
-		// Defensive: peerFetchAttempts must be > 0 by construction,
-		// so we should never reach here. Surface a clear error rather
-		// than nil so callers don't dereference a nil response.
+		// Defensivo: peerFetchAttempts > 0 por construccion.
 		lastErr = errors.New("peer request loop exited without attempt")
 	}
 	return nil, lastErr
 }
 
-// PeerStreamSessionRequest is the JSON body POSTed by us (peer A) to a
-// remote peer (peer B) when a local user clicks play on a remote item.
-// The capability shape mirrors what stream.CapabilitiesFromRequest
-// produces from the X-Hubplay-Client-Capabilities header on a direct
-// client request -- so when peer B builds its waterfall decision, it
-// sees our user's caps verbatim and a Kotlin TV / Chromecast that
-// supports HEVC+EAC3+MKV gets DirectPlay through federation just as it
-// would talking to its own server.
+// PeerStreamSessionRequest es el body JSON que enviamos al peer remoto
+// cuando un usuario local da play. Las capabilities se pasan verbatim
+// para que el peer tome la misma decision de waterfall que su propio server.
 type PeerStreamSessionRequest struct {
 	Profile      string                  `json:"profile,omitempty"` // initial transcode profile name
 	Capabilities *PeerStreamCapabilities `json:"client_capabilities,omitempty"`
 }
 
-// PeerStreamCapabilities is the wire shape of stream.Capabilities,
-// duplicated here to avoid the federation->stream import cycle.
-// Conversion happens at the handler boundary on peer B's side.
+// PeerStreamCapabilities duplica stream.Capabilities para evitar
+// ciclo federation->stream. La conversion ocurre en el handler de B.
 type PeerStreamCapabilities struct {
 	Video     []string `json:"video,omitempty"`
 	Audio     []string `json:"audio,omitempty"`
 	Container []string `json:"container,omitempty"`
 }
 
-// PeerStreamSessionResponse is the body the remote peer returns when
-// it has spawned (or attached to) a streaming session for the request.
-// MasterPath is what we feed back to our local client, rewritten to
-// proxy through us -- we never expose the remote's hostname or peer
-// JWT to the user's browser.
+// PeerStreamSessionResponse es la respuesta del peer al crear una sesion
+// de streaming. MasterPath se reescribe para proxear a traves nuestro;
+// nunca exponemos hostname ni JWT del peer al navegador.
 type PeerStreamSessionResponse struct {
 	SessionID  string `json:"session_id"`
 	Method     string `json:"method"` // "direct_play" | "direct_stream" | "transcode"
 	MasterPath string `json:"master_path"`
 }
 
-// StartPeerStreamSession asks a paired peer to spawn a streaming
-// session for one of its items, on behalf of one of our users. The
-// remote peer uses its own stream.Manager (so its transcode budget
-// caps + hwaccel apply); we just get back a session id we'll proxy
-// HLS requests against.
-//
-// Errors: peer offline, peer revoked, item not in a shared library,
-// remote-side transcode budget full -- all surface via decodeRemoteError
-// so the caller's log sees the actual remote refusal.
+// StartPeerStreamSession pide al peer que cree una sesion de streaming
+// para un item suyo. El peer usa su propio stream.Manager (budget/hwaccel).
+// Errores se surfacean via decodeRemoteError.
 func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID string, body PeerStreamSessionRequest) (*PeerStreamSessionResponse, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -506,33 +432,18 @@ func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID str
 	return &out, nil
 }
 
-// ProxyPeerItemPoster fetches a peer item's poster bytes through
-// authenticated GET /api/v1/peer/items/{itemId}/poster. The remote
-// re-verifies the calling peer (us) still has CanBrowse on the item's
-// library, so a peer that lost a share can no longer read posters
-// even if it cached the item id locally.
-//
-// Caller MUST defer resp.Body.Close(); the response is not buffered.
+// ProxyPeerItemPoster obtiene el poster de un item via GET autenticado.
+// El remoto re-verifica CanBrowse; perder el share bloquea la lectura.
+// Caller DEBE hacer defer resp.Body.Close().
 func (m *Manager) ProxyPeerItemPoster(ctx context.Context, peerID, itemID string) (*http.Response, error) {
 	return m.ProxyPeerStreamRequest(ctx, peerID, fmt.Sprintf("/api/v1/peer/items/%s/poster", itemID))
 }
 
-// ProxyPeerStreamRequest issues a GET against `path` on the remote
-// peer with our peer JWT and returns the live response. Callers MUST
-// `defer resp.Body.Close()` and stream bytes from `resp.Body` to the
-// user; the response is not buffered.
-//
-// Used for HLS manifest + segment proxying after StartPeerStreamSession.
-// The remote `path` is whatever MasterPath the session response
-// returned (or a manifest's relative reference resolved against it).
-//
-// Auth resilience: if the first attempt comes back 401/403 we drain
-// the response, mint a fresh JWT and retry once. This guards against
-// the corner where a JWT minted at the tail end of its TTL window
-// races the peer's clock — without the retry, the player would have
-// to re-fetch on its own, surfacing as a momentary stall. Peer session
-// state is keyed on session_id (not on the issuing JWT) so a fresh
-// token resumes the same session cleanly.
+// ProxyPeerStreamRequest hace GET autenticado y devuelve la respuesta live.
+// Callers DEBEN hacer defer resp.Body.Close(). Usado para proxy HLS.
+// Si recibe 401/403, reintenta una vez con JWT fresco (race de TTL
+// entre relojes). La sesion va por session_id, no por JWT, asi que
+// un token nuevo retoma la misma sesion.
 func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path string) (*http.Response, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -557,9 +468,7 @@ func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path strin
 		return resp, nil
 	}
 
-	// Drain a bounded prefix so the keep-alive socket can return to
-	// the idle pool, then close. Required by net/http before the next
-	// request can reuse the connection.
+	// Drenar para devolver el socket al pool idle (net/http).
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	_ = resp.Body.Close()
 

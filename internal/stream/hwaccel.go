@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// HWAccelType represents a hardware acceleration method.
+// HWAccelType representa un metodo de aceleracion por hardware.
 type HWAccelType string
 
 const (
@@ -19,21 +19,20 @@ const (
 	HWAccelVideoToolbox HWAccelType = "videotoolbox"
 )
 
-// HWAccelResult contains detected hardware acceleration capabilities.
+// HWAccelResult contiene las capacidades de aceleracion detectadas.
 type HWAccelResult struct {
 	Available []HWAccelType
 	Selected  HWAccelType
-	Encoder   string // e.g. "h264_vaapi", "h264_nvenc"
+	Encoder   string // ej. "h264_vaapi", "h264_nvenc"
 }
 
-// DetectHWAccel probes the system for available hardware accelerators.
+// DetectHWAccel sondea el sistema buscando aceleradores disponibles.
 func DetectHWAccel(preferred string, logger *slog.Logger) HWAccelResult {
 	result := HWAccelResult{Selected: HWAccelNone, Encoder: "libx264"}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Query ffmpeg for available hwaccels
 	out, err := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-hwaccels").Output()
 	if err != nil {
 		logger.Warn("failed to detect hwaccels", "error", err)
@@ -47,13 +46,11 @@ func DetectHWAccel(preferred string, logger *slog.Logger) HWAccelResult {
 		return result
 	}
 
-	// Select based on preference
 	selected := selectAccel(available, preferred)
 	if selected == HWAccelNone {
 		return result
 	}
 
-	// Verify the encoder actually works
 	encoder := accelToEncoder(selected)
 	if verifyEncoder(encoder, logger) {
 		result.Selected = selected
@@ -106,7 +103,7 @@ func selectAccel(available []HWAccelType, preferred string) HWAccelType {
 		}
 	}
 
-	// Auto: prefer in order of typical performance
+	// Auto: prioridad por rendimiento tipico.
 	priority := []HWAccelType{HWAccelNVENC, HWAccelQSV, HWAccelVAAPI, HWAccelVideoToolbox}
 	for _, p := range priority {
 		for _, a := range available {
@@ -134,20 +131,15 @@ func accelToEncoder(accel HWAccelType) string {
 	}
 }
 
-// HWAccelInputArgs returns the ffmpeg input-side flags for a given
-// acceleration kind. These go before `-i` and tell ffmpeg to use
-// the GPU/iGPU decoder. Empty slice means software decode (no flags).
+// HWAccelInputArgs devuelve los flags ffmpeg de decode-side para un
+// acelerador dado. Van antes de -i. Slice vacio = software decode.
 //
-// We intentionally don't set `-hwaccel_output_format` so frames stay
-// downloadable to system memory — that lets the existing software
-// filter chain (`scale=...,pad=...`) keep working unchanged. A fully
-// on-device pipeline would need scale_vaapi / scale_cuda / scale_qsv
-// and a per-format `-vf hwupload`, which is the next iteration.
+// No seteamos -hwaccel_output_format para que los frames queden en
+// memoria de sistema y el filter chain software (scale, pad) funcione
+// sin cambios. Pipeline full-device seria la siguiente iteracion.
 //
-// Exported because the iptv transmux re-encode fallback (used when
-// `-c copy` can't repackage the upstream codec) needs the same
-// decode-side flags as the VOD transcoder. Owning the canonical
-// mapping in one place keeps NVDEC / VAAPI quirks from drifting.
+// Exportado porque el fallback de re-encode de iptv transmux usa los
+// mismos flags de decode.
 func HWAccelInputArgs(accel HWAccelType) []string {
 	switch accel {
 	case HWAccelVAAPI:
@@ -155,13 +147,9 @@ func HWAccelInputArgs(accel HWAccelType) []string {
 	case HWAccelQSV:
 		return []string{"-hwaccel", "qsv"}
 	case HWAccelNVENC:
-		// NVENC's encoder works without `-hwaccel cuda`, but adding
-		// it lets ffmpeg pick the NVDEC decoder for the read side
-		// when the input codec is supported (h264, hevc, …),
-		// halving CPU usage during transcode.
+		// -hwaccel cuda activa NVDEC para el decode, reduciendo uso de CPU.
 		return []string{"-hwaccel", "cuda"}
 	case HWAccelVideoToolbox:
-		// VT only provides the encoder; no input flag needed.
 		return nil
 	default:
 		return nil
@@ -172,7 +160,6 @@ func verifyEncoder(encoder string, logger *slog.Logger) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Try to encode a tiny test frame
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",

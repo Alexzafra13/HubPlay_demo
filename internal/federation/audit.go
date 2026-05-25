@@ -7,12 +7,8 @@ import (
 	"time"
 )
 
-// AuditEntry is a single peer-request record. Populated by the
-// middleware after the response is written and queued for asynchronous
-// persistence. Every field except PeerID, Method, Endpoint, StatusCode,
-// and OccurredAt is optional — the audit table tolerates nulls so we
-// don't lie when a request didn't touch a particular dimension
-// (e.g. a ping has no item_id).
+// AuditEntry es un registro de peticion peer. Campos opcionales salvo
+// PeerID, Method, Endpoint, StatusCode y OccurredAt (la tabla tolera nulls).
 type AuditEntry struct {
 	PeerID       string
 	RemoteUserID string
@@ -27,37 +23,23 @@ type AuditEntry struct {
 	OccurredAt   time.Time
 }
 
-// AuditRepo is the slice of database operations the auditor needs.
-// Kept narrow so the auditor is testable with an in-memory fake.
+// AuditRepo es la interfaz estrecha de DB que el auditor necesita.
 type AuditRepo interface {
 	InsertAuditEntry(ctx context.Context, entry *AuditEntry) error
 }
 
-// auditQueueSize is the maximum number of pending audit entries the
-// auditor buffers before it starts dropping. Sized for a small
-// home-scale deployment: 256 entries × ~100 bytes ≈ 25 KB on the heap.
-// A federation that's hammering us hard enough to fill this is already
-// being rate-limited by the token bucket; the auditor dropping a few
-// records during the spike is tolerable as long as the drop itself is
-// logged loudly.
+// auditQueueSize: buffer maximo antes de descartar. 256 entradas ~25 KB.
+// Si se llena es porque el rate-limiter ya esta actuando; perder alguna
+// entrada durante el pico es aceptable (se loguea el descarte).
 const auditQueueSize = 256
 
-// auditFlushInterval is the maximum time between batch writes. Even
-// at very low traffic the worker wakes up at this cadence to flush
-// any pending entries — bounds the loss window in case of a crash.
+// auditFlushInterval: cadencia maxima entre flush. Acota la ventana
+// de perdida ante un crash.
 const auditFlushInterval = 30 * time.Second
 
-// Auditor records federation peer requests asynchronously. The hot
-// path (Record) is non-blocking: it does a non-blocking channel send
-// and drops on backpressure, logging once per drop so an operator
-// never silently loses audit visibility.
-//
-// A background goroutine drains the channel and persists entries
-// either when a batch fills (32 entries) or every flush interval.
-//
-// Lifecycle: NewAuditor returns an auditor that's already running.
-// Close stops the worker, drains pending entries, and waits for the
-// last write to settle.
+// Auditor registra peticiones peer asincronamente. Record es non-blocking
+// (descarta con backpressure). Un goroutine de fondo drena y persiste
+// por batch o cada flush interval. Close drena pendientes y espera.
 type Auditor struct {
 	repo   AuditRepo
 	logger *slog.Logger
@@ -70,8 +52,8 @@ type Auditor struct {
 	lastDropLog time.Time
 }
 
-// NewAuditor wires + starts an Auditor. The caller must Close it on
-// shutdown to flush the in-flight queue.
+// NewAuditor crea y arranca un Auditor. El caller debe llamar Close
+// en shutdown para vaciar la cola.
 func NewAuditor(repo AuditRepo, logger *slog.Logger) *Auditor {
 	if logger == nil {
 		logger = slog.Default()
@@ -87,10 +69,8 @@ func NewAuditor(repo AuditRepo, logger *slog.Logger) *Auditor {
 	return a
 }
 
-// Record enqueues an entry for asynchronous persistence. Non-blocking;
-// returns immediately. On a full queue the entry is dropped and the
-// drop is logged at most once every 5 seconds (so a sustained burst
-// doesn't flood the operator's log).
+// Record encola una entrada para persistencia asincrona. Non-blocking.
+// Si la cola esta llena, descarta y loguea max 1 vez cada 5s.
 func (a *Auditor) Record(entry AuditEntry) {
 	if a == nil {
 		return
@@ -105,9 +85,7 @@ func (a *Auditor) Record(entry AuditEntry) {
 	}
 }
 
-// Close stops the worker, flushes pending entries, and waits for
-// completion. Safe to call multiple times — subsequent calls are
-// no-ops because the channel is already closed.
+// Close para el worker, vacia pendientes y espera. Idempotente.
 func (a *Auditor) Close() {
 	if a == nil {
 		return
@@ -134,9 +112,8 @@ func (a *Auditor) run() {
 		case <-tick.C:
 			a.flush()
 		case entry := <-a.queue:
-			// Drain any sibling entries that arrived while we were
-			// blocked, batch them in this writer iteration. Bounded
-			// by queueSize so this loop can't run away.
+			// Drena entradas hermanas que llegaron mientras estabamos
+			// bloqueados. Acotado por queueSize.
 			batch := []AuditEntry{entry}
 			drained := true
 			for drained && len(batch) < auditQueueSize {
@@ -163,10 +140,8 @@ func (a *Auditor) flush() {
 	}
 }
 
-// persist writes a batch one row at a time. This is intentionally
-// simple — the hot path (Record) is wait-free; persistence is a
-// background concern. If a single insert errors we log and continue
-// so a transient SQLite hiccup doesn't lose the rest of the batch.
+// persist escribe el batch fila a fila. Si un insert falla, loguea y
+// continua para no perder el resto del batch por un error transitorio.
 func (a *Auditor) persist(batch []AuditEntry) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -13,30 +13,17 @@ import (
 	"hubplay/internal/event"
 )
 
-// SegmentDetector derives skip-intro / skip-credits / skip-recap
-// markers for every episode in a library and persists them in
-// `episode_segments`.
+// SegmentDetector deriva marcadores skip-intro/credits/recap por episodio
+// y los persiste en `episode_segments`.
 //
-// Phase 1 (this file): chapter-title heuristic. Many ripped or
-// professionally-encoded files already carry chapter markers
-// (mkv/mp4 chapters); when those chapters are titled "Intro",
-// "Opening", "Credits", "Recap", etc., we map them straight to
-// segments at confidence 0.95 (chapter-titled-intro is essentially
-// ground truth). Files without chapter markers are skipped — Phase 2
-// (audio fingerprinting) will handle the unlabeled-content case
-// without changing this file's contract: it'll just write rows
-// with `source = 'fingerprint'` alongside the chapter-derived ones.
+// Fase 1: heurística de títulos de chapters. Archivos con chapters
+// titulados "Intro", "Credits", "Recap" se mapean a segmentos con
+// confidence 0.95. Fase 2 (audio fingerprinting) manejará contenido
+// sin chapters escribiendo rows con source='fingerprint'.
 //
-// The detector subscribes to `library.scan.completed`. Each scan
-// kicks an async run scoped to the library that just finished.
-// Detection is idempotent — `EpisodeSegmentRepository.Replace` clears
-// the prior chapter-source rows for an item before re-inserting, so
-// re-running on a re-scanned episode replaces stale ranges cleanly.
-//
-// One run at a time per library. A scan that completes while the
-// detector is still processing its previous run is queued; we do
-// not run two passes against the same library concurrently because
-// chapter-source rows would race on Replace().
+// Se suscribe a library.scan.completed. Detección idempotente via
+// Replace(). Un run a la vez por library (mutex) para evitar races
+// en Replace().
 type SegmentDetector struct {
 	items    *db.ItemRepository
 	chapters *db.ChapterRepository
@@ -44,18 +31,12 @@ type SegmentDetector struct {
 	bus      *event.Bus
 	logger   *slog.Logger
 
-	// Mutex serialises runs across all libraries — sufficient at the
-	// scale this scheduler runs at (libraries are dozens, not
-	// thousands) and keeps the implementation tiny. If concurrency
-	// per-library ever matters, swap for a per-library mutex map.
+	// Mutex serializa runs entre todas las libraries — suficiente a esta
+	// escala. Si se necesita concurrencia por library, cambiar a map de mutex.
 	mu sync.Mutex
 
-	// bgWG espera a las goroutines de DetectLibrary lanzadas desde
-	// el handler del bus. Sin esto, shutdown podía dejar writes en
-	// vuelo contra una DB ya cerrada — produciendo "sql: database
-	// is closed" en logs y, en patológico, writes parciales (audit
-	// olor Y). El patrón replica `library.Service` y
-	// `iptv.TransmuxManager`.
+	// bgWG espera goroutines de DetectLibrary lanzadas desde el bus.
+	// Sin esto, shutdown dejaría writes en vuelo contra DB cerrada.
 	bgWG sync.WaitGroup
 }
 
@@ -75,15 +56,8 @@ func NewSegmentDetector(
 	}
 }
 
-// Start suscribe el detector a library.scan.completed y devuelve un
-// handle que desuscribe Y drena las goroutines de DetectLibrary en
-// vuelo. El caller (main.go) lo difiere en shutdown.
-//
-// El handler lanza la detección en una goroutine para que el
-// watchdog de 30s del bus nunca se dispare; un scan sobre cientos
-// de episodes puede pasar fácilmente de 30s. La goroutine se
-// registra en bgWG para que Stop espere su finalización (audit
-// olor Y).
+// Start suscribe al bus y devuelve handle que desuscribe Y drena goroutines.
+// La detección corre en goroutine para no disparar el watchdog de 30s del bus.
 func (d *SegmentDetector) Start(ctx context.Context) (unsub func()) {
 	busUnsub := d.bus.Subscribe(event.LibraryScanCompleted, func(e event.Event) {
 		libID, _ := e.Data["library_id"].(string)
@@ -106,13 +80,9 @@ func (d *SegmentDetector) Start(ctx context.Context) (unsub func()) {
 	}
 }
 
-// DetectLibrary walks every episode in the given library, runs the
-// chapter-title heuristic against each one, and writes segments.
-// Emits SegmentDetect{Started,Progress,Completed} events along the
-// way so the admin SSE stream can surface a banner.
-//
-// Exported so a future "redetect this library" admin button can
-// trigger it directly without a fake scan event.
+// DetectLibrary recorre cada episodio de la library, aplica la heurística
+// de chapter-title y escribe segmentos. Emite eventos SegmentDetect*.
+// Exportado para un futuro botón admin "redetectar".
 func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -120,7 +90,7 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 	episodes, _, err := d.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
 		Type:      "episode",
-		Limit:     100000, // upper bound; libraries this size are pathological
+		Limit:     100000,
 	})
 	if err != nil {
 		return err
@@ -186,55 +156,28 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 	return nil
 }
 
-// chapter-title regexes. Word-anchored prefix match — we don't want
-// "Introduction to the Series" (a chapter literally named that on
-// some Blu-rays) to count as an intro, but "Intro", "Intro Theme",
-// "Opening Credits" should. `\b` anchors after the keyword.
-//
-// Compiled once at package init; regex compilation is the dominant
-// cost in this detector's hot path.
+// Regexes de títulos de chapter. Prefix match con word-anchor para que
+// "Introduction to the Series" no matchee pero "Intro Theme" sí.
+// Compilados una vez; la regex es el costo dominante del hot path.
 var (
 	introPattern = regexp.MustCompile(`(?i)^(intro|opening|theme|prelude|cold[\s-]?open|teaser)\b`)
 	outroPattern = regexp.MustCompile(`(?i)^(outro|credits|ending|end\s+credits|closing|tag|stinger|coda)\b`)
 	recapPattern = regexp.MustCompile(`(?i)^(recap|previously)\b`)
 )
 
-// DetectFromChapters maps a list of chapters onto at most three
-// segments (one intro, one outro, one recap). Pure function — no
-// DB, no IO, no time.Now — `now` is passed in so tests can pin it.
+// DetectFromChapters mapea chapters a máximo 3 segmentos (intro, outro, recap).
+// Función pura — sin DB, IO ni time.Now.
 //
-// Heuristic:
-//
-//   - Intro: first chapter matching `introPattern` whose start_ticks
-//     is in the first 50% of the file. The position bound is a guard
-//     against weird trailers / bonus content that some rips include
-//     after the main feature with chapter titles like "Opening
-//     Reprise".
-//   - Recap: first chapter matching `recapPattern`, also gated to
-//     the first 50% of the file. Recaps precede intros in episode
-//     order so the position guard is generous.
-//   - Outro: last chapter matching `outroPattern` whose start_ticks
-//     is in the last 50% of the file. We pick the last to avoid
-//     matching e.g. an "Opening Credits" chapter from a flashback
-//     scene before the real outro.
-//
-// `durationTicks <= 0` (item with unknown duration) disables the
-// position guards — we still match by title, just with no sanity
-// check on where the title falls. That's OK because a chapter
-// titled "Intro" with no duration context is still very likely an
-// intro.
-//
-// Returns segments in (kind) order: recap, intro, outro. The order
-// is mostly cosmetic since the repo writes them all in one tx, but
-// keeps test golden output deterministic.
+// Heurística:
+//   - Intro: primer chapter matcheando introPattern en la primera mitad del fichero.
+//   - Recap: primer chapter matcheando recapPattern, también en la primera mitad.
+//   - Outro: último chapter matcheando outroPattern en la segunda mitad.
+//   - durationTicks <= 0 desactiva los guards de posición.
 func DetectFromChapters(durationTicks int64, chapters []*librarymodel.Chapter, now int64) []librarymodel.EpisodeSegment {
 	if len(chapters) == 0 {
 		return nil
 	}
 
-	// Use a 50/50 split as the sanity bound. With duration = 0 the
-	// midpoint becomes 0 too, which would reject every chapter, so
-	// short-circuit the bound to "always pass" in that case.
 	hasDuration := durationTicks > 0
 	mid := durationTicks / 2
 
@@ -251,9 +194,6 @@ func DetectFromChapters(durationTicks int64, chapters []*librarymodel.Chapter, n
 		return "", false
 	}
 
-	// Pick first match for intro/recap (earliest in file) and last
-	// match for outro (latest in file). We pre-classify into three
-	// buckets to keep the loop linear and avoid re-scanning.
 	var firstIntro, firstRecap, lastOutro *librarymodel.Chapter
 	for _, c := range chapters {
 		kind, ok := matchKind(c.Title)
@@ -281,13 +221,12 @@ func DetectFromChapters(durationTicks int64, chapters []*librarymodel.Chapter, n
 		if c == nil {
 			return
 		}
-		// EndTicks must be > StartTicks per the CHECK constraint.
-		// Some chapters store EndTicks = 0 when ffprobe didn't
-		// emit one; default to a 1-second range so the player at
-		// least has a defined window.
+		// EndTicks > StartTicks requerido por CHECK constraint.
+		// Algunos chapters tienen EndTicks=0 (ffprobe no lo emitió);
+		// default a 1s para dar una ventana definida al player.
 		end := c.EndTicks
 		if end <= c.StartTicks {
-			end = c.StartTicks + 10_000_000 // 1s in ticks
+			end = c.StartTicks + 10_000_000 // 1s en ticks
 		}
 		out = append(out, librarymodel.EpisodeSegment{
 			Kind:       kind,

@@ -18,38 +18,26 @@ import (
 
 // ─── ImageRefreshScheduler ──────────────────────────────────────────────────
 
-// ImageRefreshScheduler periodically walks every non-manual library and
-// asks the ImageRefresher to fill any missing artwork kinds. Distinct
-// from the scan Scheduler because the cadence is different: scans run
-// every few hours (or per-library setting) so newly-added files appear
-// quickly, but image refresh only matters when a provider has fresher
-// art than what we already cached, which is a slow drift. Weekly is
-// enough to pick up TMDb's "the show got a new poster" without
-// hammering the provider.
-//
-// Locked images are respected per-kind by the refresher (ADR-003), so
-// admin curation survives this loop.
+// ImageRefreshScheduler recorre periódicamente las libraries no-manuales
+// para rellenar artwork faltante. Cadencia semanal — suficiente para
+// captar actualizaciones de posters en TMDb sin saturar al provider.
+// Imágenes locked se respetan por kind (ADR-003).
 type ImageRefreshScheduler struct {
 	libraries ImageRefreshLibrariesRepo
 	refresher *ImageRefresher
 	logger    *slog.Logger
 	stopCh    chan struct{}
 	interval  time.Duration
-	startup   time.Duration // grace before the first sweep
+	startup   time.Duration
 }
 
-// ImageRefreshLibrariesRepo is the subset of the libraries repo needed
-// to enumerate scan targets. Defined here to keep the dependency arrow
-// pointing into library/, consistent with the rest of the schedulers
-// in this package.
+// ImageRefreshLibrariesRepo: subset del repo de libraries para enumerar targets.
 type ImageRefreshLibrariesRepo interface {
 	List(ctx context.Context) ([]*librarymodel.Library, error)
 }
 
-// NewImageRefreshScheduler wires the loop. interval=0 picks the
-// default of 7 days; startup=0 picks 1 hour after process start, so
-// the scheduler doesn't pile its first sweep on top of the startup
-// scan.
+// NewImageRefreshScheduler crea el scheduler. interval=0 → 7 días;
+// startup=0 → 1h tras arranque para no solapar con el scan inicial.
 func NewImageRefreshScheduler(libraries ImageRefreshLibrariesRepo, refresher *ImageRefresher, logger *slog.Logger) *ImageRefreshScheduler {
 	return &ImageRefreshScheduler{
 		libraries: libraries,
@@ -61,8 +49,7 @@ func NewImageRefreshScheduler(libraries ImageRefreshLibrariesRepo, refresher *Im
 	}
 }
 
-// Start runs the scheduler in its own goroutine. The first sweep fires
-// `startup` after Start; subsequent sweeps tick every `interval`.
+// Start lanza el scheduler en su propia goroutine.
 func (s *ImageRefreshScheduler) Start(ctx context.Context) {
 	s.logger.Info("image refresh scheduler started", "interval", s.interval, "first_sweep_in", s.startup)
 
@@ -94,17 +81,12 @@ func (s *ImageRefreshScheduler) Start(ctx context.Context) {
 	}()
 }
 
-// Stop halts the scheduler. Safe to call once; double-calls panic on
-// the closed channel, matching the existing Scheduler's contract.
 func (s *ImageRefreshScheduler) Stop() {
 	close(s.stopCh)
 }
 
-// runSweep enumerates libraries and asks the refresher to fill
-// missing artwork in each. Manual-mode libraries are skipped so the
-// admin's "do nothing automatic on this library" preference is
-// honoured here too. Per-library failures are logged and skipped;
-// only a list-libraries failure aborts the sweep.
+// runSweep recorre libraries y rellena artwork faltante.
+// Libraries en modo manual se saltan. Fallos per-library se loggean y continúan.
 func (s *ImageRefreshScheduler) runSweep(ctx context.Context) {
 	libs, err := s.libraries.List(ctx)
 	if err != nil {
@@ -126,24 +108,21 @@ func (s *ImageRefreshScheduler) runSweep(ctx context.Context) {
 	}
 }
 
-// ─── Collaborator interfaces ────────────────────────────────────────────────
+// ─── Interfaces colaboradoras ───────────────────────────────────────────────
 //
-// Defined here (not imported from handlers) to avoid an import cycle — handlers
-// depend on library, not the other way round. The concrete db.*Repository and
-// provider.Manager types satisfy these; the handler's fakes satisfy them too
-// via structural typing.
+// Definidas aquí (no importadas de handlers) para evitar ciclo de imports.
 
-// ImageRefresherItemRepo is the subset of item operations the refresher needs.
+// ImageRefresherItemRepo: operaciones de items que necesita el refresher.
 type ImageRefresherItemRepo interface {
 	List(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
 }
 
-// ImageRefresherExternalIDRepo is the subset for external-id lookup per item.
+// ImageRefresherExternalIDRepo: lookup de external-id por item.
 type ImageRefresherExternalIDRepo interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
 }
 
-// ImageRefresherImagesRepo is the subset of image-repository operations used.
+// ImageRefresherImagesRepo: operaciones de image-repository usadas.
 type ImageRefresherImagesRepo interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
 	Create(ctx context.Context, img *librarymodel.Image) error
@@ -151,17 +130,16 @@ type ImageRefresherImagesRepo interface {
 	HasLockedForKind(ctx context.Context, itemID, kind string) (bool, error)
 }
 
-// ImageRefresherProvider wraps the single provider call used by the refresher.
+// ImageRefresherProvider envuelve la llamada al provider que usa el refresher.
 type ImageRefresherProvider interface {
 	FetchImages(ctx context.Context, ids map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 }
 
 // ─── ImageRefresher ─────────────────────────────────────────────────────────
 
-// ImageRefresher pulls missing images from external providers for every item
-// in a library. Extracted out of the HTTP handler so the loop is testable
-// in isolation and the handler stays thin (ADR-005 anti-cycle — the handler
-// depends on a small ImageRefreshService interface, not this concrete type).
+// ImageRefresher descarga imágenes faltantes de providers externos por cada
+// item de una library. Extraído del handler HTTP para testabilidad aislada
+// (ADR-005 anti-ciclo).
 type ImageRefresher struct {
 	items       ImageRefresherItemRepo
 	externalIDs ImageRefresherExternalIDRepo
@@ -172,9 +150,6 @@ type ImageRefresher struct {
 	logger      *slog.Logger
 }
 
-// NewImageRefresher constructs an ImageRefresher. imageDir is the root for
-// on-disk storage (<imageDir>/<itemID>/filename); pathmap persists the
-// imageID → local-path mapping used at serve time.
 func NewImageRefresher(
 	items ImageRefresherItemRepo,
 	externalIDs ImageRefresherExternalIDRepo,
@@ -195,14 +170,9 @@ func NewImageRefresher(
 	}
 }
 
-// RefreshForLibrary enumerates root items (max 50 per call) and for each one
-// fetches every image kind that isn't already stored. Downloads go through
-// imaging.SafeGet (SSRF-protected) and are rejected if dimensions exceed
-// imaging.MaxPixels. Returns the count of newly persisted images.
-//
-// The method is best-effort per item: a download, save, or DB failure for one
-// item is logged and skipped, not propagated. Only a failure to enumerate the
-// library's items surfaces as an error.
+// RefreshForLibrary enumera root items (max 50) y descarga cada kind
+// de imagen que falte. Descargas via imaging.SafeGet (SSRF-protegido).
+// Best-effort por item: fallos se loggean y se saltan.
 func (r *ImageRefresher) RefreshForLibrary(ctx context.Context, libraryID string) (int, error) {
 	items, _, err := r.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
@@ -219,8 +189,6 @@ func (r *ImageRefresher) RefreshForLibrary(ctx context.Context, libraryID string
 	return updated, nil
 }
 
-// refreshForItem is the per-item loop extracted for readability. Errors are
-// logged and counted as zero updates — the caller keeps going.
 func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.Item) int {
 	extIDs, err := r.externalIDs.ListByItem(ctx, item.ID)
 	if err != nil || len(extIDs) == 0 {
@@ -246,11 +214,9 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.
 		existingTypes[img.Type] = true
 	}
 
-	// Pick the highest-scored candidate for each missing kind.
-	// Skip kinds the user has locked: a manual choice (uploaded
-	// custom poster, picked a specific candidate) survives every
-	// refresh until the admin explicitly unlocks. Without this guard
-	// the next scheduled refresh silently clobbers curation work.
+	// Mejor candidato por kind faltante. Kinds locked se saltan:
+	// una elección manual sobrevive cada refresh hasta que el admin
+	// desbloquee explícitamente.
 	bestByType := make(map[string]provider.ImageResult)
 	for _, img := range results {
 		if !imaging.IsValidKind(img.Type) {
@@ -279,15 +245,8 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.
 	return added
 }
 
-// downloadAndPersist returns true if the image was successfully stored. A
-// false return means the caller should move on — every failure is logged
-// inline so the caller doesn't need to distinguish causes.
-//
-// All disk + network work is delegated to imaging.IngestRemoteImage so the
-// scanner and the refresher land bytes through identical code paths
-// (atomic writes, blurhash, SSRF-safe downloads). The only thing that
-// stays per-caller is what we record in the DB and the path-mapping
-// table.
+// downloadAndPersist descarga y persiste una imagen. Delega a
+// imaging.IngestRemoteImage (atomic writes, blurhash, SSRF-safe).
 func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType string, best provider.ImageResult) bool {
 	dir := filepath.Join(r.imageDir, itemID)
 	ing, err := imaging.IngestRemoteImage(dir, imgType, best.URL, r.logger)
@@ -313,8 +272,7 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 	}
 
 	if err := r.images.Create(ctx, dbImg); err != nil {
-		// DB rejected the row; back out the on-disk file so we don't
-		// leak storage behind a record that no longer exists.
+		// DB rechazó la fila — borrar fichero para no filtrar storage.
 		_ = os.Remove(ing.LocalPath)
 		return false
 	}
@@ -329,8 +287,6 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 	return true
 }
 
-// itemTypeOf maps the DB-level item type string onto the provider-level enum.
-// Unknown values default to Movie (matches the original handler behaviour).
 func itemTypeOf(item *librarymodel.Item) provider.ItemType {
 	switch item.Type {
 	case "series":

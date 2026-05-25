@@ -74,6 +74,13 @@ func (m *Manager) BrowseAllPeerLibraries(ctx context.Context) ([]*SharedLibraryW
 	return out, nil
 }
 
+// BrowseResult agrupa la respuesta paginada de BrowsePeerItems.
+type BrowseResult struct {
+	Items   []*SharedItem
+	Total   int
+	Partial bool // true cuando los datos vienen de cache (potencialmente stale)
+}
+
 // BrowsePeerItems returns paginated items for a peer's library with
 // a read-through cache. Strategy:
 //
@@ -83,21 +90,18 @@ func (m *Manager) BrowseAllPeerLibraries(ctx context.Context) ([]*SharedLibraryW
 //   3. If live fetch fails AND we have any cache, serve stale cache
 //      with a "stale" indicator so the user sees content rather than
 //      a broken page when the peer is offline.
-//
-// Returns items, total, and a fromCache flag the API layer can pass
-// through so the UI shows the right freshness badge.
-func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, bool, error) {
-	cached, cachedTotal, cachedAt, cacheErr := m.repo.ListCachedItems(ctx, peerID, libraryID, offset, limit)
+func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) (BrowseResult, error) {
+	page, cacheErr := m.repo.ListCachedItems(ctx, peerID, libraryID, offset, limit)
 	if cacheErr != nil {
 		m.logger.Warn("cache read failed, falling back to live",
 			"peer_id", peerID, "err", cacheErr)
 	}
 
 	now := m.clock.Now()
-	cacheFresh := cacheErr == nil && len(cached) > 0 && now.Sub(cachedAt) < cacheStaleThreshold
+	cacheFresh := cacheErr == nil && len(page.Items) > 0 && now.Sub(page.LastSync) < cacheStaleThreshold
 
 	if cacheFresh {
-		return cached, cachedTotal, true, nil
+		return BrowseResult{Items: page.Items, Total: page.Total, Partial: true}, nil
 	}
 
 	live, liveTotal, liveErr := m.FetchPeerItems(ctx, peerID, libraryID, offset, limit)
@@ -110,17 +114,17 @@ func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string,
 				m.logger.Warn("cache write failed", "peer_id", peerID, "err", err)
 			}
 		}
-		return live, liveTotal, false, nil
+		return BrowseResult{Items: live, Total: liveTotal, Partial: false}, nil
 	}
 
 	// Live failed — serve stale cache if any.
-	if cacheErr == nil && len(cached) > 0 {
+	if cacheErr == nil && len(page.Items) > 0 {
 		m.logger.Info("serving stale cache (peer offline)",
-			"peer_id", peerID, "age", now.Sub(cachedAt), "live_err", liveErr)
-		return cached, cachedTotal, true, nil
+			"peer_id", peerID, "age", now.Sub(page.LastSync), "live_err", liveErr)
+		return BrowseResult{Items: page.Items, Total: page.Total, Partial: true}, nil
 	}
 
-	return nil, 0, false, liveErr
+	return BrowseResult{}, liveErr
 }
 
 // PurgeCache clears cached items for (peer, library) — wired to the

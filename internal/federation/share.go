@@ -88,6 +88,13 @@ type SharedItem struct {
 	PosterColorMuted string `json:"poster_color_muted,omitempty"`
 }
 
+// CachedItemPage agrupa la respuesta paginada del cache de items federados.
+type CachedItemPage struct {
+	Items    []*SharedItem
+	Total    int
+	LastSync time.Time
+}
+
 // CachedItem extends SharedItem with the peer + library it belongs
 // to and a cached_at timestamp. Stored in federation_item_cache for
 // offline-friendly browsing.

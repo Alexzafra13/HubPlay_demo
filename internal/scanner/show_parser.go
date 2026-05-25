@@ -68,7 +68,7 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 		seasonDirs = parts[1 : len(parts)-1]
 	}
 
-	se, ee, titleFromFile, hasSE := extractEpisodeFromFilename(fileName)
+	epInfo, hasSE := extractEpisodeFromFilename(fileName)
 	hasSeasonDir := false
 	seasonFromDir := 0
 	for i := len(seasonDirs) - 1; i >= 0; i-- {
@@ -84,14 +84,15 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 		// El fichero ya lleva SxxExx. Si además hay una carpeta de
 		// temporada, preferimos ese número (desambigua series renumeradas
 		// como Doctor Who 2005).
+		season := epInfo.Season
 		if hasSeasonDir {
-			se = seasonFromDir
+			season = seasonFromDir
 		}
 		return EpisodeMatch{
 			SeriesName:    seriesDir,
-			SeasonNumber:  se,
-			EpisodeNumber: ee,
-			EpisodeTitle:  titleFromFile,
+			SeasonNumber:  season,
+			EpisodeNumber: epInfo.Episode,
+			EpisodeTitle:  epInfo.Title,
 			OK:            true,
 		}
 	case hasSeasonDir:
@@ -111,9 +112,16 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 	return EpisodeMatch{OK: false}
 }
 
+// episodeInfo contiene temporada, episodio y título extraídos del nombre de fichero.
+type episodeInfo struct {
+	Season  int
+	Episode int
+	Title   string
+}
+
 // extractEpisodeFromFilename prueba cada patrón y devuelve temporada,
-// episodio y un intento de título (lo que vaya detrás del SxxExx).
-func extractEpisodeFromFilename(name string) (season, episode int, title string, ok bool) {
+// episodio y un intento de título. nil si no matchea ningún patrón.
+func extractEpisodeFromFilename(name string) (*episodeInfo, bool) {
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	for _, re := range epPatterns {
 		m := re.FindStringSubmatchIndex(base)
@@ -127,9 +135,9 @@ func extractEpisodeFromFilename(name string) (season, episode int, title string,
 		if m[1] < len(base) {
 			tail = cleanTitle(base[m[1]:])
 		}
-		return s, e, tail, true
+		return &episodeInfo{Season: s, Episode: e, Title: tail}, true
 	}
-	return 0, 0, "", false
+	return nil, false
 }
 
 // extractTrailingEpisodeNumber: captura ficheros tipo "01.mkv" donde sólo

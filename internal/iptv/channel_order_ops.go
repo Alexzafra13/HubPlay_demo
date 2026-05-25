@@ -1,28 +1,12 @@
 package iptv
 
-// ChannelOrderOps aísla el surface "orden / visibilidad / logo" del olor
-// CC del audit 2026-05-14 (god-service de 45 métodos). Agrupa tres
-// sub-features tightly-coupled por compartir overlay-at-read-time sobre
-// la lista de canales:
+// ChannelOrderOps agrupa orden/visibilidad/logo de canales:
+//  1. Overlay per-user (user_channel_order)
+//  2. Overlay admin de library (library_channel_order)
+//  3. Overrides de logo (channel_logo_overrides)
 //
-//  1. Overlay por-usuario (`user_channel_order`): cada user puede
-//     reordenar/ocultar canales para su cuenta sin tocar el snapshot
-//     compartido. Métodos `*ChannelOrder` + `ChannelVisibility`.
-//  2. Overlay admin de library (`library_channel_order`): curación
-//     dura — admin reordena, oculta o suprime canales para TODOS los
-//     usuarios. Métodos `*LibraryChannelOrder` + `LibraryChannelVisibility`.
-//  3. Overrides de logo (`channel_logo_overrides`): admin reemplaza el
-//     logo del M3U con URL externa o archivo subido. Indexado por
-//     (library_id, stream_url) para sobrevivir re-imports. Incluye el
-//     refresh masivo `RefreshLogosFromIPTVOrg`.
-//
-// Toma 5 repos en construcción + `iptvOrgLogos` post-construction
-// (nil-safe: sin él el endpoint /iptv-org/refresh-logos devuelve 503).
-// El `channels` repo se comparte por puntero con el Service core porque
-// los tres overlays parten de `channels.ListByLibrary` (o
-// `ListHealthyByLibrary`) antes de aplicar overlay-at-read-time. Sigue
-// el mismo pattern embedding facade que [FavoritesOps], [WatchHistoryOps]
-// y [HealthOps] (CC fase 1).
+// Los tres comparten overlay-at-read-time sobre la lista de canales.
+// iptvOrgLogos es nil-safe: sin él /iptv-org/refresh-logos devuelve 503.
 
 import (
 	"context"
@@ -35,19 +19,13 @@ import (
 	iptvmodel "hubplay/internal/iptv/model"
 )
 
-// LocalLogoSentinel is the prefix the logo overlay tags onto
-// Channel.LogoURL when the admin uploaded a file. The channel-logo
-// proxy detects this prefix and serves the file directly from
-// <imageDir>/channel-logos/ instead of going through the remote cache.
-// Exported so the handler that serves /channels/{id}/logo can switch
-// on it without re-deriving the convention.
+// LocalLogoSentinel — prefijo que indica logo subido a disco.
+// El proxy de logos detecta este prefijo y sirve desde
+// <imageDir>/channel-logos/ en vez del cache remoto.
 const LocalLogoSentinel = "hubplay-local:channel-logos/"
 
-// IPTVOrgRefreshSummary cuenta lo que pasó en una corrida de
-// RefreshLogosFromIPTVOrg. Sirve para que la UI explique por qué un
-// run no actualizó nada (caso muy común: el M3U ya trae todos los
-// logos, o los tvg-id del proveedor no son del estándar iptv-org y
-// no matchean).
+// IPTVOrgRefreshSummary — desglose de una corrida de RefreshLogosFromIPTVOrg
+// para que la UI explique por qué se actualizaron 0 logos.
 type IPTVOrgRefreshSummary struct {
 	Total              int `json:"total"`
 	AlreadyHaveLogo    int `json:"already_have_logo"`
@@ -57,19 +35,15 @@ type IPTVOrgRefreshSummary struct {
 	Updated            int `json:"updated"`
 }
 
-// ChannelOrderOps lleva los 4 repos del bloque order/visibility/logo +
-// el lookup iptv-org post-construction. Sin estado mutable propio (a
-// diferencia de HealthOps que lleva `healthMu` + `lastKnownBucket`):
-// el overlay-at-read-time es stateless por construcción.
+// ChannelOrderOps — stateless por construcción: el overlay se aplica
+// en cada lectura sin estado mutable propio.
 type ChannelOrderOps struct {
 	channels            *db.ChannelRepository
 	channelOrder        *db.UserChannelOrderRepository
 	libraryChannelOrder *db.LibraryChannelOrderRepository
 	logoOverrides       *db.ChannelLogoOverrideRepository
 
-	// iptvOrgLogos resuelve tvg-ids contra la base pública iptv-org
-	// para rellenar logos faltantes en bulk. nil-safe: si no se cablea,
-	// el endpoint /iptv-org/refresh-logos devuelve 503.
+	// iptvOrgLogos — nil-safe: sin él el endpoint devuelve 503.
 	iptvOrgLogos *IPTVOrgLogoLookup
 
 	logger *slog.Logger
@@ -91,16 +65,11 @@ func newChannelOrderOps(
 	}
 }
 
-// SetIPTVOrgLogos wires the iptv-org logo lookup post-construction —
-// nil-safe, sin él el endpoint de auto-discovery devuelve 503. La
-// method promotion en el Service preserva la firma pública
-// `Service.SetIPTVOrgLogos(...)`.
+// SetIPTVOrgLogos cablea el lookup iptv-org post-construcción.
 func (c *ChannelOrderOps) SetIPTVOrgLogos(l *IPTVOrgLogoLookup) { c.iptvOrgLogos = l }
 
-// listChannels reproduce la lógica de `Service.GetChannels` sin
-// depender del Service — los métodos del sub-service no pueden llamar
-// a la facade vía embedding (el `c` aquí es *ChannelOrderOps, no
-// *Service). Mismo behaviour: activeOnly filtra unhealthy en la query.
+// listChannels replica GetChannels sin depender del Service (el
+// receiver es *ChannelOrderOps, no puede llamar a la facade).
 func (c *ChannelOrderOps) listChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	if activeOnly {
 		return c.channels.ListHealthyByLibrary(ctx, libraryID)
@@ -108,37 +77,14 @@ func (c *ChannelOrderOps) listChannels(ctx context.Context, libraryID string, ac
 	return c.channels.ListByLibrary(ctx, libraryID, false)
 }
 
-// ── Pure overlay helpers ──────────────────────────────────────────
+// ── Helpers de overlay puro ──────────────────────────────────────
 //
-// Per-user channel order + visibility overlay. The admin uploads
-// M3U lists and the resulting Channel.Number is the initial order
-// every viewer sees; this file lets each user override that for
-// their own account.
-//
-// The overlay is applied at read time, not at write time: there is
-// no per-user snapshot of the channel list. A user with no override
-// rows sees the admin's order verbatim — moving one channel writes
-// one row, everything else still inherits from the admin defaults.
+// El overlay se aplica en lectura, no en escritura: no hay snapshot
+// per-user. Un usuario sin overrides ve el orden del admin tal cual.
 
-// applyLogoOverlay swaps Channel.LogoURL with the admin's custom logo
-// when there's a matching row in `channel_logo_overrides`. Two cases:
-//
-//   - logo_file set → the local-file route: emit a sentinel URL that
-//     the frontend keeps untouched (the channel-logo proxy resolves
-//     it to disk on GET). Format: "hubplay-local:channel-logos/<file>".
-//   - logo_url set  → the external-URL route: replace LogoURL with the
-//     admin's URL, which the existing logo cache will fetch on demand
-//     just like any other upstream image.
-//
-// Pure: the input slice is not mutated; a fresh slice is returned.
-// O(N + M) where N = channels, M = overrides. Channels without a
-// matching override row are passed through with their M3U LogoURL.
-//
-// Indexed by (library_id, stream_url) — same key the override table
-// uses — so the M3U refresh (which regenerates channel UUIDs) doesn't
-// orphan overrides on the next import. Two channels sharing a stream
-// URL inside the same library would also share the override; in
-// practice the M3U importer dedupes by stream URL so this is moot.
+// applyLogoOverlay sustituye LogoURL con el override admin cuando existe.
+// Puro: devuelve un slice nuevo, O(N+M). Indexado por stream_url para
+// sobrevivir re-imports (los UUIDs se regeneran en cada refresh).
 func applyLogoOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.ChannelLogoOverride) []*iptvmodel.Channel {
 	if len(overrides) == 0 {
 		return channels
@@ -166,17 +112,9 @@ func applyLogoOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.Chann
 	return out
 }
 
-// applyAdminOverlay applies the library's admin curation
-// (`library_channel_order`) on top of the raw M3U import. Channels
-// with a matching override row take the admin's position; rows
-// flagged hidden are stripped (hard constraint — users cannot
-// un-hide what the admin removed).
-//
-// Channels without an override row keep their M3U-import number.
-// Result is sorted ascending by effective number.
-//
-// Pure: the input slice is not mutated; a fresh slice is returned.
-// O(N + M) where N = channels, M = overrides.
+// applyAdminOverlay aplica la curación admin sobre el import M3U.
+// Canales con hidden=true se eliminan (restricción dura: los usuarios
+// no pueden des-ocultar). Puro, O(N+M), ordena por posición.
 func applyAdminOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.LibraryChannelOrderEntry) []*iptvmodel.Channel {
 	if len(overrides) == 0 {
 		return channels
@@ -204,16 +142,8 @@ func applyAdminOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.Libr
 	return out
 }
 
-// applyOrderOverlay overlays a user's `user_channel_order` rows onto
-// a channel list returned by `GetChannels`. Channels with a
-// matching override row use the user's position and hidden flag;
-// the rest fall through to `Channel.Number` (admin default).
-//
-// Hidden channels are stripped from the slice. The result is
-// sorted ascending by effective position.
-//
-// Pure: the input slice is not mutated; a fresh slice is returned.
-// O(N + M) where N = channels, M = overrides.
+// applyOrderOverlay aplica el overlay per-user. Los canales hidden
+// se eliminan. Puro, O(N+M), ordena por posición efectiva.
 func applyOrderOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.UserChannelOrderEntry) []*iptvmodel.Channel {
 	if len(overrides) == 0 {
 		return channels
@@ -229,11 +159,7 @@ func applyOrderOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.User
 		if has && o.Hidden {
 			continue
 		}
-		// We clone the channel so a future caller mutating the
-		// returned slice can't accidentally clobber the cached
-		// version the repo returned. Number takes the override
-		// when present so downstream consumers (sorts, group
-		// renderers) see the user's position.
+		// Clonamos para no mutar el slice cacheado del repo.
 		cp := *c
 		if has {
 			cp.Number = o.Position
@@ -241,34 +167,24 @@ func applyOrderOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.User
 		out = append(out, &cp)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		// Stable sort on Number — ties (channels with the same
-		// admin Number) keep their original order so the M3U
-		// import sequence stays meaningful as a tiebreaker.
+		// Stable: empates conservan el orden original del M3U.
 		return out[i].Number < out[j].Number
 	})
 	return out
 }
 
-// ── User-facing reads (overlay cascade) ───────────────────────────
+// ── Lecturas con cascada de overlay ──────────────────────────────
 
-// GetChannelsForUser returns the channel list the given user should
-// see: admin defaults overlaid with the user's per-channel
-// overrides. activeOnly behaves the same as GetChannels (filters
-// out unhealthy channels at the DB layer); hidden-by-user channels
-// are filtered in the overlay step.
-//
-// When userID is empty (no authenticated user, admin contexts) the
-// overlay step is skipped and this returns the admin view.
+// GetChannelsForUser devuelve la lista de canales para un usuario:
+// logo overlay → admin overlay → user overlay. userID vacío = vista admin.
 func (c *ChannelOrderOps) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	channels, err := c.listChannels(ctx, libraryID, activeOnly)
 	if err != nil {
 		return nil, err
 	}
 
-	// Logo overlay primero — antes que cualquier filtro de orden /
-	// visibilidad para que el LogoURL final lo vean todas las capas
-	// (incluido el continue-watching que clona Channel sin volver a
-	// pasar por aquí).
+	// Logo overlay primero para que todas las capas posteriores
+	// vean el LogoURL final.
 	if c.logoOverrides != nil {
 		logoRows, err := c.logoOverrides.ListByLibrary(ctx, libraryID)
 		if err != nil {
@@ -277,9 +193,7 @@ func (c *ChannelOrderOps) GetChannelsForUser(ctx context.Context, libraryID, use
 		channels = applyLogoOverlay(channels, logoRows)
 	}
 
-	// Admin overlay — applies the library's curated order and removes
-	// admin-hidden channels (hard constraint, the user cannot surface
-	// them again via their own overlay).
+	// Admin overlay — restricción dura: el usuario no puede des-ocultar.
 	if c.libraryChannelOrder != nil {
 		adminRows, err := c.libraryChannelOrder.List(ctx, libraryID)
 		if err != nil {
@@ -298,17 +212,9 @@ func (c *ChannelOrderOps) GetChannelsForUser(ctx context.Context, libraryID, use
 	return applyOrderOverlay(channels, overrides), nil
 }
 
-// GetChannelsForUserPersonalisation devuelve la vista que muestra
-// /live-tv/customize: TODAS las channels (incluso las que el usuario
-// haya ocultado, para que pueda volver a mostrarlas) ordenadas según
-// SU overlay personal. La cascada que aplica es la misma que
-// GetChannelsForUser (logo overlay → admin overlay → user overlay)
-// pero sin filtrar hidden por usuario — el panel de personalización
-// es justamente donde el usuario gestiona su lista hidden.
-//
-// Las channels admin-hidden SÍ se filtran (regla dura: el usuario no
-// puede surfear lo que el admin ocultó para todos). Esa es la única
-// diferencia frente a "el usuario podría meter mano en todo".
+// GetChannelsForUserPersonalisation devuelve TODOS los canales
+// (incluso user-hidden) para el panel /live-tv/customize. Los
+// admin-hidden sí se filtran (restricción dura).
 func (c *ChannelOrderOps) GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error) {
 	channels, err := c.listChannels(ctx, libraryID, false)
 	if err != nil {
@@ -321,9 +227,7 @@ func (c *ChannelOrderOps) GetChannelsForUserPersonalisation(ctx context.Context,
 		}
 		channels = applyLogoOverlay(channels, logoRows)
 	}
-	// Admin overlay aplica orden + remueve admin-hidden (hard
-	// constraint). El usuario sigue sin poder mostrar lo que el
-	// admin ocultó — eso es propiedad del admin, no negociable.
+	// Admin overlay — restricción dura.
 	if c.libraryChannelOrder != nil {
 		adminRows, aErr := c.libraryChannelOrder.List(ctx, libraryID)
 		if aErr != nil {
@@ -338,9 +242,7 @@ func (c *ChannelOrderOps) GetChannelsForUserPersonalisation(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("load user channel order: %w", err)
 	}
-	// Aplica posición del usuario manteniendo TODOS los rows
-	// (incluso los hidden por user), para que el panel los muestre.
-	// Mismo trick que GetChannelsForLibraryAdmin con includeHidden.
+	// Aplica posición del usuario SIN filtrar hidden (el panel los muestra).
 	byID := make(map[string]iptvmodel.UserChannelOrderEntry, len(overrides))
 	for _, o := range overrides {
 		byID[o.ChannelID] = o
@@ -357,22 +259,14 @@ func (c *ChannelOrderOps) GetChannelsForUserPersonalisation(ctx context.Context,
 	return out, nil
 }
 
-// GetChannelsForLibraryAdmin returns the curation view used by the
-// admin panel at /admin/libraries/{id}: raw channel rows ordered by
-// the admin overlay (so the operator sees the current default), but
-// `includeHidden=true` skips the admin-hidden filter so the panel
-// can render an editable list with a visibility toggle per row.
-//
-// `includeHidden=false` is equivalent to "what every non-admin user
-// sees before their own overlay" — useful for previews.
+// GetChannelsForLibraryAdmin devuelve la vista de curación admin.
+// includeHidden=true incluye los admin-hidden para el toggle del panel.
 func (c *ChannelOrderOps) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error) {
 	channels, err := c.listChannels(ctx, libraryID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Logo overlay también para el admin: el panel de curación muestra
-	// el logo efectivo (con override aplicado) para que el operador vea
-	// el estado real, no el M3U bruto.
+	// Logo overlay para que el admin vea el logo efectivo.
 	if c.logoOverrides != nil {
 		logoRows, lErr := c.logoOverrides.ListByLibrary(ctx, libraryID)
 		if lErr != nil {
@@ -388,10 +282,8 @@ func (c *ChannelOrderOps) GetChannelsForLibraryAdmin(ctx context.Context, librar
 		}
 	}
 	if includeHidden {
-		// Apply position from overlay but keep hidden rows in the
-		// list so the panel can render the eye-off toggle next to
-		// them. We can't reuse applyAdminOverlay (it filters
-		// hidden); inline the position merge.
+		// No reusamos applyAdminOverlay porque filtra hidden;
+		// aquí los mantenemos para el toggle de visibilidad.
 		byID := make(map[string]iptvmodel.LibraryChannelOrderEntry, len(rows))
 		for _, o := range rows {
 			byID[o.ChannelID] = o
@@ -410,11 +302,9 @@ func (c *ChannelOrderOps) GetChannelsForLibraryAdmin(ctx context.Context, librar
 	return applyAdminOverlay(channels, rows), rows, nil
 }
 
-// ── Library admin curation writes ─────────────────────────────────
+// ── Escrituras de curación admin ─────────────────────────────────
 
-// ListLibraryChannelOverrides returns the admin override rows for a
-// library. Used by the curation panel to compute which channels
-// have been touched vs. which still inherit the M3U order.
+// ListLibraryChannelOverrides devuelve los overrides admin de una library.
 func (c *ChannelOrderOps) ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error) {
 	if c.libraryChannelOrder == nil {
 		return nil, nil
@@ -422,15 +312,8 @@ func (c *ChannelOrderOps) ListLibraryChannelOverrides(ctx context.Context, libra
 	return c.libraryChannelOrder.List(ctx, libraryID)
 }
 
-// ReplaceLibraryChannelOrder is the admin panel's "Save order"
-// entry point: it receives the full reordered list of channel IDs
-// and persists position = index+1 for each, in a single
-// transaction. `hiddenIDs` is the set of channels the admin marked
-// hidden — applied as a hard constraint downstream of the user
-// overlay.
-//
-// Channels NOT present in `orderedIDs` lose their override row and
-// fall back to channels.number from the M3U import.
+// ReplaceLibraryChannelOrder persiste el orden completo del admin.
+// Los IDs ausentes pierden su override y vuelven al orden del M3U.
 func (c *ChannelOrderOps) ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error {
 	if c.libraryChannelOrder == nil {
 		return fmt.Errorf("library channel order repo not wired")
@@ -445,10 +328,8 @@ func (c *ChannelOrderOps) ReplaceLibraryChannelOrder(ctx context.Context, librar
 	return c.libraryChannelOrder.ReplaceAll(ctx, libraryID, entries)
 }
 
-// SetLibraryChannelVisibility flips a single channel's hidden state
-// at the admin level (hard constraint). Same surgical-edit pattern
-// as the per-user counterpart: avoids re-uploading the full
-// reordered list when the admin just wants to hide one channel.
+// SetLibraryChannelVisibility cambia el hidden de un canal a nivel admin.
+// Evita re-subir la lista completa cuando solo se oculta uno.
 func (c *ChannelOrderOps) SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error {
 	if c.libraryChannelOrder == nil {
 		return fmt.Errorf("library channel order repo not wired")
@@ -474,8 +355,7 @@ func (c *ChannelOrderOps) SetLibraryChannelVisibility(ctx context.Context, libra
 	return c.libraryChannelOrder.Upsert(ctx, libraryID, channelID, position, hidden)
 }
 
-// ResetLibraryChannelOrder wipes every admin override for a library
-// — channels fall back to channels.number from the M3U import.
+// ResetLibraryChannelOrder borra todos los overrides admin de una library.
 func (c *ChannelOrderOps) ResetLibraryChannelOrder(ctx context.Context, libraryID string) error {
 	if c.libraryChannelOrder == nil {
 		return nil
