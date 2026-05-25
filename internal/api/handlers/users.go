@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"hubplay/internal/auth"
@@ -95,8 +94,7 @@ func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 // List returns all users (admin only).
 func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	offset, limit, _ := parsePagination(w, r)
 
 	users, total, err := h.users.List(r.Context(), limit, offset)
 	if err != nil {

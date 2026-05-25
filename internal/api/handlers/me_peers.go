@@ -198,8 +198,7 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 	if libraryID == "" {
 		return
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, limit, _ := parsePagination(w, r)
 
 	result, err := h.mgr.BrowsePeerItems(r.Context(), peerID, libraryID, offset, limit)
 	if err != nil {

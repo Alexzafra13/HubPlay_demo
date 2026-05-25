@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"hubplay/internal/auth"
@@ -103,6 +104,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Collect unsubscribe funcs so we can detach every handler when the client
 	// disconnects. Without this, each SSE connection leaks 12 handlers into
 	// the bus for the lifetime of the process.
+	var sseDrops atomic.Int64
 	unsubs := make([]func(), 0, len(types))
 	for _, t := range types {
 		t := t
@@ -110,7 +112,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			select {
 			case eventCh <- e:
 			default:
-				// Drop event if channel is full (slow client)
+				sseDrops.Add(1)
 			}
 		})
 		unsubs = append(unsubs, unsub)
@@ -135,6 +137,9 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			if d := sseDrops.Load(); d > 0 {
+				h.logger.Warn("SSE events dropped (slow client)", "remote_addr", ClientIP(r), "dropped", d)
+			}
 			h.logger.Info("SSE client disconnected", "remote_addr", ClientIP(r))
 			return
 
