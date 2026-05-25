@@ -292,17 +292,10 @@ func (m *TransmuxManager) promoteToReencode(channelID string) {
 	}
 }
 
-// GetOrStart returns the live session for channelID, spawning a new
-// one if none exists. Blocks until the session has produced its first
-// segment (bounded by ReadyTimeout). Calling this concurrently with
-// the same channel ID coalesces into a single spawn — the second
-// caller waits on the same Ready signal.
-//
-// If a circuit-breaker gate is configured and the channel is in
-// cooldown, returns a *CircuitOpenError without spawning. This is the
-// load-bearing protection against the fork-bomb scenario where a dead
-// upstream causes the player to retry the manifest every second and
-// every retry spawned a fresh ffmpeg process that died in 200 ms.
+// GetOrStart devuelve la sesión viva o spawna una nueva. Bloquea
+// hasta el primer segmento (ReadyTimeout). Llamadas concurrentes
+// al mismo canal coalescen en un solo spawn.
+// El circuit breaker previene fork-bomb por upstream muerto.
 func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL string) (*TransmuxSession, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("iptv-transmux: empty channel ID")
