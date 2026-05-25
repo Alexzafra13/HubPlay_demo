@@ -504,21 +504,9 @@ func (c *ChannelOrderOps) GetChannelLogoOverride(ctx context.Context, channelID 
 	return c.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
 }
 
-// RefreshLogosFromIPTVOrg busca logos en la base pública de iptv-org
-// (mapeo por tvg_id) para cada canal de la biblioteca que:
-//   - No tenga ya un override admin (URL o archivo).
-//   - No traiga tvg-logo del M3U.
-//   - Tenga un tvg_id no vacío que se pueda usar como clave de búsqueda.
-//
-// Los hallazgos se guardan como overrides URL (no se tocan los datos
-// originales del M3U). El admin puede borrarlos uno a uno desde el
-// modal de logo del canal — "Restaurar logo del M3U" deja el override
-// en blanco y vuelve al estado anterior.
-//
-// Devuelve un summary con desglose para que la UI explique qué pasó:
-// "47 canales actualizados", o "0 actualizados porque tus 120 canales
-// ya tienen logo del M3U", o "0 actualizados porque tus tvg-ids no
-// coinciden con los de iptv-org".
+// RefreshLogosFromIPTVOrg busca logos en la base pública iptv-org
+// por tvg_id. Solo afecta canales sin logo y sin override admin.
+// Los hallazgos se guardan como overrides URL.
 func (c *ChannelOrderOps) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (IPTVOrgRefreshSummary, error) {
 	var sum IPTVOrgRefreshSummary
 	if c.iptvOrgLogos == nil {
@@ -539,8 +527,7 @@ func (c *ChannelOrderOps) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID
 	}
 	sum.Total = len(channels)
 
-	// Bulk-load overrides previos para no tener que consultarlos uno
-	// a uno (sería N+1 contra DB para libraries grandes).
+	// Bulk-load de overrides previos para evitar N+1 queries.
 	existing, err := c.logoOverrides.ListByLibrary(ctx, libraryID)
 	if err != nil {
 		return sum, fmt.Errorf("load existing logo overrides: %w", err)

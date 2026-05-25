@@ -44,7 +44,7 @@ func Fingerprint(pub ed25519.PublicKey) string {
 	if len(pub) == 0 {
 		return ""
 	}
-	// SHA-256(pubkey)[:8] → 16 hex chars in 4 groups of 4.
+	// SHA-256(pubkey)[:8] -> 16 hex chars en 4 grupos de 4.
 	sum := sha256First8(pub)
 	hexed := hex.EncodeToString(sum)
 	var sb strings.Builder
@@ -57,22 +57,14 @@ func Fingerprint(pub ed25519.PublicKey) string {
 	return sb.String()
 }
 
-// FingerprintWords returns 6 short pronounceable words derived from the
-// fingerprint bytes. Útil para confirmación por voz: "the fingerprint
-// starts with aardvark, barbados…". La lista es pequeña (288 entradas)
-// y se mapea pseudo-aleatoriamente por byte; resistencia a colisión
-// igual al SHA-256 truncado de 8 bytes subyacente.
-//
-// 6 palabras = 48 bits efectivos de confirmación oral (1 en ~280
-// billones), suficiente margen para un canal de voz con confusión
-// potencial. Antes eran 4 palabras (~32 bits, 1 en 4 mil millones)
-// que ya era seguro contra ataques cazapalabra, pero 6 deja margen
-// si el atacante puede lanzar diccionario sobre la transmisión.
+// FingerprintWords devuelve 6 palabras pronunciables derivadas del
+// fingerprint. 48 bits de confirmacion oral — suficiente para verificacion
+// por voz entre admins.
 func (i *Identity) FingerprintWords() []string {
 	return FingerprintWords(i.PublicKey)
 }
 
-// FingerprintWords (free-function variant) — see Identity.FingerprintWords.
+// FingerprintWords (variante free-function).
 func FingerprintWords(pub ed25519.PublicKey) []string {
 	if len(pub) == 0 {
 		return nil

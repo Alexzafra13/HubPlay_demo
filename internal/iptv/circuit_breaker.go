@@ -7,8 +7,7 @@ import (
 	"hubplay/internal/clock"
 )
 
-// breakerState is the three-state machine of a per-channel circuit
-// breaker.
+// breakerState — máquina de tres estados del circuit breaker per-canal.
 type breakerState int
 
 const (
@@ -28,8 +27,7 @@ func (s breakerState) String() string {
 	}
 }
 
-// breakerEntry is the runtime state for one channel inside the
-// breaker. Mutated only under channelBreaker.mu.
+// breakerEntry — estado runtime de un canal. Solo se muta bajo mu.
 type breakerEntry struct {
 	state         breakerState
 	failures      int       // consecutive upstream failures while closed
