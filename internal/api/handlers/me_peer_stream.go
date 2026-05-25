@@ -33,8 +33,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
 	"hubplay/internal/stream"
@@ -50,10 +48,12 @@ import (
 //	header: X-Hubplay-Client-Capabilities (optional)
 //	→ 200 { strategy, master_playlist_url }
 func (h *MePeersHandler) StartPeerStreamSession(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "peerID")
-	itemID := chi.URLParam(r, "itemId")
-	if peerID == "" || itemID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and itemId required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
 		return
 	}
 
@@ -118,9 +118,8 @@ func (h *MePeersHandler) ProxyPeerStreamQuality(w http.ResponseWriter, r *http.R
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	quality := chi.URLParam(r, "quality")
+	quality := requireParam(w, r, "quality")
 	if quality == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "quality required")
 		return
 	}
 	h.proxyPeerStreamPath(w, r, quality+"/index.m3u8")
@@ -135,10 +134,12 @@ func (h *MePeersHandler) ProxyPeerStreamSegment(w http.ResponseWriter, r *http.R
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	quality := chi.URLParam(r, "quality")
-	segment := chi.URLParam(r, "segment")
-	if quality == "" || segment == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "quality and segment required")
+	quality := requireParam(w, r, "quality")
+	if quality == "" {
+		return
+	}
+	segment := requireParam(w, r, "segment")
+	if segment == "" {
 		return
 	}
 	h.proxyPeerStreamPath(w, r, quality+"/"+segment)
@@ -166,9 +167,8 @@ func (h *MePeersHandler) ProxyPeerStreamSubtitleTrack(w http.ResponseWriter, r *
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
-	trackIndex := chi.URLParam(r, "trackIndex")
+	trackIndex := requireParam(w, r, "trackIndex")
 	if trackIndex == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "trackIndex required")
 		return
 	}
 	h.proxyPeerStreamPath(w, r, "subtitles/"+trackIndex)
@@ -179,10 +179,12 @@ func (h *MePeersHandler) ProxyPeerStreamSubtitleTrack(w http.ResponseWriter, r *
 // issues the GET with our peer JWT, and copies status + selected
 // headers + body to the response writer.
 func (h *MePeersHandler) proxyPeerStreamPath(w http.ResponseWriter, r *http.Request, suffix string) {
-	peerID := chi.URLParam(r, "peerID")
-	sessionID := chi.URLParam(r, "sessionId")
-	if peerID == "" || sessionID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and sessionId required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	sessionID := requireParam(w, r, "sessionId")
+	if sessionID == "" {
 		return
 	}
 

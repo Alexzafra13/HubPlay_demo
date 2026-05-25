@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
@@ -320,9 +318,8 @@ func (h *FederationAdminHandler) ListPeers(w http.ResponseWriter, r *http.Reques
 
 // GetPeer returns a single peer by local UUID.
 func (h *FederationAdminHandler) GetPeer(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	p, err := h.mgr.GetPeer(r.Context(), id)
@@ -351,9 +348,8 @@ type shareLibraryRequest struct {
 // ListShares returns every share row for a peer. Powers the per-peer
 // expansion panel in the admin UI.
 func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "id")
+	peerID := requireParam(w, r, "id")
 	if peerID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	shares, err := h.mgr.ListSharesByPeer(r.Context(), peerID)
@@ -373,9 +369,8 @@ func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Reque
 // given scopes. Idempotent — re-calling with different scopes
 // updates the existing row.
 func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "id")
+	peerID := requireParam(w, r, "id")
 	if peerID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peer id required")
 		return
 	}
 	claims := auth.GetClaims(r.Context())
@@ -422,10 +417,12 @@ func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Requ
 // DeleteShare removes a single share. Idempotent — missing share
 // is treated as success because the desired state is already true.
 func (h *FederationAdminHandler) DeleteShare(w http.ResponseWriter, r *http.Request) {
-	peerID := chi.URLParam(r, "id")
-	shareID := chi.URLParam(r, "shareID")
-	if peerID == "" || shareID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peer id and share id required")
+	peerID := requireParam(w, r, "id")
+	if peerID == "" {
+		return
+	}
+	shareID := requireParam(w, r, "shareID")
+	if shareID == "" {
 		return
 	}
 	if err := h.mgr.UnshareLibrary(r.Context(), peerID, shareID); err != nil {
@@ -601,9 +598,8 @@ func (h *FederationAdminHandler) AcceptPairingRequest(w http.ResponseWriter, r *
 		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	peer, err := h.mgr.AcceptPairingRequest(r.Context(), id, claims.UserID)
@@ -626,9 +622,8 @@ func (h *FederationAdminHandler) DeclinePairingRequest(w http.ResponseWriter, r 
 		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	if err := h.mgr.DeclinePairingRequest(r.Context(), id, claims.UserID); err != nil {
@@ -651,9 +646,8 @@ func (h *FederationAdminHandler) CancelPairingRequest(w http.ResponseWriter, r *
 		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	if err := h.mgr.CancelPairingRequest(r.Context(), id, claims.UserID); err != nil {
@@ -672,9 +666,8 @@ func (h *FederationAdminHandler) CancelPairingRequest(w http.ResponseWriter, r *
 // branding (nombre + color + URL de la foto) actualizado. Idempotente.
 // 200 con el peer actualizado; 502 si el remoto no responde.
 func (h *FederationAdminHandler) RefreshPeer(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	peer, err := h.mgr.RefreshPeerBranding(r.Context(), id)
@@ -696,9 +689,8 @@ func (h *FederationAdminHandler) RefreshPeer(w http.ResponseWriter, r *http.Requ
 
 // RevokePeer terminates a peer. 204 on success, 404 on unknown id.
 func (h *FederationAdminHandler) RevokePeer(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
 		return
 	}
 	if err := h.mgr.RevokePeer(r.Context(), id); err != nil {

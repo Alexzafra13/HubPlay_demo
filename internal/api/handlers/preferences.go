@@ -110,9 +110,8 @@ func (h *PreferencesHandler) DeleteMine(w http.ResponseWriter, r *http.Request) 
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 		return
 	}
-	key := chi.URLParam(r, "key")
+	key := requireParam(w, r, "key")
 	if key == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_KEY", "key required")
 		return
 	}
 	if err := h.repo.Delete(r.Context(), claims.UserID, key); err != nil {

@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/federation"
 )
@@ -38,10 +36,12 @@ func (h *MePeersHandler) GetPeerItemProgress(w http.ResponseWriter, r *http.Requ
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	peerID := chi.URLParam(r, "peerID")
-	itemID := chi.URLParam(r, "itemId")
-	if peerID == "" || itemID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and itemId required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
 		return
 	}
 	p, err := h.mgr.GetProgress(r.Context(), claims.UserID, peerID, itemID)
@@ -80,10 +80,12 @@ func (h *MePeersHandler) UpdatePeerItemProgress(w http.ResponseWriter, r *http.R
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	peerID := chi.URLParam(r, "peerID")
-	itemID := chi.URLParam(r, "itemId")
-	if peerID == "" || itemID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peerID and itemId required")
+	peerID := requireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	itemID := requireParam(w, r, "itemId")
+	if itemID == "" {
 		return
 	}
 

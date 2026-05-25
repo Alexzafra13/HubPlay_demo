@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/upload"
@@ -19,16 +17,16 @@ import (
 // UploadBrowseHandler implementa el explorador de carpetas estilo
 // SFTP/Termius dentro de una librería destino (PR6 file explorer).
 //
-//   GET  /api/v1/libraries/{id}/upload-browse?path=Movies/Drama
-//     lista subdirs del path indicado DENTRO de la librería.
-//     - path vacío = raíz de la librería.
-//     - Sólo subdirs (no ficheros) — el cliente sube, no inspecciona
-//       contenido existente.
-//     - Ordenados alfabéticamente para que la UI sea estable.
+//	GET  /api/v1/libraries/{id}/upload-browse?path=Movies/Drama
+//	  lista subdirs del path indicado DENTRO de la librería.
+//	  - path vacío = raíz de la librería.
+//	  - Sólo subdirs (no ficheros) — el cliente sube, no inspecciona
+//	    contenido existente.
+//	  - Ordenados alfabéticamente para que la UI sea estable.
 //
-//   POST /api/v1/libraries/{id}/folders     body: {path: "Movies/New"}
-//     crea una carpeta nueva dentro de la librería. Idempotente
-//     (MkdirAll). Devuelve el path canónico tras sanitizar.
+//	POST /api/v1/libraries/{id}/folders     body: {path: "Movies/New"}
+//	  crea una carpeta nueva dentro de la librería. Idempotente
+//	  (MkdirAll). Devuelve el path canónico tras sanitizar.
 //
 // Gate (router): can_upload — un user que no puede subir no necesita
 // el explorador. El owner pasa automático.
@@ -42,6 +40,7 @@ import (
 //     en vez de 404 — el frontend acaba de crear la carpeta y aún
 //     no se ha materializado en disco (caso happy path del "New
 //     folder + browse"); preferimos no romper la UX por una race.
+//
 // LibraryLister es la mínima superficie que UploadBrowseHandler
 // necesita del LibraryService — sólo ListForUser para resolver
 // acceso. La interface ancha LibraryService también la cumple, así
@@ -214,8 +213,8 @@ func (h *UploadBrowseHandler) CreateFolder(w http.ResponseWriter, r *http.Reques
 
 // DeleteEntry borra un fichero o una carpeta dentro de la librería.
 //
-//   DELETE /libraries/{id}/files?path=Movies/Drama/old.mkv
-//   DELETE /libraries/{id}/files?path=Movies/Drama&recursive=true
+//	DELETE /libraries/{id}/files?path=Movies/Drama/old.mkv
+//	DELETE /libraries/{id}/files?path=Movies/Drama&recursive=true
 //
 // Reglas:
 //   - path REQUERIDO y no puede ser "" (no borramos la librería entera).
@@ -299,7 +298,7 @@ type RenameRequest struct {
 // RenameEntry renombra o mueve un fichero/carpeta dentro de la
 // librería.
 //
-//   POST /libraries/{id}/files/rename body: {from: "old.mkv", to: "new.mkv"}
+//	POST /libraries/{id}/files/rename body: {from: "old.mkv", to: "new.mkv"}
 //
 // Reglas:
 //   - Ambos paths se sanitizan + se validan que viven dentro de la
@@ -402,9 +401,8 @@ func (h *UploadBrowseHandler) RenameEntry(w http.ResponseWriter, r *http.Request
 // y retorna (nil, false). Sin filtrar existencia (always 404, never
 // 403) — un user que no tiene acceso no debería poder enumerar.
 func (h *UploadBrowseHandler) resolveLibrary(w http.ResponseWriter, r *http.Request) (*librarymodel.Library, bool) {
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "MISSING_ID", "library id required")
 		return nil, false
 	}
 

@@ -98,9 +98,8 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
-	itemID := chi.URLParam(r, "itemId")
+	itemID := requireParam(w, r, "itemId")
 	if itemID == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "item id required")
 		return
 	}
 
@@ -229,9 +228,8 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 	if sess == nil {
 		return
 	}
-	quality := chi.URLParam(r, "quality")
+	quality := requireParam(w, r, "quality")
 	if quality == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "quality required")
 		return
 	}
 
@@ -290,10 +288,12 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 	if sess == nil {
 		return
 	}
-	quality := chi.URLParam(r, "quality")
-	segmentFile := chi.URLParam(r, "segment")
-	if quality == "" || segmentFile == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "quality and segment required")
+	quality := requireParam(w, r, "quality")
+	if quality == "" {
+		return
+	}
+	segmentFile := requireParam(w, r, "segment")
+	if segmentFile == "" {
 		return
 	}
 	if !validSegmentName.MatchString(segmentFile) {
@@ -431,9 +431,8 @@ func (h *FederationStreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.R
 // different peer all conflate to "session not found" so a malicious
 // peer can't enumerate other peers' session UUIDs.
 func (h *FederationStreamHandler) lookupPeerSession(w http.ResponseWriter, r *http.Request, peerID string) *federation.PeerStreamSession {
-	sid := chi.URLParam(r, "sessionId")
+	sid := requireParam(w, r, "sessionId")
 	if sid == "" {
-		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "session id required")
 		return nil
 	}
 	s := h.mgr.LookupPeerStreamSession(sid)

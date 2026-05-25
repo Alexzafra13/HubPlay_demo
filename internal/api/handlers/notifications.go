@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
 	"hubplay/internal/notification"
@@ -15,9 +13,9 @@ import (
 
 // NotificationsHandler expone el inbox por usuario:
 //
-//   GET    /me/notifications              listing + unread_count
-//   POST   /me/notifications/{id}/read    marca una como leida
-//   POST   /me/notifications/read-all     marca todas como leidas
+//	GET    /me/notifications              listing + unread_count
+//	POST   /me/notifications/{id}/read    marca una como leida
+//	POST   /me/notifications/read-all     marca todas como leidas
 //
 // Todas las rutas son auth-gated (claims.UserID es el dueño del
 // inbox). El service hace un WHERE user_id extra como defense-in-
@@ -113,9 +111,8 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := requireParam(w, r, "id")
 	if id == "" {
-		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing notification id")
 		return
 	}
 	if err := h.svc.MarkRead(r.Context(), id, claims.UserID); err != nil {
