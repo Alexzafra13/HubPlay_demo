@@ -6,20 +6,70 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21 noche tardía IV — F14-2-b cadena completa)
+## 🔭 Estado actual (2026-05-25, sesión larga cerrada)
 
-- Branch actual: `claude/f14-2-b-manager-startsession`. Tercera pieza F14-2-b: `Manager.StartSession` (8 params) + `Manager.startSessionSlow` (9 params) → struct `StartSessionRequest`. Actualizado el `StreamManagerService` interface + los 3 callers en handlers (stream.go + federation_stream.go x2) + el fake en stream_test.go + 5 sites de `startSessionFn`.
-- Mergeadas a main hoy: **#396** (G parcial / lifecycle), **#397** (olor H / router split), **#398** (F14-2-a / BuildFFmpegArgs), **#399** (F14-2-b / Transcoder.Start+RestartAt).
-- Branch principal `main`: V+JJ+LL+G+H+F14-2-a+F14-2-b-trio cerrados.
-- Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
-- Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: `go test -race ./...` verde end-to-end con todo Iter 6 V+JJ+LL+G aplicado; frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
-- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard)**, `react-doctor` (visibility-only con comentarios inline en PRs).
-- **Score React Doctor: ≥75/100 ("Great")** post-VideoPlayer-split (PR #381 mergeada). El offender principal de las reglas estructurales (`no-cascading-set-state`) eliminado; `no-giant-component` reducido de 1003 a 663 lines; `prefer-useReducer` de 12 useState a 5.
-- **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types**. Hard gate en CI.
-- **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
-- **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
-- HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+- **16 PRs producidas en la sesión** (#396-#411). Todas mergeadas excepto #409 (F14-9 where builder), #411 (BB stream comments) pendientes review.
+- **6/6 olores altos del audit cerrados.** 0 pendientes.
+- **Iter 9 (verificación empírica) cerrada**: goleak enforcement en 4 paquetes + fix CI Postgres + govulncheck + -race ya estaban.
+- **F14-2-b cadena completa**: BuildFFmpegArgs → TranscodeRequest, Transcoder.Start/RestartAt, Manager.StartSession/startSessionSlow, NewTranscoder → TranscoderConfig, RecordProgress → ProgressUpdate. 7 firmas refactorizadas.
+- **F14 quick wins**: panic→error (F14-4-a), CacheControl constantes (F14-9-a), sqlPlaceholders (F14-12-a), naming convention (F14-5-a), respondData 115 sites (F14-6-a), requireParam 53 sites (F14-6-b), where builder (F14-9).
+- **H cerrado** (router.go 1549→465 LoC en 7 mount_*.go).
+- **BB parcial**: transcode.go + manager.go traducidos + acortados (-474 líneas).
+- **Convención de comentarios** documentada en conventions.md (#405).
+- CI: todos los jobs verdes incluyendo Test Backend (Postgres) post-fix #406.
+
+---
+
+## 📋 Pendiente para próxima sesión
+
+### BB — traducir + acortar comentarios (continuar)
+
+Lo hecho: `internal/stream/transcode.go` + `manager.go` (-474 líneas).
+
+Lo que falta:
+- `internal/stream/`: decision.go, hwaccel.go, hls.go, subburn.go
+- `internal/library/`: ~10 ficheros con headers largos en inglés
+- `internal/iptv/`: ~8 ficheros, mismo patrón
+- `internal/federation/`: headers + doc-comments
+- `internal/api/handlers/`: los mount_*.go y otros ficheros tocados esta sesión
+
+### F14 polish residual (baja severidad)
+
+| Item | Qué |
+|---|---|
+| F14-10-a | 4 funciones con 4-value returns → struct (4 sites, scattered) |
+| F14-7-a | Sub-loggers `.With("library_id", id)` × 145 sites |
+| F14-3 | `iptv.RunRefreshM3U` 177 LoC pipeline split |
+| F14-4 | `stream.startSessionSlow` 175 LoC split |
+| F14-5 | `db.NewHomeRepository` 175 LoC SQL inline |
+
+### F15 tests
+
+| Item | Severidad | Qué |
+|---|---|---|
+| F15-1 | Alta | `time.Sleep` en 19 ficheros de tests → seams determinísticos |
+| F15-2..12 | Media/baja | time.Now no inyectado, parallel infrautilizado, etc. |
+
+### F16 handlers (8 media, 10 baja)
+
+Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, auth check redundante, etc.
+
+### Arquitectónicos (sesión grande, diferidos)
+
+- **G feature modules** — `library.New()` / `iptv.New()` con Shutdown
+- **H interfaces** — 22 `*db.X` concretos en Dependencies → interfaces
+- **LL** — Transcoder stateless (cmd/cancel/done a ManagedSession)
+
+### Frontend
+
+- VideoPlayer segunda ola (no-giant-component 663 LoC, prefer-useReducer)
+- file-type vuln (medium, bloqueada upstream)
+- Subir gate React Doctor a min-score 80
+
+### Distribución
+
+- Firma installer Windows con SignPath Foundation (gratis OSS)
+- Auto-update one-click + cert TLS LAN
 
 ---
 
