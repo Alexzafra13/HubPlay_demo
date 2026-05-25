@@ -6,26 +6,26 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-25 — sesión mega cerrada)
+## 🔭 Estado actual (2026-05-25, sesión cerrada — todo mergeado a main)
 
-**18+ PRs en esta sesión** (#396-#413). Todo el F14 del audit cerrado o en PR. BB completo (~3800 líneas eliminadas). Proyecto listo para producción.
+**20 PRs en esta sesión** (#396-#415). Todas mergeadas. 0 PRs abiertas.
 
 ### Cerrado en esta sesión
 
-- **6/6 olores altos** del audit 2026-05-14
+- **6/6 olores altos** del audit 2026-05-14 — 0 pendientes
 - **H** — router.go 1549→465 LoC (7 mount_*.go)
-- **F14 completo**: F14-2-a/b (7 firmas→structs), F14-3/4/5 (3 splits), F14-4-a (panic→error), F14-6-a/b (respondData 115 sites + requireParam 53), F14-9 (where builder), F14-9-a (CacheControl), F14-10-a (4-value returns), F14-12-a (sqlPlaceholders), F14-5-a (naming)
-- **Iter 9** — goleak (4 paquetes) + fix CI Postgres
-- **BB** — ~3800 líneas traducidas + acortadas (stream/ library/ iptv/ federation/ handlers/)
-- **Convención comentarios** documentada
+- **F14 completo**: F14-2-a/b (7 firmas→structs), F14-3/4/5 (3 splits de funciones largas: RunRefreshM3U, startSessionSlow, NewHomeRepository), F14-4-a (panic→error), F14-6-a/b (respondData 115 sites + requireParam 53 sites), F14-9 (where builder), F14-9-a (CacheControl constantes), F14-10-a (4-value returns→structs), F14-12-a (sqlPlaceholders), F14-5-a (naming convention)
+- **Iter 9** — goleak enforcement (4 paquetes) + fix CI Postgres singleton
+- **BB** — ~3800 líneas de comentarios traducidas + acortadas (stream/ library/ iptv/ federation/ handlers/)
+- **Convención comentarios** documentada en conventions.md (español, cortos, "por qué")
 
-### PRs pendientes de merge
+### CI
 
-#407, #408, #409, #411, #413
+Todos los jobs verdes: Test Backend, Test Backend (Postgres), Lint, Frontend, knip, govulncheck, goleak, React Doctor.
 
 ---
 
-## 📋 Lo que queda para sesión(es) grande(s)
+## 📋 Lo que queda para próxima(s) sesión(es)
 
 ### Polish baja (~2h)
 
@@ -34,17 +34,17 @@
 ### Tests (F15)
 
 - **F15-1 ALTA** — `time.Sleep` en 19 ficheros → seams determinísticos
-- **F15-2..12** — media/baja (time.Now, t.Parallel, etc.)
+- **F15-2..12** — media/baja (time.Now no inyectado, t.Parallel infrautilizado, etc.)
 
 ### Handlers (F16, 8 media)
 
-Paginación inconsistente, SSE drops, race async iptv_admin.
+Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, auth check redundante.
 
 ### Arquitectónicos (sesión grande cada uno)
 
-- **G** — feature modules `library.New()` / `iptv.New()` con Shutdown
+- **G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado
 - **H** — 22 `*db.X` → interfaces en Dependencies
-- **LL** — Transcoder stateless
+- **LL** — Transcoder stateless (cmd/cancel/done a ManagedSession)
 
 ### Frontend
 
@@ -59,15 +59,24 @@ Paginación inconsistente, SSE drops, race async iptv_admin.
 
 ---
 
-## Sesiones anteriores (archivadas abajo)
+## PRs de esta sesión (2026-05-25)
 
-- Branch previa `claude/f14-2-b-manager-startsession`. Tercera pieza F14-2-b: `Manager.StartSession` (8 params) + `Manager.startSessionSlow` (9 params) → struct `StartSessionRequest`. Actualizado el `StreamManagerService` interface + los 3 callers en handlers (stream.go + federation_stream.go x2) + el fake en stream_test.go + 5 sites de `startSessionFn`.
-- Mergeadas a main hoy: **#396** (G parcial / lifecycle), **#397** (olor H / router split), **#398** (F14-2-a / BuildFFmpegArgs), **#399** (F14-2-b / Transcoder.Start+RestartAt).
-- Branch principal `main`: V+JJ+LL+G+H+F14-2-a+F14-2-b-trio cerrados.
-- Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
-- Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: `go test -race ./...` verde end-to-end con todo Iter 6 V+JJ+LL+G aplicado; frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
-- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard)**, `react-doctor` (visibility-only con comentarios inline en PRs).
+| PR | Tema | Estado |
+|---|---|---|
+| #396 | G parcial (lifecycle) | ✅ merged |
+| #397 | H (router split 1549→465 LoC) | ✅ merged |
+| #398 | F14-2-a (BuildFFmpegArgs→TranscodeRequest) | ✅ merged |
+| #399 | F14-2-b (Transcoder.Start/RestartAt) | ✅ merged |
+| #400 | F14-2-b (Manager.StartSession→StartSessionRequest) | ✅ merged |
+| #401 | F14-2-b (NewTranscoder→TranscoderConfig) | ✅ merged |
+| #402 | F14-2-b (RecordProgress→ProgressUpdate) | ✅ merged |
+| #403 | Iter 9 goleak (4 paquetes) | ✅ merged |
+| #404 | 5 quick wins F14 (panic, CacheControl, sqlPlaceholders, naming) | ✅ merged |
+| #405 | Convención comentarios | ✅ merged |
+| #406 | Fix CI Postgres (goleak singleton) | ✅ merged |
+| #407 | respondData 115 sites | ✅ merged |
+| #415 | Consolidación: requireParam + where builder + BB + splits + F14-10-a | ✅ merged |
+| #414 | Memoria | ✅ merged |
 - **Score React Doctor: ≥75/100 ("Great")** post-VideoPlayer-split (PR #381 mergeada). El offender principal de las reglas estructurales (`no-cascading-set-state`) eliminado; `no-giant-component` reducido de 1003 a 663 lines; `prefer-useReducer` de 12 useState a 5.
 - **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types**. Hard gate en CI.
 - **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
