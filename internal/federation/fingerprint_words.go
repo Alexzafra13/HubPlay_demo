@@ -2,7 +2,7 @@ package federation
 
 import "crypto/sha256"
 
-// sha256First8 returns the first 8 bytes of SHA-256(input).
+// sha256First8 devuelve los primeros 8 bytes de SHA-256(input).
 func sha256First8(input []byte) []byte {
 	sum := sha256.Sum256(input)
 	out := make([]byte, 8)

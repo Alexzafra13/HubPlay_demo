@@ -16,15 +16,15 @@ var Profiles = map[string]Profile{
 	"720p":  {Name: "720p", Width: 1280, Height: 720, VideoBitrate: "2500k", AudioBitrate: "128k", MaxFrameRate: 30},
 	"480p":  {Name: "480p", Width: 854, Height: 480, VideoBitrate: "1200k", AudioBitrate: "128k", MaxFrameRate: 30},
 	"360p":  {Name: "360p", Width: 640, Height: 360, VideoBitrate: "600k", AudioBitrate: "96k", MaxFrameRate: 30},
-	"original": {Name: "original"}, // Direct play, no transcoding
+	"original": {Name: "original"}, // Reproducción directa, sin transcodificación
 }
 
-// ProfileNames returns sorted profile names from highest to lowest quality.
+// ProfileNames devuelve nombres de perfil ordenados de mayor a menor calidad.
 func ProfileNames() []string {
 	return []string{"original", "1080p", "720p", "480p", "360p"}
 }
 
-// DefaultProfile returns the default transcoding profile.
+// DefaultProfile devuelve el perfil de transcodificación por defecto.
 func DefaultProfile() Profile {
 	return Profiles["720p"]
 }

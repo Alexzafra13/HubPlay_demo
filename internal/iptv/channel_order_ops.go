@@ -363,12 +363,9 @@ func (c *ChannelOrderOps) ResetLibraryChannelOrder(ctx context.Context, libraryI
 	return c.libraryChannelOrder.Reset(ctx, libraryID)
 }
 
-// ── User-facing writes ────────────────────────────────────────────
+// ── Escrituras per-user ──────────────────────────────────────────
 
-// ListChannelOverrides returns the user's raw override rows for the
-// personalisation panel. The panel renders these alongside the
-// channel list so the user can see which channels they've touched
-// (highlighted) vs. which still inherit the admin defaults.
+// ListChannelOverrides devuelve las filas de override del usuario.
 func (c *ChannelOrderOps) ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error) {
 	if c.channelOrder == nil {
 		return nil, nil
@@ -376,15 +373,8 @@ func (c *ChannelOrderOps) ListChannelOverrides(ctx context.Context, userID strin
 	return c.channelOrder.List(ctx, userID)
 }
 
-// ReplaceChannelOrder is the panel's "Save order" entry point: it
-// receives the full reordered list of channel IDs and persists
-// position = index+1 for each, in a single transaction.
-//
-// The hidden flag is preserved for IDs the caller marked as
-// hidden via `hiddenIDs` (set semantics — pass the same channelID
-// once even if it's also in `orderedIDs`). Channels not present
-// in `orderedIDs` lose their override row and fall back to admin
-// defaults — that's how "opt out for a subset" works.
+// ReplaceChannelOrder persiste el orden per-user completo.
+// Los IDs ausentes pierden su override y vuelven a defaults admin.
 func (c *ChannelOrderOps) ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error {
 	if c.channelOrder == nil {
 		return fmt.Errorf("channel order repo not wired")
@@ -399,15 +389,9 @@ func (c *ChannelOrderOps) ReplaceChannelOrder(ctx context.Context, userID string
 	return c.channelOrder.ReplaceAll(ctx, userID, entries)
 }
 
-// SetChannelVisibility flips a single channel's hidden state for
-// the given user. Touching only one row avoids the "save the whole
-// list" round trip when the user just wants to hide one channel
-// from the channel list view.
-//
-// Implementation: when the user hides a channel that doesn't have
-// an override yet, we insert with position = current admin Number
-// so the visible order is unchanged. When they un-hide an existing
-// override, we keep their position and just flip the flag.
+// SetChannelVisibility cambia el hidden de un canal para el usuario.
+// Si no existe override, inserta con position = Number actual para
+// no alterar el orden visible.
 func (c *ChannelOrderOps) SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error {
 	if c.channelOrder == nil {
 		return fmt.Errorf("channel order repo not wired")
@@ -430,9 +414,7 @@ func (c *ChannelOrderOps) SetChannelVisibility(ctx context.Context, userID, chan
 	return c.channelOrder.Upsert(ctx, userID, channelID, position, hidden)
 }
 
-// ResetChannelOrder wipes every override the user has, restoring
-// the admin's default order and visibility. The personalisation
-// panel's "Restore admin order" button calls this.
+// ResetChannelOrder borra todos los overrides del usuario.
 func (c *ChannelOrderOps) ResetChannelOrder(ctx context.Context, userID string) error {
 	if c.channelOrder == nil {
 		return nil

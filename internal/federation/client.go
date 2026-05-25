@@ -481,8 +481,7 @@ func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path strin
 	return retried, nil
 }
 
-// recordProxyOutcome maps an HTTP status from a proxy attempt to the
-// outbound-request counter labels.
+// recordProxyOutcome mapea status HTTP a etiquetas del counter outbound.
 func (m *Manager) recordProxyOutcome(status int) {
 	switch {
 	case status >= 500:
@@ -494,9 +493,8 @@ func (m *Manager) recordProxyOutcome(status int) {
 	}
 }
 
-// proxyPeerAttempt issues a single authenticated GET and returns the
-// raw response; reused by ProxyPeerStreamRequest for both the initial
-// attempt and the post-401/403 refresh.
+// proxyPeerAttempt hace un solo GET autenticado; reutilizado para el
+// intento inicial y el retry post-401/403.
 func (m *Manager) proxyPeerAttempt(ctx context.Context, peerID, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

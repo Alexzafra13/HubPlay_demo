@@ -7,24 +7,12 @@ import (
 	"hubplay/internal/config"
 )
 
-// This file exposes hooks intended for tests that live OUTSIDE the
-// stream package (e.g. internal/api/handlers/admin_streams_test.go).
-// Tests inside the stream package itself can — and do — touch
-// unexported fields directly via newTestManager / m.mu.Lock(). The
-// helpers below are the public counterpart: same building blocks,
-// reachable across package boundaries, with names that telegraph the
-// "do not call this from production" intent.
+// Hooks exportados para tests cross-package (e.g. admin_streams_test.go).
+// Tests internos usan campos no-exportados directamente.
 
-// NewManagerForTest builds a minimal Manager without running hardware
-// acceleration detection, validating ffmpeg, wiring the cleanup
-// loop, or attaching repositories. The returned manager supports
-// every read API (ActiveSessions, ListAllSessions, GetSession, etc.)
-// and StopSession, but StartSession will panic — by design — because
-// the transcoder is not wired.
-//
-// The intended caller is an external test that wants to inject
-// pre-built ManagedSession values via SetSessionForTest and then
-// exercise the read or kill paths.
+// NewManagerForTest crea un Manager mínimo sin detección HW, ffmpeg ni cleanup loop.
+// Soporta read APIs y StopSession; StartSession panics (transcoder no conectado).
+// Para tests que inyectan sesiones via SetSessionForTest.
 func NewManagerForTest() *Manager {
 	return &Manager{
 		sessions:  make(map[string]*ManagedSession),
