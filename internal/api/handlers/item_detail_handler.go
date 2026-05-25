@@ -10,8 +10,6 @@ import (
 	"hubplay/internal/db"
 	"hubplay/internal/library"
 	librarymodel "hubplay/internal/library/model"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // ItemDetailHandler aísla las rutas del detalle de un item (la mayor

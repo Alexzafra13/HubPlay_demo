@@ -18,8 +18,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	iptvmodel "hubplay/internal/iptv/model"
 )
 
@@ -149,9 +147,9 @@ func (h *IPTVHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Reques
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"total_channels":     sum.TotalChannels,
-			"unhealthy_count":    sum.UnhealthyCount,
-			"without_epg_count":  sum.WithoutEPGCount,
+			"total_channels":    sum.TotalChannels,
+			"unhealthy_count":   sum.UnhealthyCount,
+			"without_epg_count": sum.WithoutEPGCount,
 		},
 	})
 }

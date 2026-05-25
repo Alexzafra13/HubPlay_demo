@@ -338,22 +338,22 @@ func (r *inMemoryFedRepo) UpsertCachedItems(_ context.Context, peerID, libraryID
 	r.cache[peerID+"|"+libraryID] = cacheEntry{items: cp, cachedAt: at}
 	return nil
 }
-func (r *inMemoryFedRepo) ListCachedItems(_ context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, time.Time, error) {
+func (r *inMemoryFedRepo) ListCachedItems(_ context.Context, peerID, libraryID string, offset, limit int) (CachedItemPage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.cache[peerID+"|"+libraryID]
 	if !ok {
-		return []*SharedItem{}, 0, time.Time{}, nil
+		return CachedItemPage{Items: []*SharedItem{}}, nil
 	}
 	total := len(entry.items)
 	if offset >= total {
-		return []*SharedItem{}, total, entry.cachedAt, nil
+		return CachedItemPage{Items: []*SharedItem{}, Total: total, CachedAt: entry.cachedAt}, nil
 	}
 	end := offset + limit
 	if end > total || limit <= 0 {
 		end = total
 	}
-	return entry.items[offset:end], total, entry.cachedAt, nil
+	return CachedItemPage{Items: entry.items[offset:end], Total: total, CachedAt: entry.cachedAt}, nil
 }
 func (r *inMemoryFedRepo) PurgeCachedItemsForLibrary(_ context.Context, peerID, libraryID string) error {
 	r.mu.Lock()

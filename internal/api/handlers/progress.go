@@ -8,8 +8,6 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/event"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // ProgressHandler handles watch progress and user engagement endpoints.

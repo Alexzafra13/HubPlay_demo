@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/go-chi/chi/v5"
-
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // PeopleRepository is the subset of db.PeopleRepository the handler
@@ -136,10 +134,10 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	entries := make([]map[string]any, 0, len(credits))
 	for _, c := range credits {
 		entry := map[string]any{
-			"item_id":   c.ItemID,
-			"type":      c.Type,
-			"title":     c.Title,
-			"role":      c.Role,
+			"item_id":    c.ItemID,
+			"type":       c.Type,
+			"title":      c.Title,
+			"role":       c.Role,
 			"sort_order": c.SortOrder,
 		}
 		if c.Year > 0 {

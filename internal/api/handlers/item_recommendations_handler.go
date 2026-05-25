@@ -5,8 +5,6 @@ import (
 	"net/http"
 
 	"hubplay/internal/provider"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // RecommendationsHandler atiende el rail "more like this" del detail

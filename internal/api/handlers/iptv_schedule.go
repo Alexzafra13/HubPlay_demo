@@ -8,10 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
-
-	"github.com/go-chi/chi/v5"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // IPTVScheduleRepository is the subset of db.IPTVScheduleRepository the
@@ -36,10 +34,10 @@ type IPTVScheduleRunner interface {
 // with IPTVHandler via the same LibraryAccessService / RequireAdmin
 // middleware; this handler only deals with the schedule CRUD surface.
 type IPTVScheduleHandler struct {
-	repo    IPTVScheduleRepository
-	runner  IPTVScheduleRunner
-	access  LibraryAccessService
-	logger  *slog.Logger
+	repo   IPTVScheduleRepository
+	runner IPTVScheduleRunner
+	access LibraryAccessService
+	logger *slog.Logger
 }
 
 // NewIPTVScheduleHandler wires a schedule handler. access is shared

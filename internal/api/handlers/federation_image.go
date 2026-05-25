@@ -27,8 +27,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/federation"
 )
 
@@ -160,4 +158,3 @@ func imageIDFromPath(path string) string {
 	}
 	return id
 }
-

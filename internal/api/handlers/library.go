@@ -12,11 +12,9 @@ import (
 	"strings"
 	"time"
 
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/library"
-
-	"github.com/go-chi/chi/v5"
+	librarymodel "hubplay/internal/library/model"
 )
 
 type LibraryHandler struct {
@@ -468,19 +466,19 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 //
 // Por que un endpoint dedicado en vez de reusar /items/latest:
 //
-//   1. /items/latest sin filtros devuelve episodios sueltos porque
-//      es lo que mas se añade en bibliotecas de series. Un strip
-//      saturado de "Show X · S2E5, Show X · S2E6, Show X · S2E7"
-//      no es lo que el operador quiere ver - quiere ver "Show X
-//      con 3 nuevos episodios" como hace Plex.
+//  1. /items/latest sin filtros devuelve episodios sueltos porque
+//     es lo que mas se añade en bibliotecas de series. Un strip
+//     saturado de "Show X · S2E5, Show X · S2E6, Show X · S2E7"
+//     no es lo que el operador quiere ver - quiere ver "Show X
+//     con 3 nuevos episodios" como hace Plex.
 //
-//   2. Hace falta MEZCLAR movies + series ordenadas por recency.
-//      Movies vienen de LatestItems(type=movie); series vienen de
-//      LatestSeriesByActivity (que ya rollupea por serie con un
-//      contador new_episodes_count en una ventana de 14 dias).
-//      Ningun endpoint del dashboard hacia esta mezcla.
+//  2. Hace falta MEZCLAR movies + series ordenadas por recency.
+//     Movies vienen de LatestItems(type=movie); series vienen de
+//     LatestSeriesByActivity (que ya rollupea por serie con un
+//     contador new_episodes_count en una ventana de 14 dias).
+//     Ningun endpoint del dashboard hacia esta mezcla.
 //
-//   3. Hereda el cap por content_rating del caller automatico.
+//  3. Hereda el cap por content_rating del caller automatico.
 //
 // Eficiencia: 2 queries SQL en serie (no paralelas porque no merece
 // la complejidad de goroutines + sync para un endpoint admin que
@@ -725,10 +723,10 @@ func splitLanguageFilter(stored string) []string {
 
 func itemSummaryResponse(item *librarymodel.Item) map[string]any {
 	resp := map[string]any{
-		"id":             item.ID,
-		"library_id":     item.LibraryID,
-		"type":           item.Type,
-		"title":          item.Title,
+		"id":         item.ID,
+		"library_id": item.LibraryID,
+		"type":       item.Type,
+		"title":      item.Title,
 		// `sort_title` is the lowercased + article-stripped variant the
 		// backend stores for SQL ORDER BY (so "The Matrix" sorts as
 		// "matrix"). The browse page also re-sorts client-side when

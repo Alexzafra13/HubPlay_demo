@@ -10,10 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/iptv"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // PreflightM3U probes an M3U URL on the operator's behalf so the

@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"hubplay/internal/imaging"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // TrickplayHandler aísla la generación y serving de sprite-sheets de

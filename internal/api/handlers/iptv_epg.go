@@ -17,10 +17,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
-	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // EPGCatalog returns the curated EPG provider list.

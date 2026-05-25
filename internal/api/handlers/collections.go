@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/imaging"
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
@@ -463,7 +461,7 @@ func (h *CollectionHandler) ServeCollectionImage(w http.ResponseWriter, r *http.
 func (h *CollectionHandler) parseCollectionImageRoute(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	rawID := requireParam(w, r, "id")
 	if rawID == "" {
-		return
+		return "", "", false
 	}
 	id := rawID
 	if decoded, err := netUrl.PathUnescape(rawID); err == nil {
@@ -471,7 +469,7 @@ func (h *CollectionHandler) parseCollectionImageRoute(w http.ResponseWriter, r *
 	}
 	imageType := requireParam(w, r, "type")
 	if imageType == "" {
-		return
+		return "", "", false
 	}
 	if imageType != "poster" && imageType != "backdrop" {
 		respondError(w, r, http.StatusBadRequest, "INVALID_TYPE", "image type must be poster or backdrop")

@@ -33,8 +33,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
 	"hubplay/internal/stream"

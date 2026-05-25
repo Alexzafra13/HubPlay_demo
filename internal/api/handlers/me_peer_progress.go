@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/federation"
 )

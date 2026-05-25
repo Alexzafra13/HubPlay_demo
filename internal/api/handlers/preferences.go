@@ -8,8 +8,6 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // PreferencesHandler exposes the per-user key/value preference store

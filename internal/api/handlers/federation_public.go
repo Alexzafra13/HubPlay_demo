@@ -7,8 +7,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
 )
@@ -399,9 +397,9 @@ func (h *FederationPublicHandler) Ping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"server_uuid":      h.mgr.PublicServerInfo().ServerUUID,
-		"now":              h.mgr.NowUTC().Format("2006-01-02T15:04:05Z"),
-		"acknowledged_to":  peer.ServerUUID,
+		"server_uuid":     h.mgr.PublicServerInfo().ServerUUID,
+		"now":             h.mgr.NowUTC().Format("2006-01-02T15:04:05Z"),
+		"acknowledged_to": peer.ServerUUID,
 	})
 }
 

@@ -8,8 +8,6 @@ import (
 
 	"hubplay/internal/domain"
 	"hubplay/internal/provider"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // ProviderHandler handles provider management and metadata/image/subtitle lookups.
@@ -61,10 +59,10 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProviderRequest struct {
-	Status   *string            `json:"status"`
-	APIKey   *string            `json:"api_key"`
-	Priority *int               `json:"priority"`
-	Config   map[string]string  `json:"config"`
+	Status   *string           `json:"status"`
+	APIKey   *string           `json:"api_key"`
+	Priority *int              `json:"priority"`
+	Config   map[string]string `json:"config"`
 }
 
 // Update modifies a provider's configuration (API key, status, priority).

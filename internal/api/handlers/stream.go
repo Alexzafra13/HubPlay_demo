@@ -18,8 +18,6 @@ import (
 	"hubplay/internal/domain"
 	"hubplay/internal/provider"
 	"hubplay/internal/stream"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // validSegmentName matches only safe HLS segment filenames (e.g. segment00001.ts, stream.m3u8).
@@ -643,11 +641,11 @@ func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.R
 	out := make([]map[string]any, len(results))
 	for i, r := range results {
 		out[i] = map[string]any{
-			"source":    r.Source,
-			"file_id":   r.URL, // OpenSubtitles uses the URL slot for fileID
-			"language":  r.Language,
-			"format":    r.Format,
-			"score":     r.Score,
+			"source":   r.Source,
+			"file_id":  r.URL, // OpenSubtitles uses the URL slot for fileID
+			"language": r.Language,
+			"format":   r.Format,
+			"score":    r.Score,
 		}
 	}
 	respondData(w, http.StatusOK, out)

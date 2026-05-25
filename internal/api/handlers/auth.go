@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
-	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/config"
 	"hubplay/internal/domain"
 )
@@ -97,9 +95,9 @@ func (h *AuthHandler) auditEmit() AuditEmitter {
 
 type noopAudit struct{}
 
-func (noopAudit) LogAuthLogin(_ context.Context, _ *http.Request, _, _ string)             {}
-func (noopAudit) LogAuthLoginFailed(_ context.Context, _ *http.Request, _, _ string)        {}
-func (noopAudit) LogAuthLogout(_ context.Context, _ *http.Request, _, _ string)             {}
+func (noopAudit) LogAuthLogin(_ context.Context, _ *http.Request, _, _ string)       {}
+func (noopAudit) LogAuthLoginFailed(_ context.Context, _ *http.Request, _, _ string) {}
+func (noopAudit) LogAuthLogout(_ context.Context, _ *http.Request, _, _ string)      {}
 func (noopAudit) LogPermissionChanged(_ context.Context, _ *http.Request, _ string, _ map[string]bool) {
 }
 func (noopAudit) LogRoleChanged(_ context.Context, _ *http.Request, _, _, _ string)         {}
@@ -980,7 +978,6 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondData(w, http.StatusCreated, resp)
 }
-
 
 // ─── Active sessions (user-facing) ──────────────────────────────────
 

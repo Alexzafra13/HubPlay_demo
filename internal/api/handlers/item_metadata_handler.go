@@ -12,8 +12,6 @@ import (
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
 	"hubplay/internal/scanner"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // MetadataIdentifier orquesta el rematch de un item contra un metadata

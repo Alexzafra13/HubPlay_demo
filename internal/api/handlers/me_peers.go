@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
 )
@@ -203,7 +201,7 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
-	items, total, fromCache, err := h.mgr.BrowsePeerItems(r.Context(), peerID, libraryID, offset, limit)
+	result, err := h.mgr.BrowsePeerItems(r.Context(), peerID, libraryID, offset, limit)
 	if err != nil {
 		h.logger.Warn("federation: browse peer items",
 			"peer_id", peerID, "library_id", libraryID, "err", err)
@@ -211,8 +209,8 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	out := make([]peerItemWire, 0, len(items))
-	for _, it := range items {
+	out := make([]peerItemWire, 0, len(result.Items))
+	for _, it := range result.Items {
 		row := peerItemWire{
 			ID:             it.ID,
 			Type:           it.Type,
@@ -230,8 +228,8 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
 			"items":      out,
-			"total":      total,
-			"from_cache": fromCache,
+			"total":      result.Total,
+			"from_cache": result.FromCache,
 		},
 	})
 }

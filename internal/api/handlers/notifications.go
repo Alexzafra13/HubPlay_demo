@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
 	"hubplay/internal/notification"
@@ -15,9 +13,9 @@ import (
 
 // NotificationsHandler expone el inbox por usuario:
 //
-//   GET    /me/notifications              listing + unread_count
-//   POST   /me/notifications/{id}/read    marca una como leida
-//   POST   /me/notifications/read-all     marca todas como leidas
+//	GET    /me/notifications              listing + unread_count
+//	POST   /me/notifications/{id}/read    marca una como leida
+//	POST   /me/notifications/read-all     marca todas como leidas
 //
 // Todas las rutas son auth-gated (claims.UserID es el dueño del
 // inbox). El service hace un WHERE user_id extra como defense-in-

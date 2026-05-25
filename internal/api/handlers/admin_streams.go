@@ -8,10 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
 )

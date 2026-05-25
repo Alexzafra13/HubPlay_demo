@@ -14,13 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
 	"hubplay/internal/imaging"
 	"hubplay/internal/imaging/pathmap"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
 )
 
@@ -589,16 +588,16 @@ func (h *ImageHandler) saveImageFile(itemID, filename string, data []byte) (stri
 // can't drift.
 //
 // Steps:
-//   1. Compose the on-disk filename from {kind}_{8-byte sha256}{ext}.
-//   2. Atomic write to {imageDir}/{itemID}/{filename}.
-//   3. Compute blurhash.
-//   4. Compute dominant colour pair.
-//   5. Insert the DB row with IsLocked = true (manual selection).
-//   6. If insert fails, remove the file (rollback).
-//   7. Promote the row to primary for its kind.
-//   8. Write the pathmap entry so /images/file/<id> can serve it.
-//   9. Return the populated `*librarymodel.Image` so the caller can build the
-//      JSON response.
+//  1. Compose the on-disk filename from {kind}_{8-byte sha256}{ext}.
+//  2. Atomic write to {imageDir}/{itemID}/{filename}.
+//  3. Compute blurhash.
+//  4. Compute dominant colour pair.
+//  5. Insert the DB row with IsLocked = true (manual selection).
+//  6. If insert fails, remove the file (rollback).
+//  7. Promote the row to primary for its kind.
+//  8. Write the pathmap entry so /images/file/<id> can serve it.
+//  9. Return the populated `*librarymodel.Image` so the caller can build the
+//     JSON response.
 //
 // The (width, height) pair is optional (0 = unknown) — Select gets it
 // from the request body, Upload leaves it unset and the imaging
@@ -687,4 +686,3 @@ func (h *ImageHandler) removePathMapping(imageID string) {
 		h.logger.Warn("pathmap remove failed", "id", imageID, "error", err)
 	}
 }
-
