@@ -82,7 +82,7 @@ func (h *UploadsHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 			"duration_ms":    row.DurationMs,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // Stream sirve un SSE filtrado a los uploads del usuario. Reusa el

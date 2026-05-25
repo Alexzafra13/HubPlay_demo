@@ -110,7 +110,7 @@ func (h *MetadataHandler) IdentifyCandidates(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 type identifyRequest struct {

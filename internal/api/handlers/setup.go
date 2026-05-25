@@ -145,7 +145,7 @@ func (h *SetupHandler) Browse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Cache-Control", CacheControlListing)
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 type createLibrariesRequest struct {
@@ -188,7 +188,7 @@ func (h *SetupHandler) CreateLibraries(w http.ResponseWriter, r *http.Request) {
 		created = append(created, result)
 	}
 
-	respondJSON(w, http.StatusCreated, map[string]any{"data": created})
+	respondData(w, http.StatusCreated, created)
 }
 
 type updateSettingsRequest struct {
@@ -249,7 +249,7 @@ func (h *SetupHandler) Capabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caps := h.setup.DetectCapabilities()
-	respondJSON(w, http.StatusOK, map[string]any{"data": caps})
+	respondData(w, http.StatusOK, caps)
 }
 
 type completeRequest struct {
@@ -264,7 +264,7 @@ func (h *SetupHandler) DatabaseProfiles(w http.ResponseWriter, r *http.Request) 
 	if !h.requireSetupActive(w, r) {
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": detectDBProfiles()})
+	respondData(w, http.StatusOK, detectDBProfiles())
 }
 
 // TestDatabase probes a candidate database driver+DSN/path so the
@@ -286,7 +286,7 @@ func (h *SetupHandler) TestDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := testCandidateDB(r.Context(), req, h.logger)
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // SaveDatabase persists the wizard's database selection to
@@ -324,7 +324,7 @@ func (h *SetupHandler) SaveDatabase(w http.ResponseWriter, r *http.Request) {
 			resp["restart_scheduled"] = true
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // Complete marks the setup wizard as finished.

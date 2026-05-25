@@ -122,15 +122,13 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	}
 	profiles := stream.ProfileNames()
 
-	respondJSON(w, http.StatusOK, map[string]any{
-		"data": map[string]any{
-			"item_id":     itemID,
-			"method":      decision.Method,
-			"video_codec": decision.VideoCodec,
-			"audio_codec": decision.AudioCodec,
-			"container":   decision.Container,
-			"profiles":    profiles,
-		},
+	respondData(w, http.StatusOK, map[string]any{
+		"item_id":     itemID,
+		"method":      decision.Method,
+		"video_codec": decision.VideoCodec,
+		"audio_codec": decision.AudioCodec,
+		"container":   decision.Container,
+		"profiles":    profiles,
 	})
 }
 
@@ -548,7 +546,7 @@ func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": subs})
+	respondData(w, http.StatusOK, subs)
 }
 
 // SearchExternalSubtitles queries every registered subtitle provider
@@ -619,7 +617,7 @@ func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.R
 			"score":     r.Score,
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // DownloadExternalSubtitle pulls bytes from the named provider, runs

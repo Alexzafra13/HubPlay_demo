@@ -58,7 +58,7 @@ func (h *MePeersHandler) GetPeerItemProgress(w http.ResponseWriter, r *http.Requ
 		wire.Completed = p.Completed
 		wire.LastPlayedAt = p.LastPlayedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": wire})
+	respondData(w, http.StatusOK, wire)
 }
 
 type updatePeerProgressRequest struct {
@@ -194,5 +194,5 @@ func (h *MePeersHandler) PeerContinueWatching(w http.ResponseWriter, r *http.Req
 		}
 		out = append(out, entry)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }

@@ -47,7 +47,7 @@ func (h *IPTVHandler) ListChannelsWithoutEPG(w http.ResponseWriter, r *http.Requ
 	for _, ch := range channels {
 		out = append(out, channelWithoutEPGDTO(ch))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 type patchChannelRequest struct {
@@ -93,7 +93,7 @@ func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": channelWithoutEPGDTO(updated)})
+	respondData(w, http.StatusOK, channelWithoutEPGDTO(updated))
 }
 
 // channelWithoutEPGDTO shapes the row so the UI gets the minimum
@@ -171,7 +171,7 @@ func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Reque
 	for _, ch := range channels {
 		out = append(out, channelHealthDTO(ch))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // ResetChannelHealth clears the failure counter so the channel is

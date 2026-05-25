@@ -137,7 +137,7 @@ type dbProfilesResponse struct {
 // /admin/system/*). The corresponding /setup/db/profiles is
 // unauthenticated; both share the same engine below.
 func (h *AdminDBHandler) Profiles(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]any{"data": detectDBProfiles()})
+	respondData(w, http.StatusOK, detectDBProfiles())
 }
 
 // detectDBProfiles is the shared engine behind /admin/system/db/profiles
@@ -179,7 +179,7 @@ func (h *AdminDBHandler) Status(w http.ResponseWriter, r *http.Request) {
 			WaitDurationMs: int64(s.WaitDuration / time.Millisecond),
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 type dbTestRequest struct {
@@ -220,7 +220,7 @@ func (h *AdminDBHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := testCandidateDB(r.Context(), req, h.logger)
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // testCandidateDB is the shared engine behind /admin/system/db/test
@@ -407,7 +407,7 @@ func (h *AdminDBHandler) Save(w http.ResponseWriter, r *http.Request) {
 			resp["restart_scheduled"] = true
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // Restart triggers a graceful self-shutdown so the next boot picks

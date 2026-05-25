@@ -37,7 +37,7 @@ func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
 			"url":         src.URL,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // ListEPGSources returns the EPG providers attached to a library.
@@ -54,7 +54,7 @@ func (h *IPTVHandler) ListEPGSources(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
+	respondData(w, http.StatusOK, epgSourcesToJSON(sources))
 }
 
 type addEPGSourceRequest struct {
@@ -96,7 +96,7 @@ func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusCreated, map[string]any{"data": epgSourceToJSON(src)})
+	respondData(w, http.StatusCreated, epgSourceToJSON(src))
 }
 
 // RemoveEPGSource deletes one provider from the library.
@@ -142,7 +142,7 @@ func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) 
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
+	respondData(w, http.StatusOK, epgSourcesToJSON(sources))
 }
 
 func epgSourcesToJSON(sources []*iptvmodel.LibraryEPGSource) []map[string]any {

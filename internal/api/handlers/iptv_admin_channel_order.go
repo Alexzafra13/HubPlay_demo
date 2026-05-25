@@ -54,7 +54,7 @@ func (h *IPTVHandler) ReplaceLibraryChannelOrder(w http.ResponseWriter, r *http.
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
+	respondData(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 type libraryChannelVisibilityRequest struct {
@@ -81,7 +81,7 @@ func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
+	respondData(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 // ResetLibraryChannelOrder wipes the admin overlay for a library,
@@ -96,7 +96,7 @@ func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Re
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
+	respondData(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 // ListLibraryChannelsAdmin returns every channel for a library with
@@ -137,5 +137,5 @@ func (h *IPTVHandler) ListLibraryChannelsAdmin(w http.ResponseWriter, r *http.Re
 		}
 		result = append(result, out)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }

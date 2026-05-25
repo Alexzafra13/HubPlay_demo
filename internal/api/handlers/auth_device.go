@@ -175,7 +175,7 @@ func (h *DeviceAuthHandler) Poll(w http.ResponseWriter, r *http.Request) {
 			int(h.authCfg.AccessTokenTTL.Seconds()),
 			int(h.authCfg.RefreshTokenTTL.Seconds()))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": tok})
+	respondData(w, http.StatusOK, tok)
 }
 
 // writePollError maps the device-code service errors to the RFC 8628

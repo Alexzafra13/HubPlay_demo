@@ -282,7 +282,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if profiles, perr := h.auth.ListProfiles(r.Context(), u.ID); perr == nil {
 		resp["profiles"] = profileListResponse(profiles)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // profileListResponse trims the User wire payload down to what the
@@ -384,7 +384,7 @@ func (h *AuthHandler) SwitchProfile(w http.ResponseWriter, r *http.Request) {
 	if profiles, perr := h.auth.ListProfiles(r.Context(), u.ID); perr == nil {
 		resp["profiles"] = profileListResponse(profiles)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 type setPINRequest struct {
@@ -535,7 +535,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
-	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
+	respondData(w, http.StatusOK, authTokenResponse(token, u))
 }
 
 type logoutRequest struct {
@@ -803,7 +803,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		out["generated_password"] = req.Password
 	}
 
-	respondJSON(w, http.StatusCreated, map[string]any{"data": out})
+	respondData(w, http.StatusCreated, out)
 }
 
 // ResetPassword is the admin "user lost their password" path. Mints a
@@ -981,7 +981,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
-	respondJSON(w, http.StatusCreated, map[string]any{"data": resp})
+	respondData(w, http.StatusCreated, resp)
 }
 
 
@@ -1021,7 +1021,7 @@ func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 			"auth_method":    sessionAuthMethod(s.DeviceID),
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // sessionAuthMethod classifies a session by how it was minted. The

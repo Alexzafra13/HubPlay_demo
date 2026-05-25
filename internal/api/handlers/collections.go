@@ -218,7 +218,7 @@ func (h *CollectionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["items"] = entries
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }
 
 // resolveOverrideURL produce la URL absoluta que el frontend pondrá en
@@ -510,7 +510,7 @@ func (h *CollectionHandler) AvailableCollectionImages(w http.ResponseWriter, r *
 	if col.TMDBID == 0 {
 		// Colección sin tmdb_id (caso raro: row legacy o creada sin
 		// match). Sin id no hay forma de pedirle imágenes a TMDb.
-		respondJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		respondData(w, http.StatusOK, []any{})
 		return
 	}
 
@@ -543,7 +543,7 @@ func (h *CollectionHandler) AvailableCollectionImages(w http.ResponseWriter, r *
 			"source":   img.Source,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 // Compile-time check: el Manager del provider package es lo que se

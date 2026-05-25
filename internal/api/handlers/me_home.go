@@ -207,7 +207,7 @@ func (h *HomeHandler) GetLayout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": layout})
+	respondData(w, http.StatusOK, layout)
 }
 
 // ─── PUT /me/home/layout ─────────────────────────────────────────────
@@ -282,7 +282,7 @@ func (h *HomeHandler) PutLayout(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": persist})
+	respondData(w, http.StatusOK, persist)
 }
 
 // ─── GET /me/home/trending ───────────────────────────────────────────

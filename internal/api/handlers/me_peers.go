@@ -69,7 +69,7 @@ func (h *MePeersHandler) ListMyPeers(w http.ResponseWriter, r *http.Request) {
 			Fingerprint: p.Fingerprint(),
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // unifiedLibraryWire pairs a library with the peer it came from in a
@@ -112,7 +112,7 @@ func (h *MePeersHandler) BrowseAllPeerLibraries(w http.ResponseWriter, r *http.R
 			CanLiveTV:       e.Library.Scopes.CanLiveTV,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // BrowsePeerLibraries returns the libraries a peer has shared with us.
@@ -134,7 +134,7 @@ func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Requ
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": libs})
+	respondData(w, http.StatusOK, libs)
 }
 
 // peerItemWire is the user-facing item shape. Mirrors federation.SharedItem

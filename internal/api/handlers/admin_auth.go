@@ -60,7 +60,7 @@ func (h *AdminAuthHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, entry)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 type rotateRequest struct {

@@ -45,7 +45,7 @@ func (h *IPTVHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 	for _, ch := range channels {
 		result = append(result, toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream"))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }
 
 // ListFavoriteIDs returns just the IDs — lighter payload used on page load
@@ -62,7 +62,7 @@ func (h *IPTVHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": ids})
+	respondData(w, http.StatusOK, ids)
 }
 
 // AddFavorite marks a channel favorited by the caller. Idempotent.
@@ -249,5 +249,5 @@ func (h *IPTVHandler) ListContinueWatching(w http.ResponseWriter, r *http.Reques
 		}
 		result = append(result, row)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+	respondData(w, http.StatusOK, result)
 }

@@ -126,5 +126,5 @@ func (h *StudioHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["items"] = entries
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	respondData(w, http.StatusOK, resp)
 }

@@ -120,7 +120,7 @@ func (h *AdminStreamsHandler) ListSessions(w http.ResponseWriter, r *http.Reques
 		}
 		out = append(out, dto)
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+	respondData(w, http.StatusOK, out)
 }
 
 // KillSession is the admin "stop now" endpoint. Idempotent: killing a

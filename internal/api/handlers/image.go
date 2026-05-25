@@ -81,7 +81,7 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 		data[i] = imageResponse(img)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 // Available queries all registered image providers for available images.
@@ -97,7 +97,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(extIDs) == 0 {
-		respondJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		respondData(w, http.StatusOK, []any{})
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondData(w, http.StatusOK, data)
 }
 
 // Select downloads an image from a URL and saves it locally, setting it as primary.
@@ -203,7 +203,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditEmit().LogArtworkChanged(r.Context(), r, "item", itemID, imgType)
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
+	respondData(w, http.StatusOK, imageResponse(img))
 }
 
 // Upload handles multipart file upload for custom images.
@@ -275,7 +275,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditEmit().LogArtworkChanged(r.Context(), r, "item", itemID, imgType)
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
+	respondData(w, http.StatusOK, imageResponse(img))
 }
 
 // SetLocked toggles the manual-override lock on an image. The flag is
@@ -311,7 +311,7 @@ func (h *ImageHandler) SetLocked(w http.ResponseWriter, r *http.Request) {
 	}
 
 	img.IsLocked = body.Locked
-	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
+	respondData(w, http.StatusOK, imageResponse(img))
 }
 
 // SetPrimary sets an existing image as the primary for its type.
@@ -337,7 +337,7 @@ func (h *ImageHandler) SetPrimary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	img.IsPrimary = true
-	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
+	respondData(w, http.StatusOK, imageResponse(img))
 }
 
 // Delete removes an image record and its local file.
@@ -397,7 +397,7 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"updated": updated}})
+	respondData(w, http.StatusOK, map[string]any{"updated": updated})
 }
 
 // ServeFile serves a locally stored image by its ID.
