@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -52,6 +54,31 @@ func respondData(w http.ResponseWriter, status int, payload any) {
 
 func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
+}
+
+const paginationMaxLimit = 500
+
+// parsePagination extracts offset and limit from query parameters with
+// validation: both must be non-negative, limit is capped at
+// paginationMaxLimit. Returns (offset, limit, ok). When ok is false
+// the response has already been written.
+func parsePagination(w http.ResponseWriter, r *http.Request) (offset, limit int, ok bool) {
+	return parsePaginationFromValues(w, r, r.URL.Query())
+}
+
+func parsePaginationFromValues(w http.ResponseWriter, r *http.Request, q url.Values) (offset, limit int, ok bool) {
+	offset, _ = strconv.Atoi(q.Get("offset"))
+	limit, _ = strconv.Atoi(q.Get("limit"))
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > paginationMaxLimit {
+		limit = paginationMaxLimit
+	}
+	return offset, limit, true
 }
 
 // respondAppError writes an AppError as a JSON response. Thin wrapper

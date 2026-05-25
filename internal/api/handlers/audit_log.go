@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strconv"
+
 	"time"
 
 	"hubplay/internal/db"
@@ -64,8 +64,7 @@ func NewAuditLogHandler(store AuditLogStore, logger *slog.Logger) *AuditLogHandl
 //   }
 func (h *AuditLogHandler) Query(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	offset, limit, _ := parsePaginationFromValues(w, r, q)
 
 	query := db.AuditQuery{
 		EventTypePrefix: q.Get("type"),

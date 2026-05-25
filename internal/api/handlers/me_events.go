@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"hubplay/internal/auth"
@@ -122,16 +123,12 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// dropped at the `default` branch below, which is the right
 	// behaviour: better to lose a tick than to block the bus dispatch
 	// for every connected client.
+	var sseDrops atomic.Int64
 	eventCh := make(chan event.Event, 64)
 	unsubs := make([]func(), 0, len(userScopedEventTypes))
 	for _, t := range userScopedEventTypes {
 		t := t
 		unsub := h.bus.Subscribe(t, func(e event.Event) {
-			// User-scope filter: drop events for other users at the
-			// subscription handler, before they ever land in the
-			// per-connection channel. Saves the channel slot and
-			// avoids a wakeup of the write goroutine for events the
-			// client would discard anyway.
 			if e.Data == nil {
 				return
 			}
@@ -141,7 +138,7 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			select {
 			case eventCh <- e:
 			default:
-				// Slow client; drop.
+				sseDrops.Add(1)
 			}
 		})
 		unsubs = append(unsubs, unsub)
@@ -162,6 +159,9 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			if d := sseDrops.Load(); d > 0 {
+				h.logger.Warn("user SSE events dropped (slow client)", "user_id", userID, "dropped", d)
+			}
 			h.logger.Info("user SSE client disconnected", "user_id", userID, "remote_addr", ClientIP(r))
 			return
 

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
@@ -292,8 +291,7 @@ func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *htt
 	if libraryID == "" {
 		return
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, limit, _ := parsePagination(w, r)
 
 	items, total, err := h.mgr.ListSharedItems(r.Context(), peer.ID, libraryID, offset, limit)
 	if err != nil {
@@ -330,7 +328,7 @@ func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http
 		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "q required")
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	_, limit, _ := parsePagination(w, r)
 
 	items, err := h.mgr.SearchLocalSharedItems(r.Context(), peer.ID, query, limit)
 	if err != nil {
@@ -364,7 +362,7 @@ func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Requ
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	_, limit, _ := parsePagination(w, r)
 
 	items, err := h.mgr.ListLocalRecentSharedItems(r.Context(), peer.ID, limit)
 	if err != nil {

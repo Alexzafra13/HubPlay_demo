@@ -70,8 +70,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	offset, limit, _ := parsePaginationFromValues(w, r, q)
 	libraryID := q.Get("library_id")
 	itemType := q.Get("type")
 	genre := q.Get("genre")

@@ -257,8 +257,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	offset, limit, _ := parsePagination(w, r)
 	sortBy := r.URL.Query().Get("sort_by")
 	sortOrder := r.URL.Query().Get("sort_order")
 	itemType := r.URL.Query().Get("type")
@@ -309,8 +308,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 // truncated grid.
 func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	offset, limit, _ := parsePaginationFromValues(w, r, q)
 	sortBy := q.Get("sort_by")
 	sortOrder := q.Get("sort_order")
 	itemType := q.Get("type")
@@ -385,7 +383,7 @@ func (h *LibraryHandler) Genres(w http.ResponseWriter, r *http.Request) {
 func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	libraryID := r.URL.Query().Get("library_id")
 	itemType := r.URL.Query().Get("type")
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	_, limit, _ := parsePagination(w, r)
 	cap := h.callerCapRating(r.Context())
 
 	// Activity-aware shows rail: when the caller asks for the latest
@@ -485,7 +483,7 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 // se llama una vez por minuto). Cada una es indexed por added_at +
 // type. Merge + sort en memoria sobre N+M items = trivial.
 func (h *LibraryHandler) AdminRecentlyAdded(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	_, limit, _ := parsePagination(w, r)
 	if limit <= 0 {
 		limit = 12
 	}
