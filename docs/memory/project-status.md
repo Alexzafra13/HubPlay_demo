@@ -6,18 +6,21 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-25, extensión post-cierre — G al 100 %)
+## 🔭 Estado actual (2026-05-25, extensión post-cierre — G + H al 100 %)
 
-Sesión corta sobre la "todo mergeado" ya cerrada. **Dos PRs
-estructurales** consecutivas cerraron el olor G del audit
-2026-05-14 al 100 %:
+Sesión de extensión sobre la "todo mergeado" del cierre 2026-05-25.
+**Tres PRs estructurales** consecutivas cierran los dos olores
+arquitectónicos pendientes del audit:
 
-1. **G fase iptv** (`iptv.Module`, PR #417, mergeada).
-2. **G fase library** (`library.Module`, rama
-   `claude/g-library-module`).
+1. **G fase iptv** (#417, ✅ merged) — `iptv.Module`.
+2. **G fase library** (#418, ✅ merged) — `library.Module`. Olor G
+   al 100 %.
+3. **H deps-interfaces** (#419, ✅ merged) — 18 `*db.X` en
+   Dependencies → interfaces broad. Olor H al 100 % (mountXxx ya
+   estaba cerrado en sesión 2026-05-21).
 
-Con `lifecycle.go` (#396, ya en main) + las dos PRs nuevas, las
-tres piezas del refactor propuesto en el audit están en su sitio.
+Con `lifecycle.go` (#396, ya en main) + estas tres PRs, **iteración
+6 del audit (composition root) cerrada al 100 %**.
 
 **20 PRs en la sesión 2026-05-25 base** (#396-#415). Todas mergeadas. 0 PRs abiertas al inicio.
 
@@ -53,8 +56,8 @@ Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, 
 
 ### Arquitectónicos (sesión grande cada uno)
 
-- ~~**G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado~~ — **cerrada al 100 %** (iptv.Module #417 + library.Module en `claude/g-library-module`, post lifecycle.go #396).
-- **H** — 22 `*db.X` → interfaces en Dependencies
+- ~~**G** — feature modules `library.New()` / `iptv.New()` con Shutdown integrado~~ — **cerrado al 100 %** (iptv.Module #417 + library.Module #418, post lifecycle.go #396).
+- ~~**H** — 22 `*db.X` → interfaces en Dependencies~~ — **cerrado al 100 %** (mountXxx split sesión 2026-05-21 + deps-interfaces #419).
 - **LL** — Transcoder stateless (cmd/cancel/done a ManagedSession)
 
 ### Frontend
@@ -196,8 +199,111 @@ están en su sitio:
 (−25 %), sin contar el lifecycle.go separado. Los **6 olores
 estructurales altos** del audit están cerrados (A+M, B+J, CC, P,
 W, F14-2-a) más los **5 olores composition-root** (V, JJ, LL, G,
-H mountXxx). Sólo queda Dependencies-as-interfaces (H parte 2) y
-LL stateless como sesiones grandes futuras.
+H mountXxx). Sólo queda Dependencies-as-interfaces (H parte 2 —
+abordada en la siguiente PR) y LL stateless como sesiones grandes
+futuras.
+
+---
+
+## 🪞 Sesión 2026-05-25 (extensión, parte III) — H deps-interfaces: 18 `*db.X` → interfaces
+
+Tercera PR de la extensión post-cierre. Cierra la segunda mitad del
+olor H del audit 2026-05-14: tras el split del router en mount_*.go
+helpers (sesión 2026-05-21, router.go 1549 → 465 LoC), faltaba que
+`api.Dependencies` dejara de expresar el contrato dos veces — como
+`*db.XRepository` arriba (composition root) y como interface estrecha
+abajo (handler local).
+
+### Cambio
+
+Nuevo `internal/api/handlers/deps_repos.go` (~218 LoC) declara
+**18 interfaces "broad"** — una por repo de `Dependencies` — con
+sufijo `Repo` para distinguirlas de las interfaces estrechas
+existentes a nivel handler:
+
+| Campo en `Dependencies` | Antes | Ahora |
+|---|---|---|
+| `IPTVSchedules` | `*db.IPTVScheduleRepository` | `handlers.IPTVSchedulesRepo` |
+| `Items` | `*db.ItemRepository` | `handlers.ItemsRepo` |
+| `MediaStreams` | `*db.MediaStreamRepository` | `handlers.MediaStreamsRepo` |
+| `Images` | `*db.ImageRepository` | `handlers.ImagesRepo` |
+| `Metadata` | `*db.MetadataRepository` | `handlers.MetadataRepo` |
+| `UserData` | `*db.UserDataRepository` | `handlers.UserDataRepo` |
+| `Chapters` | `*db.ChapterRepository` | `handlers.ChaptersRepo` |
+| `EpisodeSegments` | `*db.EpisodeSegmentRepository` | `handlers.EpisodeSegmentsRepo` |
+| `People` | `*db.PeopleRepository` | `handlers.PeopleRepo` |
+| `Studios` | `*db.StudioRepository` | `handlers.StudiosRepo` |
+| `Collections` | `*db.CollectionRepository` | `handlers.CollectionsRepo` |
+| `CollectionImageOverrides` | `*db.CollectionImageOverrideRepository` | `handlers.CollectionImageOverridesRepo` |
+| `UserPreferences` | `*db.UserPreferenceRepository` | `handlers.UserPreferencesRepoForDeps` |
+| `Home` | `*db.HomeRepository` | `handlers.HomeRepo` |
+| `ExternalIDs` | `*db.ExternalIDRepository` | `handlers.ExternalIDsRepo` |
+| `LibraryRepo` | `*db.LibraryRepository` | `handlers.LibrariesRepo` |
+| `ProviderRepo` | `*db.ProviderRepository` | `handlers.ProvidersConfigRepo` |
+| `Settings` | `*db.SettingsRepository` | `handlers.SettingsRepo` |
+| `Activity` | `*db.ActivityRepository` | `handlers.ActivityRepo` |
+
+### 4 handlers que aún aceptaban concretos
+
+Actualizados a interfaces locales **estrechas** (no a las broad —
+preservar el principio "interfaz estrecha en consumidor"):
+
+- `SystemHandlerConfig.Activity` → `activityRepo` (DailyWatchActivity
+  + TopItems).
+- `SettingsHandlerConfig.Settings` → `settingsStore` (Get + Set +
+  Delete).
+- `NewAdminStreamsHandler(... items ...)` → `adminStreamsItemLookup`
+  (GetByID).
+- `NewHomeHandler(home ..., items ...)` → `homeRepo` (4 rails) +
+  `ItemRepository` (interface existente).
+
+### Por qué dos niveles
+
+- **Broad (`handlers.XRepo`)**: lo que `Dependencies` declara. Cubre
+  la UNIÓN de los métodos invocados a través de `deps.X`. Expresa
+  el contrato **una vez** a nivel composition root.
+- **Estrecha (interface por handler)**: lo que cada handler consume.
+  Ya existían — los handlers siempre consumieron interfaces
+  localmente. Las broad son superset, así que `deps.X` (broad) se
+  pasa a constructores que esperan estrechas via duck-typing.
+
+### Aislamiento
+
+- `internal/api/router.go`: 18 campos cambian de tipo. **Cero cambios
+  semánticos**.
+- 2 imports `"hubplay/internal/db"` desaparecen de handlers
+  (`settings.go`, `admin_streams.go`).
+- `main.go`: **cero cambios** — `repos.Items` etc. satisfacen
+  estructuralmente las nuevas interfaces.
+
+### Tests
+
+`go test ./internal/api/...` verde sin modificaciones — los repos
+concretos satisfacen las nuevas interfaces, los handler tests
+siguen pasando `*db.X` directo y siguen compilando.
+
+| Categoría | Métrica |
+|---|---|
+| Ficheros tocados | 5 modificados + 1 nuevo |
+| LoC delta total | +280 / −15 (el +218 es deps_repos.go nuevo) |
+| Tests modificados | 0 |
+| Imports `db` eliminados de handlers | 2 |
+
+### Iteración 6 del audit — estado final
+
+| Olor | Estado |
+|---|---|
+| V (config en router) | ✅ #395 |
+| JJ (3 setters stream.Manager) | ✅ #395 |
+| LL (Manager+Transcoder doble session) | ✅ #395 (parcial, documentación) |
+| G iptv (feature module) | ✅ #417 |
+| G library (feature module) | ✅ #418 |
+| H mountXxx (router split) | ✅ sesión 2026-05-21 |
+| H deps-interfaces | ✅ #419 |
+
+**Iteración 6 cerrada al 100 %.** Quedan polish (F14-7-a sub-loggers,
+F15-1 time.Sleep) y refactors grandes con sesión propia (LL stateless
+full).
 
 ---
 

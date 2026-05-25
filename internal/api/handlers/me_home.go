@@ -40,10 +40,10 @@ import (
 
 // HomeHandler exposes the home-page customisation + discovery rails.
 type HomeHandler struct {
-	home     *db.HomeRepository
+	home     homeRepo
 	prefs    UserPreferencesRepo
 	libs     HomeLibraryLister
-	items    *db.ItemRepository
+	items    ItemRepository
 	images   ImageRepository
 	metadata HomeMetadataRepo
 	// users resolves the caller's max_content_rating so trending /
@@ -52,6 +52,18 @@ type HomeHandler struct {
 	// for everything.
 	users  UserService
 	logger *slog.Logger
+}
+
+// homeRepo es el contrato estrecho que HomeHandler usa del
+// HomeRepository de db (las cuatro rails: Trending, Recommended,
+// LiveNow, BecauseYouWatched). Interface local en lugar del concreto
+// cierra parte del olor H del audit — el contrato queda expresado
+// UNA vez aquí.
+type homeRepo interface {
+	Trending(ctx context.Context, userID string, windowDays, limit int) ([]db.HomeTrendingItem, error)
+	Recommended(ctx context.Context, userID string, limit int) ([]db.HomeRecommendation, error)
+	BecauseYouWatched(ctx context.Context, userID string, limit int) (*db.HomeBecauseResult, error)
+	LiveNow(ctx context.Context, userID string, limit int) ([]db.HomeLiveNowChannel, error)
 }
 
 // HomeLibraryLister is the slice of LibraryRepository the home
@@ -70,10 +82,10 @@ type HomeMetadataRepo interface {
 }
 
 func NewHomeHandler(
-	home *db.HomeRepository,
+	home homeRepo,
 	prefs UserPreferencesRepo,
 	libs HomeLibraryLister,
-	items *db.ItemRepository,
+	items ItemRepository,
 	images ImageRepository,
 	metadata HomeMetadataRepo,
 	users UserService,

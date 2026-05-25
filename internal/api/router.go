@@ -42,36 +42,42 @@ type Dependencies struct {
 	IPTVTransmux   *iptv.TransmuxManager
 	IPTVLogoCache  *iptv.LogoCache
 	IPTVScheduler  *iptv.Scheduler
-	IPTVSchedules  *db.IPTVScheduleRepository
-	Items          *db.ItemRepository
-	MediaStreams    *db.MediaStreamRepository
-	Images         *db.ImageRepository
-	Metadata       *db.MetadataRepository
-	UserData       *db.UserDataRepository
-	Chapters        *db.ChapterRepository
-	EpisodeSegments *db.EpisodeSegmentRepository
-	People          *db.PeopleRepository
-	Studios        *db.StudioRepository
-	Collections    *db.CollectionRepository
+	// Repos expuestos como interfaces (olor H fase 2 del audit
+	// 2026-05-14): los handlers ya consumían contratos estrechos
+	// localmente, así que el `*db.XRepository` concreto sólo añadía
+	// "doble expresión" del contrato. Los repos concretos siguen
+	// satisfaciendo estas interfaces — composition root pasa
+	// `repos.X` sin cambios.
+	IPTVSchedules            handlers.IPTVSchedulesRepo
+	Items                    handlers.ItemsRepo
+	MediaStreams             handlers.MediaStreamsRepo
+	Images                   handlers.ImagesRepo
+	Metadata                 handlers.MetadataRepo
+	UserData                 handlers.UserDataRepo
+	Chapters                 handlers.ChaptersRepo
+	EpisodeSegments          handlers.EpisodeSegmentsRepo
+	People                   handlers.PeopleRepo
+	Studios                  handlers.StudiosRepo
+	Collections              handlers.CollectionsRepo
 	// CollectionImageOverrides es opcional. nil deshabilita los
 	// endpoints de edición de carátula/fondo de colección con 503;
 	// el listado y el detail siguen funcionando con la imagen TMDb
 	// original.
-	CollectionImageOverrides *db.CollectionImageOverrideRepository
-	UserPreferences *db.UserPreferenceRepository
-	Home            *db.HomeRepository
-	Providers      *provider.Manager
+	CollectionImageOverrides handlers.CollectionImageOverridesRepo
+	UserPreferences          handlers.UserPreferencesRepoForDeps
+	Home                     handlers.HomeRepo
+	Providers                *provider.Manager
 	// Scanner expone SearchCandidates + IdentifyAndApply para el flujo
 	// admin de "Identify" (rematch manual contra TMDb). Opcional — si
 	// nil los endpoints /items/{id}/identify devuelven 503 y el resto
 	// del item handler sigue funcionando. Comparte instancia con la
 	// que dispara los scans periódicos: una sola fuente de verdad para
 	// la aplicación de metadatos en disco.
-	Scanner        *scanner.Scanner
-	ExternalIDs    *db.ExternalIDRepository
-	LibraryRepo    *db.LibraryRepository
-	ProviderRepo   *db.ProviderRepository
-	Settings       *db.SettingsRepository
+	Scanner      *scanner.Scanner
+	ExternalIDs  handlers.ExternalIDsRepo
+	LibraryRepo  handlers.LibrariesRepo
+	ProviderRepo handlers.ProvidersConfigRepo
+	Settings     handlers.SettingsRepo
 	SetupService   *setup.Service
 	EventBus       *event.Bus
 	Federation     *federation.Manager
@@ -90,7 +96,7 @@ type Dependencies struct {
 	DB             *db.Maintenance
 	// Activity expone DailyWatchActivity + TopItems para el admin
 	// SystemHandler. Sustituye las queries raw inline en system.go.
-	Activity       *db.ActivityRepository
+	Activity       handlers.ActivityRepo
 	Version        string
 	// Commit es el short SHA inyectado por el linker. Se renderiza en
 	// el panel system → server.commit. Vacío en dev builds.

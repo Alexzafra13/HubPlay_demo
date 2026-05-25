@@ -10,7 +10,7 @@ import (
 
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/stream"
 )
 
@@ -39,8 +39,16 @@ type adminUserLookup interface {
 type AdminStreamsHandler struct {
 	manager *stream.Manager
 	users   adminUserLookup
-	items   *db.ItemRepository
+	items   adminStreamsItemLookup
 	logger  *slog.Logger
+}
+
+// adminStreamsItemLookup es el contrato estrecho que el handler
+// admin/streams usa del repo de items (sólo GetByID, para enriquecer
+// sessions con título). Interface local en lugar del concreto cierra
+// la "doble expresión" del contrato — olor H fase 2 del audit.
+type adminStreamsItemLookup interface {
+	GetByID(ctx context.Context, id string) (*librarymodel.Item, error)
 }
 
 // NewAdminStreamsHandler constructs a handler wired to the given
@@ -49,7 +57,7 @@ type AdminStreamsHandler struct {
 // (username / item title), matching the behaviour for orphaned rows
 // where the user / item has been deleted but the manager still holds
 // a session reference.
-func NewAdminStreamsHandler(manager *stream.Manager, users adminUserLookup, items *db.ItemRepository, logger *slog.Logger) *AdminStreamsHandler {
+func NewAdminStreamsHandler(manager *stream.Manager, users adminUserLookup, items adminStreamsItemLookup, logger *slog.Logger) *AdminStreamsHandler {
 	return &AdminStreamsHandler{
 		manager: manager,
 		users:   users,
