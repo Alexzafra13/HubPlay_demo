@@ -71,7 +71,8 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 		return 0, fmt.Errorf("library %s has no M3U URL configured", libraryID)
 	}
 
-	s.logger.Info("refreshing M3U playlist", "library", libraryID, "url", lib.M3UURL)
+	log := s.logger.With("library_id", libraryID)
+	log.Info("refreshing M3U playlist", "url", lib.M3UURL)
 
 	// 1. Fetch + parse del M3U stream.
 	dbChannels, playlistEPGURL, err := s.fetchAndParseM3U(ctx, libraryID, lib)
@@ -90,7 +91,7 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 	// 4. Persistir EPG URL descubierta y publicar evento.
 	epgDiscovered := s.persistDiscoveredEPG(ctx, libraryID, playlistEPGURL, lib)
 
-	s.logger.Info("M3U refresh complete", "library", libraryID, "channels", len(dbChannels))
+	log.Info("M3U refresh complete", "channels", len(dbChannels))
 	s.publish(event.Event{
 		Type: event.PlaylistRefreshed,
 		Data: map[string]any{

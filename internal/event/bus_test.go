@@ -116,23 +116,30 @@ func TestBus_Unsubscribe_RemovesHandler(t *testing.T) {
 
 	var called int
 	var mu sync.Mutex
+	firstDone := make(chan struct{})
 	unsub := bus.Subscribe(ItemAdded, func(e Event) {
 		mu.Lock()
 		called++
 		mu.Unlock()
+		select {
+		case firstDone <- struct{}{}:
+		default:
+		}
 	})
 
-	// One publish while subscribed → handler runs.
 	bus.Publish(Event{Type: ItemAdded})
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("handler not called within 1s")
+	}
 
-	// Unsubscribe, then publish again → handler must NOT run.
 	unsub()
 	if bus.HandlerCount(ItemAdded) != 0 {
 		t.Fatalf("handler not removed: count=%d", bus.HandlerCount(ItemAdded))
 	}
+	// After unsub, handler count is 0 — Publish spawns nothing.
 	bus.Publish(Event{Type: ItemAdded})
-	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -156,30 +163,31 @@ func TestBus_Unsubscribe_IsIdempotent(t *testing.T) {
 func TestBus_Unsubscribe_DoesNotAffectOtherSubscribers(t *testing.T) {
 	bus := NewBus(slog.Default())
 
-	var aCalled, bCalled bool
+	var aCalled bool
 	var mu sync.Mutex
+	bDone := make(chan struct{})
 	unsubA := bus.Subscribe(ItemAdded, func(e Event) {
 		mu.Lock()
 		aCalled = true
 		mu.Unlock()
 	})
 	bus.Subscribe(ItemAdded, func(e Event) {
-		mu.Lock()
-		bCalled = true
-		mu.Unlock()
+		close(bDone)
 	})
 
 	unsubA()
 	bus.Publish(Event{Type: ItemAdded})
-	time.Sleep(50 * time.Millisecond)
+
+	select {
+	case <-bDone:
+	case <-time.After(time.Second):
+		t.Fatal("B handler not called within 1s")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
 	if aCalled {
 		t.Error("A was unsubscribed but still called")
-	}
-	if !bCalled {
-		t.Error("B should still be called")
 	}
 }
 
@@ -195,10 +203,8 @@ func TestBus_DifferentEventTypes(t *testing.T) {
 		mu.Unlock()
 	})
 
-	// Publish a different event type
+	// No handlers for ItemRemoved — Publish spawns nothing.
 	bus.Publish(Event{Type: ItemRemoved})
-
-	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()

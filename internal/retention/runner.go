@@ -6,6 +6,7 @@ package retention
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"hubplay/internal/config"
@@ -27,6 +28,9 @@ type Runner struct {
 	audit  AuditPruner
 	logger *slog.Logger
 	stopCh chan struct{}
+
+	sweepsDone       atomic.Int64
+	sweepsDoneNotify chan struct{}
 }
 
 // New: epg y audit pueden ser nil — se omite el sweep correspondiente.
@@ -35,11 +39,12 @@ func New(cfg config.RetentionConfig, epg EPGCleaner, audit AuditPruner, logger *
 		logger = slog.Default()
 	}
 	return &Runner{
-		cfg:    cfg,
-		epg:    epg,
-		audit:  audit,
-		logger: logger.With("module", "retention"),
-		stopCh: make(chan struct{}),
+		cfg:              cfg,
+		epg:              epg,
+		audit:            audit,
+		logger:           logger.With("module", "retention"),
+		stopCh:           make(chan struct{}),
+		sweepsDoneNotify: make(chan struct{}, 32),
 	}
 }
 
@@ -96,6 +101,28 @@ func (r *Runner) sweep(ctx context.Context) {
 			r.logger.Warn("federation audit prune failed", "error", err)
 		case n > 0:
 			r.logger.Info("federation audit prune", "rows_deleted", n, "window", r.cfg.FederationAuditLog)
+		}
+	}
+
+	r.sweepsDone.Add(1)
+	select {
+	case r.sweepsDoneNotify <- struct{}{}:
+	default:
+	}
+}
+
+// WaitForSweep blocks until at least n sweeps have completed (or
+// timeout elapses). Test-only.
+func (r *Runner) WaitForSweep(n int64, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		if r.sweepsDone.Load() >= n {
+			return true
+		}
+		select {
+		case <-r.sweepsDoneNotify:
+		case <-deadline:
+			return r.sweepsDone.Load() >= n
 		}
 	}
 }

@@ -38,9 +38,10 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 	if s.providers == nil || s.externalIDs == nil {
 		return
 	}
+	log := s.logger.With("item_id", item.ID)
 	extIDs, err := s.externalIDs.ListByItem(ctx, seriesID)
 	if err != nil {
-		s.logger.Debug("season enrich: series external_ids lookup failed", "series_id", seriesID, "error", err)
+		log.Debug("season enrich: series external_ids lookup failed", "series_id", seriesID, "error", err)
 		return
 	}
 	var tmdbID string
@@ -56,7 +57,7 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 
 	meta, err := s.providers.FetchSeasonMetadata(ctx, tmdbID, seasonNum)
 	if err != nil || meta == nil {
-		s.logger.Debug("season enrich: provider returned nothing", "tmdb_id", tmdbID, "season", seasonNum, "error", err)
+		log.Debug("season enrich: provider returned nothing", "tmdb_id", tmdbID, "season", seasonNum, "error", err)
 		return
 	}
 
@@ -73,7 +74,7 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 	}
 	item.UpdatedAt = time.Now()
 	if err := s.items.Update(ctx, item); err != nil {
-		s.logger.Warn("update season with metadata", "id", item.ID, "error", err)
+		log.Warn("update season with metadata", "error", err)
 	}
 
 	if meta.Overview != "" {
@@ -81,7 +82,7 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 			ItemID:   item.ID,
 			Overview: meta.Overview,
 		}); err != nil {
-			s.logger.Warn("store season metadata", "id", item.ID, "error", err)
+			log.Warn("store season metadata", "error", err)
 		}
 	}
 
@@ -89,17 +90,18 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 		s.fetchAndStoreSeasonPoster(ctx, item.ID, meta.PosterURL)
 	}
 
-	s.logger.Info("enriched season metadata", "title", item.Title, "id", item.ID, "tmdb_show", tmdbID, "season", seasonNum, "episodes_known", meta.EpisodeCount)
+	log.Info("enriched season metadata", "title", item.Title, "tmdb_show", tmdbID, "season", seasonNum, "episodes_known", meta.EpisodeCount)
 }
 
 // fetchAndStoreSeasonPoster descarga el póster de una temporada y lo
 // guarda como imagen principal de esa temporada. Funciona igual que el
 // equivalente para episodios.
 func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterURL string) {
+	log := s.logger.With("item_id", itemID)
 	dir := filepath.Join(s.imageDir, itemID)
 	ing, err := imaging.IngestRemoteImage(dir, "primary", posterURL, s.logger)
 	if err != nil {
-		s.logger.Warn("scanner: season poster ingest failed", "id", itemID, "error", err)
+		log.Warn("scanner: season poster ingest failed", "error", err)
 		return
 	}
 
@@ -117,12 +119,12 @@ func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterU
 		DominantColorMuted: ing.DominantColorMuted,
 	}
 	if err := s.images.Create(ctx, dbImg); err != nil {
-		s.logger.Warn("scanner: failed to store season poster row", "id", itemID, "error", err)
+		log.Warn("scanner: failed to store season poster row", "error", err)
 		_ = os.Remove(ing.LocalPath)
 		return
 	}
 	if err := s.pathmap.Write(imgID, ing.LocalPath); err != nil {
-		s.logger.Warn("scanner: pathmap write failed (season poster)", "id", imgID, "error", err)
+		log.Warn("scanner: pathmap write failed (season poster)", "image_id", imgID, "error", err)
 	}
 }
 
@@ -136,6 +138,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 	if s.providers == nil || s.externalIDs == nil {
 		return
 	}
+	log := s.logger.With("item_id", item.ID)
 	season, err := s.items.GetByID(ctx, seasonItemID)
 	if err != nil || season == nil || season.ParentID == "" {
 		return
@@ -144,7 +147,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 
 	extIDs, err := s.externalIDs.ListByItem(ctx, seriesID)
 	if err != nil {
-		s.logger.Debug("episode enrich: series external_ids lookup failed", "series_id", seriesID, "error", err)
+		log.Debug("episode enrich: series external_ids lookup failed", "series_id", seriesID, "error", err)
 		return
 	}
 	var tmdbID string
@@ -161,7 +164,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 
 	meta, err := s.providers.FetchEpisodeMetadata(ctx, tmdbID, seasonNum, episodeNum)
 	if err != nil || meta == nil {
-		s.logger.Debug("episode enrich: provider returned nothing", "tmdb_id", tmdbID, "season", seasonNum, "episode", episodeNum, "error", err)
+		log.Debug("episode enrich: provider returned nothing", "tmdb_id", tmdbID, "season", seasonNum, "episode", episodeNum, "error", err)
 		return
 	}
 
@@ -185,7 +188,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 	}
 	item.UpdatedAt = time.Now()
 	if err := s.items.Update(ctx, item); err != nil {
-		s.logger.Warn("update episode with metadata", "id", item.ID, "error", err)
+		log.Warn("update episode with metadata", "error", err)
 	}
 
 	if meta.Overview != "" {
@@ -193,7 +196,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 			ItemID:   item.ID,
 			Overview: meta.Overview,
 		}); err != nil {
-			s.logger.Warn("store episode metadata", "id", item.ID, "error", err)
+			log.Warn("store episode metadata", "error", err)
 		}
 	}
 
@@ -205,16 +208,17 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 		s.fetchAndStoreEpisodeStill(ctx, item.ID, meta.StillURL)
 	}
 
-	s.logger.Info("enriched episode metadata", "title", item.Title, "id", item.ID, "tmdb_show", tmdbID, "season", seasonNum, "episode", episodeNum)
+	log.Info("enriched episode metadata", "title", item.Title, "tmdb_show", tmdbID, "season", seasonNum, "episode", episodeNum)
 }
 
 // fetchAndStoreEpisodeStill: ingest de 1 still TMDb + Image row `backdrop`
 // del episode. Sin loop per-kind: episodes no tienen poster ni logo en TMDb.
 func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillURL string) {
+	log := s.logger.With("item_id", itemID)
 	dir := filepath.Join(s.imageDir, itemID)
 	ing, err := imaging.IngestRemoteImage(dir, "backdrop", stillURL, s.logger)
 	if err != nil {
-		s.logger.Warn("scanner: episode still ingest failed", "id", itemID, "error", err)
+		log.Warn("scanner: episode still ingest failed", "error", err)
 		return
 	}
 
@@ -232,11 +236,11 @@ func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillUR
 		DominantColorMuted: ing.DominantColorMuted,
 	}
 	if err := s.images.Create(ctx, dbImg); err != nil {
-		s.logger.Warn("scanner: failed to store episode still row", "id", itemID, "error", err)
+		log.Warn("scanner: failed to store episode still row", "error", err)
 		_ = os.Remove(ing.LocalPath)
 		return
 	}
 	if err := s.pathmap.Write(imgID, ing.LocalPath); err != nil {
-		s.logger.Warn("scanner: pathmap write failed (episode still)", "id", imgID, "error", err)
+		log.Warn("scanner: pathmap write failed (episode still)", "image_id", imgID, "error", err)
 	}
 }

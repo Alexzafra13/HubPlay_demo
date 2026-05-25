@@ -58,7 +58,7 @@ func TestRunner_RunsBothCleanersOnStartup(t *testing.T) {
 	cfg := config.RetentionConfig{
 		EPGPrograms:        12 * time.Hour,
 		FederationAuditLog: 7 * 24 * time.Hour,
-		SweepInterval:      24 * time.Hour, // very long; only the startup tick runs in the test
+		SweepInterval:      24 * time.Hour,
 	}
 	r := retention.New(cfg, epg, audit, quietLogger())
 
@@ -67,14 +67,9 @@ func TestRunner_RunsBothCleanersOnStartup(t *testing.T) {
 	r.Start(ctx)
 	t.Cleanup(r.Stop)
 
-	deadline := time.After(2 * time.Second)
-	for atomic.LoadInt32(&epg.calls) == 0 || atomic.LoadInt32(&audit.calls) == 0 {
-		select {
-		case <-deadline:
-			t.Fatalf("startup sweep did not run within 2s (epg=%d audit=%d)",
-				epg.calls, audit.calls)
-		case <-time.After(10 * time.Millisecond):
-		}
+	if !r.WaitForSweep(1, 2*time.Second) {
+		t.Fatalf("startup sweep did not run within 2s (epg=%d audit=%d)",
+			epg.calls, audit.calls)
 	}
 
 	epg.mu.Lock()
@@ -99,7 +94,7 @@ func TestRunner_DisabledOnZeroInterval(t *testing.T) {
 	r.Start(context.Background())
 	t.Cleanup(r.Stop)
 
-	time.Sleep(50 * time.Millisecond)
+	// Start returns immediately without goroutine when interval=0.
 	if got := atomic.LoadInt32(&epg.calls); got != 0 {
 		t.Errorf("EPG cleanup must not run when interval=0, got %d calls", got)
 	}
@@ -119,8 +114,9 @@ func TestRunner_NilDepsAreSafe(t *testing.T) {
 	r := retention.New(cfg, nil, nil, quietLogger())
 	r.Start(context.Background())
 	t.Cleanup(r.Stop)
-	// Just sleep long enough for startup tick to fire — it must not panic.
-	time.Sleep(50 * time.Millisecond)
+	if !r.WaitForSweep(1, 2*time.Second) {
+		t.Fatal("startup sweep did not complete — possible panic")
+	}
 }
 
 // TestRunner_OneCleanerFailureDoesNotBlockTheOther — independent paths
@@ -137,12 +133,7 @@ func TestRunner_OneCleanerFailureDoesNotBlockTheOther(t *testing.T) {
 	r.Start(context.Background())
 	t.Cleanup(r.Stop)
 
-	deadline := time.After(2 * time.Second)
-	for atomic.LoadInt32(&audit.calls) == 0 {
-		select {
-		case <-deadline:
-			t.Fatalf("audit prune was skipped after EPG failure (calls=%d)", audit.calls)
-		case <-time.After(10 * time.Millisecond):
-		}
+	if !r.WaitForSweep(1, 2*time.Second) {
+		t.Fatalf("audit prune was skipped after EPG failure (calls=%d)", audit.calls)
 	}
 }

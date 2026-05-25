@@ -140,6 +140,7 @@ type ScanResult struct {
 func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*ScanResult, error) {
 	start := time.Now()
 	result := &ScanResult{}
+	log := s.logger.With("library_id", lib.ID)
 
 	s.bus.Publish(event.Event{
 		Type: event.LibraryScanStarted,
@@ -176,7 +177,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 	seenPaths := make(map[string]bool)
 	for _, libPath := range lib.Paths {
 		if err := s.walkPath(ctx, lib, libPath, seenPaths, cache, result); err != nil {
-			s.logger.Error("error walking path", "path", libPath, "error", err)
+			log.Error("error walking path", "path", libPath, "error", err)
 			result.Errors++
 		}
 	}
@@ -223,7 +224,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		},
 	})
 
-	s.logger.Info("scan complete",
+	log.Info("scan complete",
 		"library", lib.Name,
 		"added", result.Added,
 		"updated", result.Updated,

@@ -117,6 +117,8 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	log := d.logger.With("library_id", libraryID)
+
 	episodes, _, err := d.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
 		Type:      "episode",
@@ -179,8 +181,7 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 			"detected":   detected,
 		},
 	})
-	d.logger.Info("segment detection complete",
-		"library_id", libraryID,
+	log.Info("segment detection complete",
 		"episodes_scanned", scanned,
 		"segments_detected", detected)
 	return nil

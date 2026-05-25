@@ -29,9 +29,10 @@ import (
 // (póster, fondo, logo) y la guarda en local. Si una imagen falla, se
 // loguea y se sigue — perder un póster es mejor que tumbar todo el scan.
 func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, externalIDs map[string]string, itemType provider.ItemType) {
+	log := s.logger.With("item_id", itemID)
 	results, err := s.providers.FetchImages(ctx, externalIDs, itemType)
 	if err != nil {
-		s.logger.Debug("provider image fetch failed", "id", itemID, "error", err)
+		log.Debug("provider image fetch failed", "error", err)
 		return
 	}
 	if len(results) == 0 {
@@ -57,7 +58,7 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 	for kind, best := range bestByKind {
 		ing, err := imaging.IngestRemoteImage(dir, kind, best.URL, s.logger)
 		if err != nil {
-			s.logger.Warn("scanner: image ingest failed", "id", itemID, "kind", kind, "error", err)
+			log.Warn("scanner: image ingest failed", "kind", kind, "error", err)
 			continue
 		}
 
@@ -84,7 +85,7 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 			DominantColorMuted: ing.DominantColorMuted,
 		}
 		if err := s.images.Create(ctx, dbImg); err != nil {
-			s.logger.Warn("scanner: failed to store image row", "id", itemID, "kind", kind, "error", err)
+			log.Warn("scanner: failed to store image row", "kind", kind, "error", err)
 			_ = os.Remove(ing.LocalPath)
 			continue
 		}

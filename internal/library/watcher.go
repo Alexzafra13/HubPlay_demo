@@ -96,7 +96,11 @@ type FSWatcher struct {
 	// Test-only observability — prod code never reads this. Atomic so
 	// tests can sample it from outside the dispatcher goroutine
 	// without holding any locks.
-	walksDone atomic.Int64
+	walksDone       atomic.Int64
+	walksDoneNotify chan struct{}
+
+	reconcileDone       atomic.Int64
+	reconcileDoneNotify chan struct{}
 
 	// mu guards stop visibility from Stop() to the dispatcher loop.
 	mu      sync.Mutex
@@ -109,20 +113,25 @@ type FSWatcher struct {
 // calling Start.
 func NewFSWatcher(service *Service, logger *slog.Logger) *FSWatcher {
 	return &FSWatcher{
-		service:        service,
-		logger:         logger.With("module", "fs_watcher"),
-		debounce:       2 * time.Second,
-		reconcileEvery: 5 * time.Minute,
-		debouncers:     make(map[string]*time.Timer),
-		watchedRoots:   make(map[string]string),
-		lastSeen:       make(map[string][]string),
-		stopCh:         make(chan struct{}),
+		service:         service,
+		logger:          logger.With("module", "fs_watcher"),
+		debounce:        2 * time.Second,
+		reconcileEvery:  5 * time.Minute,
+		debouncers:      make(map[string]*time.Timer),
+		watchedRoots:    make(map[string]string),
+		lastSeen:        make(map[string][]string),
+		stopCh:              make(chan struct{}),
+		walksDoneNotify:     make(chan struct{}, 32),
+		reconcileDoneNotify: make(chan struct{}, 32),
 	}
 }
 
 // SetDebounce overrides the quiet period before firing a scan. For
 // tests only — production callers should use the default.
 func (w *FSWatcher) SetDebounce(d time.Duration) { w.debounce = d }
+
+// TestDebounce returns the current debounce duration. Test-only.
+func (w *FSWatcher) TestDebounce() time.Duration { return w.debounce }
 
 // SetReconcileEvery overrides the library-list refresh cadence. For
 // tests only.
@@ -134,6 +143,38 @@ func (w *FSWatcher) SetReconcileEvery(d time.Duration) { w.reconcileEvery = d }
 // counter increment once at startup and stay there for the rest of
 // the process lifetime.
 func (w *FSWatcher) WalksDone() int64 { return w.walksDone.Load() }
+
+// WaitForWalksDone blocks until walksDone reaches at least n (or
+// timeout fires). Returns true if the threshold was met. Test-only.
+func (w *FSWatcher) WaitForWalksDone(n int64, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		if w.walksDone.Load() >= n {
+			return true
+		}
+		select {
+		case <-w.walksDoneNotify:
+		case <-deadline:
+			return w.walksDone.Load() >= n
+		}
+	}
+}
+
+// WaitForReconcileDone blocks until reconcileDone reaches at least n.
+// Test-only.
+func (w *FSWatcher) WaitForReconcileDone(n int64, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		if w.reconcileDone.Load() >= n {
+			return true
+		}
+		select {
+		case <-w.reconcileDoneNotify:
+		case <-deadline:
+			return w.reconcileDone.Load() >= n
+		}
+	}
+}
 
 // Start spawns the dispatcher goroutine. Returns an error only when
 // the platform doesn't support fsnotify (Docker on Windows with
@@ -254,6 +295,12 @@ func (w *FSWatcher) reconcile(ctx context.Context) {
 	}
 
 	w.lastSeen = current
+
+	w.reconcileDone.Add(1)
+	select {
+	case w.reconcileDoneNotify <- struct{}{}:
+	default:
+	}
 }
 
 // addLibraryTree walks every path of a library and adds a fsnotify
@@ -262,13 +309,19 @@ func (w *FSWatcher) reconcile(ctx context.Context) {
 //
 // Increments walksDone for test observability.
 func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
-	w.walksDone.Add(1)
+	log := w.logger.With("library_id", libID)
+	defer func() {
+		w.walksDone.Add(1)
+		select {
+		case w.walksDoneNotify <- struct{}{}:
+		default:
+		}
+	}()
 	for _, root := range paths {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
-				w.logger.Warn("walk for watcher",
+				log.Warn("walk for watcher",
 					"path", path,
-					"library_id", libID,
 					"error", walkErr)
 				if entry != nil && entry.IsDir() {
 					return filepath.SkipDir
@@ -282,9 +335,8 @@ func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
 				return nil
 			}
 			if err := w.watch.Add(path); err != nil {
-				w.logger.Warn("fsnotify add",
+				log.Warn("fsnotify add",
 					"path", path,
-					"library_id", libID,
 					"error", err)
 				return nil
 			}
@@ -292,9 +344,8 @@ func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
 			return nil
 		})
 		if err != nil {
-			w.logger.Warn("walk root for watcher",
+			log.Warn("walk root for watcher",
 				"root", root,
-				"library_id", libID,
 				"error", err)
 		}
 	}
@@ -358,13 +409,11 @@ func (w *FSWatcher) handleEvent(ctx context.Context, ev fsnotify.Event) {
 // are logged once and the walk continues — losing one branch is
 // strictly better than losing the rest of the tree.
 func (w *FSWatcher) addSubtreeWatch(root, libID string) {
+	log := w.logger.With("library_id", libID)
 	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// Permission denied / vanished mid-walk / etc. Log and
-			// keep going; matches addLibraryTree's policy.
-			w.logger.Warn("subtree watch walk",
+			log.Warn("subtree watch walk",
 				"path", path,
-				"library_id", libID,
 				"error", walkErr)
 			if entry != nil && entry.IsDir() {
 				return filepath.SkipDir
@@ -378,9 +427,8 @@ func (w *FSWatcher) addSubtreeWatch(root, libID string) {
 			return nil
 		}
 		if err := w.watch.Add(path); err != nil {
-			w.logger.Warn("fsnotify add (subtree)",
+			log.Warn("fsnotify add (subtree)",
 				"path", path,
-				"library_id", libID,
 				"error", err)
 			return nil
 		}
@@ -396,19 +444,15 @@ func (w *FSWatcher) kickDebounce(ctx context.Context, libID string) {
 	if t, ok := w.debouncers[libID]; ok {
 		t.Stop()
 	}
+	log := w.logger.With("library_id", libID)
 	w.debouncers[libID] = time.AfterFunc(w.debounce, func() {
-		// Service.Scan dedups concurrent calls per library — if a
-		// scheduled scan is already running we get ErrConflict and
-		// silently skip; the in-flight scan will see our changes.
 		if err := w.service.Scan(ctx, libID); err != nil {
 			if errors.Is(err, domain.ErrConflict) {
 				return
 			}
-			w.logger.Warn("watcher-triggered scan failed",
-				"library_id", libID,
-				"error", err)
+			log.Warn("watcher-triggered scan failed", "error", err)
 		} else {
-			w.logger.Info("watcher-triggered scan", "library_id", libID)
+			log.Info("watcher-triggered scan")
 		}
 	})
 }

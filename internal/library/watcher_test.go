@@ -144,9 +144,9 @@ func TestFSWatcher_NewFileTriggersScan(t *testing.T) {
 	}
 	defer w.Stop()
 
-	// Reconcile fires inside Start at t=0; allow a moment for the
-	// initial walk to register watches before we drop the file.
-	time.Sleep(100 * time.Millisecond)
+	if !w.WaitForWalksDone(1, 3*time.Second) {
+		t.Fatal("initial walk did not complete in time")
+	}
 
 	moviePath := filepath.Join(dir, "movie.mkv")
 	if err := os.WriteFile(moviePath, []byte("fake-mkv-bytes"), 0o644); err != nil {
@@ -175,7 +175,9 @@ func TestFSWatcher_DebounceCoalescesBurst(t *testing.T) {
 	}
 	defer w.Stop()
 
-	time.Sleep(100 * time.Millisecond) // initial walk
+	if !w.WaitForWalksDone(1, 3*time.Second) {
+		t.Fatal("initial walk did not complete in time")
+	}
 
 	// Drop 10 files in rapid succession — the debounce window must
 	// collapse all of them into a single scan.
@@ -189,11 +191,10 @@ func TestFSWatcher_DebounceCoalescesBurst(t *testing.T) {
 	if !counter.waitForScan(1, 3*time.Second) {
 		t.Fatalf("expected at least one scan after the burst")
 	}
-	// Allow a generous buffer beyond the debounce window so any
-	// stragglers would have fired by now.
-	time.Sleep(500 * time.Millisecond)
-	if got := counter.total(); got != 1 {
-		t.Errorf("expected exactly 1 scan, got %d — burst was not coalesced", got)
+	// Negative assertion: no second scan should fire. Wait 2×debounce
+	// so any straggler would have triggered by now.
+	if counter.waitForScan(2, 2*w.TestDebounce()) {
+		t.Errorf("expected exactly 1 scan, got %d — burst was not coalesced", counter.total())
 	}
 }
 
@@ -220,9 +221,10 @@ func TestFSWatcher_ReconcileLazyOnUnchangedLibraries(t *testing.T) {
 	}
 	defer w.Stop()
 
-	// Wait for the startup reconcile to complete and a few periodic
-	// ticks to fire. 250 ms at 50 ms/tick = ~5 ticks.
-	time.Sleep(250 * time.Millisecond)
+	// Wait for the startup reconcile + several periodic ticks.
+	if !w.WaitForReconcileDone(5, 3*time.Second) {
+		t.Fatal("reconcile ticks did not fire in time")
+	}
 
 	got := w.WalksDone()
 	if got != 1 {
@@ -249,7 +251,9 @@ func TestFSWatcher_NewSubdirGetsWatched(t *testing.T) {
 	}
 	defer w.Stop()
 
-	time.Sleep(100 * time.Millisecond) // initial walk
+	if !w.WaitForWalksDone(1, 3*time.Second) {
+		t.Fatal("initial walk did not complete in time")
+	}
 
 	// Create a subdir, then drop a file in it. The mkdir alone
 	// triggers a scan via the parent-dir watch; we'll see that
@@ -259,8 +263,10 @@ func TestFSWatcher_NewSubdirGetsWatched(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	counter.waitForScan(1, 1*time.Second)
-	time.Sleep(200 * time.Millisecond) // let the inner-subdir watch attach
+	// The scan fires after debounce; by then, addSubtreeWatch has
+	// already run (it's inline in the dispatch goroutine before the
+	// debounce timer fires).
+	counter.waitForScan(1, 3*time.Second)
 	priorScans := counter.total()
 
 	deepFile := filepath.Join(sub, "movie.mkv")
