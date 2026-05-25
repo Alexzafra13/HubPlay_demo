@@ -2,37 +2,27 @@ package stream
 
 import librarymodel "hubplay/internal/library/model"
 
-// PlaybackMethod describes how the server will deliver a media item.
+// PlaybackMethod indica cómo el servidor entrega un media item.
 type PlaybackMethod string
 
 const (
-	MethodDirectPlay   PlaybackMethod = "DirectPlay"   // client plays file as-is
-	MethodDirectStream PlaybackMethod = "DirectStream"  // remux into compatible container
-	MethodTranscode    PlaybackMethod = "Transcode"      // full transcode
+	MethodDirectPlay   PlaybackMethod = "DirectPlay"   // el cliente reproduce el archivo tal cual
+	MethodDirectStream PlaybackMethod = "DirectStream"  // remux a contenedor compatible
+	MethodTranscode    PlaybackMethod = "Transcode"      // transcodificación completa
 )
 
-// PlaybackDecision is the result of analyzing an item's streams against client capabilities.
+// PlaybackDecision es el resultado de analizar streams contra las capacidades del cliente.
 //
-// CopyVideo / CopyAudio describe what ffmpeg should do per stream when
-// the chosen Method requires a session (DirectStream or Transcode):
+// CopyVideo/CopyAudio controlan qué hace ffmpeg por stream:
+//   - true  → `-c:v/a copy` (sin re-encode)
+//   - false → re-encode (video con encoder configurado, audio a AAC stereo)
 //
-//   - CopyVideo=true  → `-c:v copy` (no re-encode, ~5% of full-encode cost)
-//   - CopyVideo=false → re-encode with the configured encoder
-//   - CopyAudio=true  → `-c:a copy` (works only when the codec is in client caps)
-//   - CopyAudio=false → re-encode to AAC stereo (the universal fallback)
+// Permite copiar video (caro) y solo re-encodear audio (barato) en el caso
+// común de h264+mkv con AC3/DTS incompatible con el navegador.
 //
-// The flags exist so a common case — "h264 mkv with AC3 / DTS audio
-// the browser can't decode" — can copy the (expensive) video stream
-// untouched and only re-encode the cheap audio. Before this change,
-// that path full-transcoded the video for no reason.
-//
-// ToneMap is set when the source carries an HDR transfer (HDR10 / HLG
-// / Dolby Vision) and the client did NOT declare matching HDR support.
-// It always implies CopyVideo=false (you can't tonemap a stream-copy)
-// and instructs BuildFFmpegArgs to insert a zscale+tonemap filter
-// chain before the regular scale. Without this, an HDR file played on
-// an SDR client looks washed out and grey because the browser pipes
-// the PQ-coded luma straight to the SDR display.
+// ToneMap se activa cuando la fuente es HDR y el cliente no soporta ese formato.
+// Implica CopyVideo=false e inserta cadena zscale+tonemap en BuildFFmpegArgs.
+// Sin esto, HDR en cliente SDR se ve gris y desaturado (luma PQ renderizado como sRGB).
 type PlaybackDecision struct {
 	Method     PlaybackMethod
 	VideoCodec string
@@ -44,11 +34,8 @@ type PlaybackDecision struct {
 	ToneMap    bool
 }
 
-// remuxableContainers lists source containers that ffmpeg can repackage
-// into a web-friendly mp4 without re-encoding. The intersection with
-// the *client's* container caps is the one that matters for DirectPlay
-// (we'd send the file as-is), but DirectStream still needs the source
-// to be remuxable on our side.
+// remuxableContainers: contenedores que ffmpeg puede reempaquetar sin re-encode.
+// DirectStream requiere que la fuente sea remuxable del lado servidor.
 var remuxableContainers = map[string]bool{
 	"matroska": true,
 	"mkv":      true,
@@ -56,23 +43,9 @@ var remuxableContainers = map[string]bool{
 	"mpegts":   true,
 }
 
-// DecideForceDirectPlay short-circuits the capability waterfall and
-// returns a DirectPlay decision regardless of what the client said it
-// can decode. This is the policy hook for an admin who has flipped
-// `playback.force_direct_play` on — they're vouching that every client
-// they care about can decode every file in the library, and they'd
-// rather see a broken playback than have the server burn CPU on a
-// transcode they think is unnecessary.
-//
-// We still pull the file's actual video / audio / container metadata
-// so the response shape mirrors what Decide() returns on the
-// happy-path DirectPlay branch — the player UI's pill ("Reproducción
-// directa") shows the codecs the file ships with, not "unknown".
-//
-// Caller is expected to have verified item != nil already; the helper
-// returns a zero-value DirectPlay decision when streams are empty,
-// which the player will then attempt to play with whatever the
-// browser can do.
+// DecideForceDirectPlay cortocircuita la cascada de capacidades y devuelve
+// DirectPlay incondicional. Hook para admin con `playback.force_direct_play`.
+// Rellena codecs reales del archivo para que la UI muestre info correcta.
 func DecideForceDirectPlay(item *librarymodel.Item, streams []*librarymodel.MediaStream) PlaybackDecision {
 	var videoStream, audioStream *librarymodel.MediaStream
 	for _, s := range streams {

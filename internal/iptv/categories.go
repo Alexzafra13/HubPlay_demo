@@ -4,9 +4,8 @@ import (
 	"strings"
 )
 
-// Category is a canonical, UI-stable category identifier.
-// M3U `group-title` is free-form and multilingual; Category collapses it to
-// a fixed, translatable set the frontend can key off for filtering and icons.
+// Category colapsa el group-title libre del M3U a un conjunto fijo
+// que el frontend usa para filtros e iconos.
 type Category string
 
 const (
