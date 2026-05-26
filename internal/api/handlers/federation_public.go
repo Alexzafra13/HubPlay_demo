@@ -260,9 +260,8 @@ func (h *FederationPublicHandler) ServeIdentityAvatar(w http.ResponseWriter, r *
 //	  }
 //	]
 func (h *FederationPublicHandler) ListLibraries(w http.ResponseWriter, r *http.Request) {
-	peer := federation.PeerFromContext(r.Context())
+	peer := requirePeer(w, r)
 	if peer == nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
 	libs, err := h.mgr.ListSharedLibrariesForPeer(r.Context(), peer.ID)
@@ -282,9 +281,8 @@ func (h *FederationPublicHandler) ListLibraries(w http.ResponseWriter, r *http.R
 // deliberately conflated with "library doesn't exist" so attackers
 // can't enumerate library IDs.
 func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *http.Request) {
-	peer := federation.PeerFromContext(r.Context())
+	peer := requirePeer(w, r)
 	if peer == nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
 	libraryID := requireParam(w, r, "libraryID")
@@ -318,9 +316,8 @@ func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *htt
 // Empty q is a 400. The repo applies a sensible upper limit so a
 // pathological query cannot stream the whole catalog.
 func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http.Request) {
-	peer := federation.PeerFromContext(r.Context())
+	peer := requirePeer(w, r)
 	if peer == nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
 	query := r.URL.Query().Get("q")
@@ -357,9 +354,8 @@ func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http
 //
 // GET /api/v1/peer/recent?limit=<n>  (peer JWT required)
 func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Request) {
-	peer := federation.PeerFromContext(r.Context())
+	peer := requirePeer(w, r)
 	if peer == nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
 	_, limit, _ := parsePagination(w, r)
@@ -388,10 +384,11 @@ func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Requ
 // at handshake — divergence means the peer is talking to a different
 // server than the one it paired with.
 func (h *FederationPublicHandler) Ping(w http.ResponseWriter, r *http.Request) {
-	peer := federation.PeerFromContext(r.Context())
+	// requirePeer is fail-closed: middleware sets the ctx value, but we
+	// don't trust the assumption — a future route mis-wire would
+	// otherwise leak nil-deref panics into the peer-facing surface.
+	peer := requirePeer(w, r)
 	if peer == nil {
-		// Should be impossible — middleware sets this. Fail closed.
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{

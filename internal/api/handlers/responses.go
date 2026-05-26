@@ -14,6 +14,7 @@ import (
 
 	"hubplay/internal/api/apperror"
 	"hubplay/internal/domain"
+	"hubplay/internal/federation"
 )
 
 // requireParam extracts a chi URL parameter by name and writes a 400
@@ -25,6 +26,18 @@ func requireParam(w http.ResponseWriter, r *http.Request, name string) string {
 		respondError(w, r, http.StatusBadRequest, "MISSING_PARAM", "missing path parameter: "+name)
 	}
 	return v
+}
+
+// requirePeer extrae el *federation.Peer del contexto que pone
+// RequirePeerJWT. Si falta (handler montado fuera del group protegido,
+// o test que se olvida de inyectar) escribe 500 y devuelve nil — los
+// callers deben retornar inmediatamente. Análogo a requireParam.
+func requirePeer(w http.ResponseWriter, r *http.Request) *federation.Peer {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+	}
+	return peer
 }
 
 // SetErrorRecorder installs the observability hook fired for every
