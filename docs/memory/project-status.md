@@ -6,6 +6,38 @@
 
 ---
 
+## 🎯 Sesión 2026-05-26 (cierre completo) — F15-1 100% + F16 medium 100% + 3/10 F16 bajas
+
+Sesión larga (7+1 PRs). Cierra el F15-1 ALTA por completo y los 3 issues
+medium restantes del F16. Resumen:
+
+| Bloque | PRs | Notas |
+|---|---|---|
+| **F15-1 cierre** | #429, #430, #431, #432 (docs), #433, #434, #435 | 29 sleeps eliminados + 11 documentados legítimos + memoria. F15-1 al 100 %. |
+| **F16-3 requirePeer** | #436 | 11 sitios federation migrados al helper. |
+| **F16-5 / F16-9 verificación** | (sin código) | Ambos ya cerrados en sesiones previas — F16-5 con doc en iptv_admin:61-64, F16-9 con SpawnBackground/bgWG. |
+| **F16 bajas** | #437 | F16-12 (UTF-8 + null bytes en preferences), F16-15 (log err en GetPrimaryURLs ×2), F16-16 (log err en json.Unmarshal de providers). |
+
+**Total acumulado**: 7 PRs nuevas en esta sesión + #436 + #437 = 9 PRs. ~80 LoC neto de cambios productivos (la mayoría son tests + helpers + comentarios).
+
+### F16 status post-sesión
+
+| Severidad | Cerrados | Pendientes |
+|---|---|---|
+| Alta | 1/1 (F16-1 path traversal) | 0 |
+| Medium | 8/8 | 0 ✅ |
+| Bajas | 3/10 | 7 (F16-10/11/13/14/17/18/19 — todos non-critical o decisiones deliberadas) |
+
+### Pendientes priorizadas (próximas sesiones)
+
+- **F16 bajas restantes** (~1h) — 7 fixes pequeños. Algunos (F16-11, F16-19) son decisiones deliberadas que sólo necesitan comentario explicativo.
+- **F15-2..12** — time.Now no inyectado, t.Parallel infrautilizado.
+- **VideoPlayer 3ª ola** — 787 LoC.
+- **LL Transcoder stateless** — sesión grande propia.
+- **Distribución** — installer Windows firmado, auto-update, TLS LAN.
+
+---
+
 ## 🧪 Sesión 2026-05-26 — F15-1 (parte 2): time.Sleep → seams determinísticos
 
 Continuación del F15-1 ALTA arrancado en PR #426. Tres PRs encadenadas
@@ -253,12 +285,12 @@ Todos los jobs verdes: Test Backend, Test Backend (Postgres), Lint, Frontend, kn
 
 ### Tests (F15)
 
-- ~~**F15-1 ALTA** — `time.Sleep` en 19 ficheros → seams determinísticos~~ — **~70 % cerrado**: PR #426 (12 sleeps en watcher/retention/event-bus/service_lock), PRs #429-#431 (20 sleeps en SSE/iptv/auth/federation). Quedan 10 en transmux_test (batch 2b — requiere notify en TransmuxManager) + ~7 legítimos/difíciles (auth_device clock, stream WaitForFile simulation, federation sweeper, singleflight leader, time-based reales).
+- ~~**F15-1 ALTA** — `time.Sleep` en 19 ficheros → seams determinísticos~~ — ✅ **cerrado al 100 %** en sesión 2026-05-26. 41 sleeps eliminados total (12 en #426 + 29 en #429-#434), 11 documentados como legítimos con tag uniforme (#435).
 - **F15-2..12** — media/baja (time.Now no inyectado, t.Parallel infrautilizado, etc.)
 
-### Handlers (F16, 5 medium pendientes)
+### Handlers (F16) — medium ✅ cerrado al 100 %
 
-PR #427 cerró F16-2/4 (parsePagination helper × 9 sites) + F16-8 (SSE drop observability). Quedan: race async iptv_admin, auth check redundante, paginación restante, dedup SSE same-user, telemetría de conexiones SSE.
+PR #427 cerró F16-2/4 (parsePagination helper × 9 sites) + F16-8 (SSE drop observability). PR #436 cerró F16-3 (requirePeer helper × 11 sitios federation). F16-5 ya estaba documentado en `iptv_admin.go:61-64` y F16-9 ya usa `svc.SpawnBackground` (eco GGGG cerrado). PR #437 cerró 3/10 bajas (F16-12 UTF-8, F16-15 log err GetPrimaryURLs, F16-16 log err json.Unmarshal). Quedan 7 bajas non-critical.
 
 ### Arquitectónicos (sesión grande cada uno)
 
