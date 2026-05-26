@@ -116,7 +116,7 @@ func NewService(
 		}
 	}
 
-	rl := newLoginRateLimiter(maxFails, window, lockout)
+	rl := newLoginRateLimiter(maxFails, window, lockout, clk)
 	pub := &publisher{}
 	issuer := newSessionIssuer(users, sessions, keys, cfg, clk, authLogger)
 

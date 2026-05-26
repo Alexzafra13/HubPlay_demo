@@ -479,7 +479,7 @@ func run(configPath string) error {
 	// a fixed cadence so append-only tables don't grow forever. Both
 	// dependencies are nil-safe inside the runner — operators without
 	// IPTV or federation still get a no-op runner that costs nothing.
-	retentionRunner := retention.New(cfg.Retention, iptvMod.Service, federationRepo, logger)
+	retentionRunner := retention.New(cfg.Retention, iptvMod.Service, federationRepo, clk, logger)
 	retentionRunner.Start(ctx)
 	lc.AddWorker("retention runner", func(context.Context) error {
 		retentionRunner.Stop()

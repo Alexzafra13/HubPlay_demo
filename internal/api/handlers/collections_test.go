@@ -45,6 +45,7 @@ func (f *fakeCollectionRepo) ListItemsForCollection(_ context.Context, _ string)
 // always 404. Pin the decode behaviour so a future refactor can't
 // regress the saga page back into a "Colección no encontrada" loop.
 func TestCollectionHandler_Get_DecodesPercentEncodedID(t *testing.T) {
+	t.Parallel()
 	repo := &fakeCollectionRepo{
 		result: &librarymodel.Collection{
 			ID:     "collection:9485",
@@ -89,6 +90,7 @@ func TestCollectionHandler_Get_DecodesPercentEncodedID(t *testing.T) {
 // has no escape sequences, so the handler should still resolve the
 // row.
 func TestCollectionHandler_Get_PassesUnescapedIDThrough(t *testing.T) {
+	t.Parallel()
 	repo := &fakeCollectionRepo{
 		result: &librarymodel.Collection{
 			ID:     "collection:9485",

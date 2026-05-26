@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/retention"
 )
@@ -32,12 +33,17 @@ func (f *fakeEPG) CleanupOldPrograms(_ context.Context, window time.Duration) (i
 }
 
 type fakeAudit struct {
-	calls  int32
-	failOn int32
+	calls      int32
+	failOn     int32
+	mu         sync.Mutex
+	lastCutoff time.Time
 }
 
-func (f *fakeAudit) PruneAuditBefore(_ context.Context, _ time.Time) (int64, error) {
+func (f *fakeAudit) PruneAuditBefore(_ context.Context, cutoff time.Time) (int64, error) {
 	n := atomic.AddInt32(&f.calls, 1)
+	f.mu.Lock()
+	f.lastCutoff = cutoff
+	f.mu.Unlock()
 	if f.failOn != 0 && n == f.failOn {
 		return 0, errors.New("simulated audit failure")
 	}
@@ -60,7 +66,7 @@ func TestRunner_RunsBothCleanersOnStartup(t *testing.T) {
 		FederationAuditLog: 7 * 24 * time.Hour,
 		SweepInterval:      24 * time.Hour,
 	}
-	r := retention.New(cfg, epg, audit, quietLogger())
+	r := retention.New(cfg, epg, audit, nil, quietLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -90,7 +96,7 @@ func TestRunner_DisabledOnZeroInterval(t *testing.T) {
 		FederationAuditLog: 30 * 24 * time.Hour,
 		SweepInterval:      0,
 	}
-	r := retention.New(cfg, epg, audit, quietLogger())
+	r := retention.New(cfg, epg, audit, nil, quietLogger())
 	r.Start(context.Background())
 	t.Cleanup(r.Stop)
 
@@ -111,7 +117,7 @@ func TestRunner_NilDepsAreSafe(t *testing.T) {
 		FederationAuditLog: 30 * 24 * time.Hour,
 		SweepInterval:      24 * time.Hour,
 	}
-	r := retention.New(cfg, nil, nil, quietLogger())
+	r := retention.New(cfg, nil, nil, nil, quietLogger())
 	r.Start(context.Background())
 	t.Cleanup(r.Stop)
 	if !r.WaitForSweep(1, 2*time.Second) {
@@ -129,11 +135,38 @@ func TestRunner_OneCleanerFailureDoesNotBlockTheOther(t *testing.T) {
 		FederationAuditLog: 30 * 24 * time.Hour,
 		SweepInterval:      24 * time.Hour,
 	}
-	r := retention.New(cfg, epg, audit, quietLogger())
+	r := retention.New(cfg, epg, audit, nil, quietLogger())
 	r.Start(context.Background())
 	t.Cleanup(r.Stop)
 
 	if !r.WaitForSweep(1, 2*time.Second) {
 		t.Fatalf("audit prune was skipped after EPG failure (calls=%d)", audit.calls)
+	}
+}
+
+func TestRunner_AuditCutoffDeterministic(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	clk := &clock.Mock{CurrentTime: now}
+	audit := &fakeAudit{}
+	window := 7 * 24 * time.Hour
+	cfg := config.RetentionConfig{
+		FederationAuditLog: window,
+		SweepInterval:      24 * time.Hour,
+	}
+	r := retention.New(cfg, nil, audit, clk, quietLogger())
+	r.Start(context.Background())
+	t.Cleanup(r.Stop)
+
+	if !r.WaitForSweep(1, 2*time.Second) {
+		t.Fatal("startup sweep did not run")
+	}
+
+	audit.mu.Lock()
+	got := audit.lastCutoff
+	audit.mu.Unlock()
+	want := now.Add(-window)
+	if !got.Equal(want) {
+		t.Errorf("cutoff = %v, want %v", got, want)
 	}
 }

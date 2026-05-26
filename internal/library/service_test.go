@@ -33,7 +33,7 @@ func newTestLibraryService(t *testing.T) *library.Service {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{}
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, repos.ItemMetadataLocks, nil, prober, bus, "", nil, slog.Default())
-	svc := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, repos.ItemValues, scnr, slog.Default())
+	svc := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, repos.ItemValues, scnr, nil, slog.Default())
 	// Cancel in-flight auto-scan goroutines BEFORE the DB teardown fires,
 	// otherwise the goroutine races the "sql: database is closed" error and
 	// the TempDir cleanup fails with "directory not empty". t.Cleanup runs

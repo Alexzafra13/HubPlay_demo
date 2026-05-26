@@ -19,6 +19,7 @@ func newTestBreaker(t *testing.T) (*channelBreaker, *clock.Mock) {
 // A fresh breaker with no entries should allow every channel and
 // report "closed" state.
 func TestBreaker_FreshState_AllowsAndReportsClosed(t *testing.T) {
+	t.Parallel()
 	b, _ := newTestBreaker(t)
 
 	allowed, retry := b.Allow("c-1")
@@ -34,6 +35,7 @@ func TestBreaker_FreshState_AllowsAndReportsClosed(t *testing.T) {
 // Empty channelID is the test/anonymous-fetch case — the breaker
 // must skip rather than create a phantom shared entry under "".
 func TestBreaker_EmptyChannelID_SkipsAllSurfaces(t *testing.T) {
+	t.Parallel()
 	b, _ := newTestBreaker(t)
 
 	for i := 0; i < breakerThreshold+5; i++ {
@@ -52,6 +54,7 @@ func TestBreaker_EmptyChannelID_SkipsAllSurfaces(t *testing.T) {
 // Five consecutive failures opens the breaker. Subsequent Allow calls
 // during the cooldown return false with a non-zero retry-after.
 func TestBreaker_OpensAfterThresholdConsecutiveFailures(t *testing.T) {
+	t.Parallel()
 	b, _ := newTestBreaker(t)
 
 	// Threshold-1 failures: still closed.
@@ -85,6 +88,7 @@ func TestBreaker_OpensAfterThresholdConsecutiveFailures(t *testing.T) {
 // One success in the closed state resets the failure counter so a
 // subsequent burst doesn't trip the breaker on its prior near-miss.
 func TestBreaker_SuccessResetsClosedCounter(t *testing.T) {
+	t.Parallel()
 	b, _ := newTestBreaker(t)
 
 	for i := 0; i < breakerThreshold-1; i++ {
@@ -106,6 +110,7 @@ func TestBreaker_SuccessResetsClosedCounter(t *testing.T) {
 // half-open and lets exactly one caller through. Concurrent callers
 // during the trial must be refused.
 func TestBreaker_CooldownExpires_PromotesToHalfOpen_OneTrialOnly(t *testing.T) {
+	t.Parallel()
 	b, mc := newTestBreaker(t)
 
 	for i := 0; i < breakerThreshold; i++ {
@@ -139,6 +144,7 @@ func TestBreaker_CooldownExpires_PromotesToHalfOpen_OneTrialOnly(t *testing.T) {
 
 // A successful trial closes the breaker and clears the cooldown.
 func TestBreaker_HalfOpenSuccess_Closes(t *testing.T) {
+	t.Parallel()
 	b, mc := newTestBreaker(t)
 	for i := 0; i < breakerThreshold; i++ {
 		b.RecordFailure("c-1")
@@ -163,6 +169,7 @@ func TestBreaker_HalfOpenSuccess_Closes(t *testing.T) {
 // A failed trial re-opens the breaker with a longer cooldown
 // (exponential backoff up to breakerMaxCooldown).
 func TestBreaker_HalfOpenFailure_ReOpensWithLongerCooldown(t *testing.T) {
+	t.Parallel()
 	b, mc := newTestBreaker(t)
 	for i := 0; i < breakerThreshold; i++ {
 		b.RecordFailure("c-1")
@@ -197,6 +204,7 @@ func TestBreaker_HalfOpenFailure_ReOpensWithLongerCooldown(t *testing.T) {
 // If a half-open trial neither succeeds nor fails within the trial
 // timeout, the slot is forfeited and another caller can probe.
 func TestBreaker_HalfOpenTrialTimeout_NextCallerProbes(t *testing.T) {
+	t.Parallel()
 	b, mc := newTestBreaker(t)
 	for i := 0; i < breakerThreshold; i++ {
 		b.RecordFailure("c-1")
@@ -226,6 +234,7 @@ func TestBreaker_HalfOpenTrialTimeout_NextCallerProbes(t *testing.T) {
 // millions of channels doesn't grow an unbounded breaker map.
 // Channels with current failures or non-closed states must survive.
 func TestBreaker_Prune_DropsIdleClosedEntries(t *testing.T) {
+	t.Parallel()
 	b, mc := newTestBreaker(t)
 
 	// "kept-open" — open, must survive.

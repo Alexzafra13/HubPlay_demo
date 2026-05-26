@@ -7,6 +7,7 @@ import (
 )
 
 func TestDecide_DirectPlay_MP4_H264_AAC(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "mov,mp4,m4a,3gp,3g2,mj2"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -20,6 +21,7 @@ func TestDecide_DirectPlay_MP4_H264_AAC(t *testing.T) {
 }
 
 func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -42,6 +44,7 @@ func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
 // promotes this to DirectStream with CopyVideo=true, CopyAudio=false:
 // ffmpeg copies video bytes and only re-encodes the (cheap) audio.
 func TestDecide_DirectStream_VideoCopyAudioReencode_AC3(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -61,6 +64,7 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_AC3(t *testing.T) {
 }
 
 func TestDecide_Transcode_HEVC(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
@@ -76,6 +80,7 @@ func TestDecide_Transcode_HEVC(t *testing.T) {
 // Mirror of the AC3 test for DTS — same outcome, just a different
 // audio codec the browser can't decode natively.
 func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -101,6 +106,7 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
 // transcode because the literal "matroska,webm" string doesn't
 // match the map keys.
 func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska,webm"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -117,6 +123,7 @@ func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
 }
 
 func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "webm"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "vp9", IsDefault: true},
@@ -130,6 +137,7 @@ func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
 }
 
 func TestDecide_RequestedProfile(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
@@ -146,6 +154,7 @@ func TestDecide_RequestedProfile(t *testing.T) {
 }
 
 func TestDecide_NoStreams(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "mp4"}
 	d := Decide(item, nil, nil, "")
 	if d.Method != MethodTranscode {
@@ -154,6 +163,7 @@ func TestDecide_NoStreams(t *testing.T) {
 }
 
 func TestDecide_AudioOnly(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "mp4"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
@@ -167,6 +177,7 @@ func TestDecide_AudioOnly(t *testing.T) {
 }
 
 func TestDecideForceDirectPlay_BypassesCapsForHEVC(t *testing.T) {
+	t.Parallel()
 	// Daredevil-shaped rip: HEVC video + EAC3 audio + MKV container.
 	// Decide() forces a Transcode against web defaults (no HEVC, no
 	// EAC3, no MKV). DecideForceDirectPlay must skip the waterfall
@@ -199,6 +210,7 @@ func TestDecideForceDirectPlay_BypassesCapsForHEVC(t *testing.T) {
 }
 
 func TestDecideForceDirectPlay_PrefersDefaultStream(t *testing.T) {
+	t.Parallel()
 	// Multi-language rip: the file has a non-default English audio
 	// AND a default Spanish one. DecideForceDirectPlay must pick the
 	// flagged default — same convention as Decide() so the player
@@ -223,6 +235,7 @@ func TestDecideForceDirectPlay_PrefersDefaultStream(t *testing.T) {
 // refactor doesn't silently send PQ luma to an SDR browser and
 // produce the washed-out grey picture this fix exists to prevent.
 func TestDecide_HDR_TonemapsForDefaultWebClient(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		hdrType string
@@ -259,6 +272,7 @@ func TestDecide_HDR_TonemapsForDefaultWebClient(t *testing.T) {
 // and ToneMap=false. This is the "native HDR-capable Android TV app"
 // scenario.
 func TestDecide_HDR_DirectStreamsWhenClientDeclaresHDR(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: "HDR10"},
@@ -282,6 +296,7 @@ func TestDecide_HDR_DirectStreamsWhenClientDeclaresHDR(t *testing.T) {
 // alias matters because the wire header is informal and a
 // hand-rolled client could send either.
 func TestDecide_HDR_DolbyVisionLongAlias(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: "DolbyVision"},
@@ -299,6 +314,7 @@ func TestDecide_HDR_DolbyVisionLongAlias(t *testing.T) {
 // without ToneMap=true the encoder would produce washed-out SDR-sized
 // frames from HDR-coded source data.
 func TestDecide_HDR_HEVCAlsoTonemaps(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true, HDRType: "HDR10"},
@@ -318,6 +334,7 @@ func TestDecide_HDR_HEVCAlsoTonemaps(t *testing.T) {
 // flips ToneMap unconditionally for any client without hdr=... can't
 // re-encode every SDR stream the project serves.
 func TestDecide_SDR_NeverTonemaps(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "matroska"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true}, // HDRType deliberately empty
@@ -330,6 +347,7 @@ func TestDecide_SDR_NeverTonemaps(t *testing.T) {
 }
 
 func TestDecideForceDirectPlay_AudioOnlyItemEmptyVideoCodec(t *testing.T) {
+	t.Parallel()
 	// Defensive: a row with no video stream returns DirectPlay with
 	// an empty VideoCodec rather than panicking. The browser will
 	// likely fail to play it, but that's the operator's risk

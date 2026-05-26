@@ -3,6 +3,8 @@ package auth
 import (
 	"sync"
 	"time"
+
+	"hubplay/internal/clock"
 )
 
 // loginRateLimiter trackea login fails por username/IP para frenar
@@ -16,6 +18,7 @@ type loginRateLimiter struct {
 	window   time.Duration
 	maxFails int
 	lockout  time.Duration
+	clock    clock.Clock
 
 	stopCh chan struct{}
 	once   sync.Once
@@ -27,12 +30,13 @@ type attemptRecord struct {
 	lockedUntil time.Time
 }
 
-func newLoginRateLimiter(maxFails int, window, lockout time.Duration) *loginRateLimiter {
+func newLoginRateLimiter(maxFails int, window, lockout time.Duration, clk clock.Clock) *loginRateLimiter {
 	rl := &loginRateLimiter{
 		attempts: make(map[string]*attemptRecord),
 		window:   window,
 		maxFails: maxFails,
 		lockout:  lockout,
+		clock:    clk,
 		stopCh:   make(chan struct{}),
 	}
 	// Cleanup periódico de entradas obsoletas. Sale al cerrar stopCh.
@@ -66,7 +70,7 @@ func (rl *loginRateLimiter) isLocked(key string) bool {
 		return false
 	}
 
-	now := time.Now()
+	now := rl.clock.Now()
 
 	// Si el lockout expiró, limpiar.
 	if !rec.lockedUntil.IsZero() && now.After(rec.lockedUntil) {
@@ -88,7 +92,7 @@ func (rl *loginRateLimiter) recordFailure(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
+	now := rl.clock.Now()
 	rec, ok := rl.attempts[key]
 	if !ok || now.Sub(rec.firstFail) > rl.window {
 		rec = &attemptRecord{firstFail: now}
@@ -114,7 +118,7 @@ func (rl *loginRateLimiter) cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
+	now := rl.clock.Now()
 	for key, rec := range rl.attempts {
 		if !rec.lockedUntil.IsZero() && now.After(rec.lockedUntil) {
 			delete(rl.attempts, key)

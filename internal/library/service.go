@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"hubplay/internal/clock"
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -108,6 +109,7 @@ type Service struct {
 	items     *db.ItemRepository
 	channels  *db.ChannelRepository
 	scanner   *scanner.Scanner
+	clock     clock.Clock
 	logger    *slog.Logger
 
 	// Track active scans to prevent concurrent scans of the same library
@@ -132,8 +134,12 @@ func NewService(
 	channels *db.ChannelRepository,
 	itemValues *db.ItemValueRepository,
 	scnr *scanner.Scanner,
+	clk clock.Clock,
 	logger *slog.Logger,
 ) *Service {
+	if clk == nil {
+		clk = clock.New()
+	}
 	libLogger := logger.With("module", "library")
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Service{
@@ -144,6 +150,7 @@ func NewService(
 		items:     items,
 		channels:  channels,
 		scanner:   scnr,
+		clock:     clk,
 		logger:    libLogger,
 		scanning:  make(map[string]bool),
 		bgCtx:     bgCtx,
@@ -195,7 +202,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.
 		req.ScanMode = "auto"
 	}
 
-	now := time.Now()
+	now := s.clock.Now()
 	lib := &librarymodel.Library{
 		ID:             uuid.NewString(),
 		Name:           req.Name,
@@ -261,7 +268,7 @@ func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, re
 		return nil, err
 	}
 
-	now := time.Now()
+	now := s.clock.Now()
 	lib := &librarymodel.Library{
 		ID:             uuid.NewString(),
 		Name:           req.Name,
@@ -361,7 +368,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*li
 	if req.TLSInsecure != nil {
 		lib.TLSInsecure = *req.TLSInsecure
 	}
-	lib.UpdatedAt = time.Now()
+	lib.UpdatedAt = s.clock.Now()
 
 	if err := s.libraries.Update(ctx, lib); err != nil {
 		return nil, fmt.Errorf("updating library: %w", err)
