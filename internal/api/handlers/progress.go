@@ -310,7 +310,13 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 	for id := range idSet {
 		allIDs = append(allIDs, id)
 	}
-	imageMap, _ := h.images.GetPrimaryURLs(r.Context(), allIDs)
+	imageMap, err := h.images.GetPrimaryURLs(r.Context(), allIDs)
+	if err != nil {
+		// Fail-soft: el rail sigue funcionando sin imágenes (cards sin
+		// poster). El log permite diagnosticar si las imágenes dejan de
+		// resolverse en producción.
+		h.logger.Warn("continue watching: GetPrimaryURLs", "error", err)
+	}
 
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -453,7 +459,11 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	for i, item := range items {
 		favIDs[i] = item.ItemID
 	}
-	favImageMap, _ := h.images.GetPrimaryURLs(r.Context(), favIDs)
+	favImageMap, err := h.images.GetPrimaryURLs(r.Context(), favIDs)
+	if err != nil {
+		// Fail-soft: ver Favorites — log para diagnóstico operacional.
+		h.logger.Warn("favorites: GetPrimaryURLs", "error", err)
+	}
 
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
