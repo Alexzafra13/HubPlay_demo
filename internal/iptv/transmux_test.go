@@ -25,12 +25,22 @@ type fakeGate struct {
 	retryAfter time.Duration
 	successes  atomic.Int64
 	failures   atomic.Int64
+	// changes señaliza cada RecordSuccess/RecordFailure (buffer 16) para
+	// que los tests esperen señales en vez de hacer polling con sleep.
+	changes chan struct{}
 }
 
 func newFakeGate(allowed bool) *fakeGate {
-	g := &fakeGate{}
+	g := &fakeGate{changes: make(chan struct{}, 16)}
 	g.allow.Store(allowed)
 	return g
+}
+
+func (g *fakeGate) notifyChange() {
+	select {
+	case g.changes <- struct{}{}:
+	default:
+	}
 }
 
 func (g *fakeGate) Allow(_ string) (bool, time.Duration) {
@@ -40,8 +50,8 @@ func (g *fakeGate) Allow(_ string) (bool, time.Duration) {
 	return false, g.retryAfter
 }
 
-func (g *fakeGate) RecordSuccess(_ string) { g.successes.Add(1) }
-func (g *fakeGate) RecordFailure(_ string) { g.failures.Add(1) }
+func (g *fakeGate) RecordSuccess(_ string) { g.successes.Add(1); g.notifyChange() }
+func (g *fakeGate) RecordFailure(_ string) { g.failures.Add(1); g.notifyChange() }
 
 // countingReporter counts calls to RecordProbeSuccess / RecordProbeFailure
 // so tests can assert the manager mirrored the gate state into the
@@ -49,11 +59,44 @@ func (g *fakeGate) RecordFailure(_ string) { g.failures.Add(1) }
 type countingReporter struct {
 	successes atomic.Int64
 	failures  atomic.Int64
+	// changes señaliza cada Record* (buffer 16) para tests deterministas.
+	changes chan struct{}
 }
 
-func (r *countingReporter) RecordProbeSuccess(_ context.Context, _ string) { r.successes.Add(1) }
+func newCountingReporter() *countingReporter {
+	return &countingReporter{changes: make(chan struct{}, 16)}
+}
+
+func (r *countingReporter) notifyChange() {
+	select {
+	case r.changes <- struct{}{}:
+	default:
+	}
+}
+
+func (r *countingReporter) RecordProbeSuccess(_ context.Context, _ string) {
+	r.successes.Add(1)
+	r.notifyChange()
+}
 func (r *countingReporter) RecordProbeFailure(_ context.Context, _ string, _ error) {
 	r.failures.Add(1)
+	r.notifyChange()
+}
+
+// waitForCounters bloquea hasta que cond() devuelve true o el timeout
+// vence. Drena cualquiera de los canales notify pasados como dispatcher
+// de wake-ups; el chequeo de cond() es la verdad. Test-only.
+func waitForCounters(t *testing.T, timeout time.Duration, ch1, ch2 <-chan struct{}, cond func() bool) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for !cond() {
+		select {
+		case <-ch1:
+		case <-ch2:
+		case <-deadline:
+			return
+		}
+	}
 }
 
 // fakeFFmpeg writes a minimal "I produced a segment" workload so the
@@ -545,7 +588,7 @@ func TestTransmuxManager_GetOrStart_RefusedByGate(t *testing.T) {
 // next prober pass.
 func TestTransmuxManager_GetOrStart_RecordsSuccessOnReady(t *testing.T) {
 	gate := newFakeGate(true)
-	rep := &countingReporter{}
+	rep := newCountingReporter()
 	m, _ := newTestManagerWithOpts(t, "ok", 0, TransmuxManagerConfig{Gate: gate, Reporter: rep})
 	t.Cleanup(m.Shutdown)
 
@@ -555,16 +598,10 @@ func TestTransmuxManager_GetOrStart_RecordsSuccessOnReady(t *testing.T) {
 	if _, err := m.GetOrStart(ctx, "ch-good", "http://upstream/good"); err != nil {
 		t.Fatalf("GetOrStart: %v", err)
 	}
-	// Allow the readyWatcher's tick (250ms) plus a generous margin to
-	// fire recordSuccess. The success path runs concurrently with
-	// GetOrStart's return, so we poll briefly.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if gate.successes.Load() == 1 && rep.successes.Load() == 1 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	// El readyWatcher's tick + recordSuccess corren concurrentes con el
+	// retorno de GetOrStart. Espera la señal en gate y rep en vez de pollear.
+	waitForCounters(t, 2*time.Second, gate.changes, rep.changes,
+		func() bool { return gate.successes.Load() >= 1 && rep.successes.Load() >= 1 })
 	if got := gate.successes.Load(); got != 1 {
 		t.Errorf("gate.successes: got %d want 1", got)
 	}
@@ -583,7 +620,7 @@ func TestTransmuxManager_GetOrStart_RecordsSuccessOnReady(t *testing.T) {
 // breaker thresholds.
 func TestTransmuxManager_GetOrStart_RecordsFailureOnCrash(t *testing.T) {
 	gate := newFakeGate(true)
-	rep := &countingReporter{}
+	rep := newCountingReporter()
 	m, _ := newTestManagerWithOpts(t, "crash", 0, TransmuxManagerConfig{Gate: gate, Reporter: rep})
 	t.Cleanup(m.Shutdown)
 
@@ -594,15 +631,10 @@ func TestTransmuxManager_GetOrStart_RecordsFailureOnCrash(t *testing.T) {
 	if !errors.Is(err, ErrTransmuxFailed) {
 		t.Fatalf("expected ErrTransmuxFailed, got %v", err)
 	}
-	// processWatcher records failure asynchronously after Wait()
-	// returns; poll briefly so we don't race the goroutine.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if gate.failures.Load() >= 1 && rep.failures.Load() >= 1 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	// processWatcher graba failure async tras Wait() — espera señales en
+	// vez de pollear.
+	waitForCounters(t, 2*time.Second, gate.changes, rep.changes,
+		func() bool { return gate.failures.Load() >= 1 && rep.failures.Load() >= 1 })
 	if got := gate.failures.Load(); got != 1 {
 		t.Errorf("gate.failures: got %d want 1", got)
 	}
@@ -653,28 +685,44 @@ type fakeMetrics struct {
 	starts         map[string]int
 	decodeMode     map[string]int
 	reencodePromos int
+	// changes señaliza cada Inc* (buffer 16) para tests deterministas.
+	changes chan struct{}
 }
 
 func newFakeMetrics() *fakeMetrics {
-	return &fakeMetrics{starts: map[string]int{}, decodeMode: map[string]int{}}
+	return &fakeMetrics{
+		starts:     map[string]int{},
+		decodeMode: map[string]int{},
+		changes:    make(chan struct{}, 16),
+	}
+}
+
+func (f *fakeMetrics) notifyChange() {
+	select {
+	case f.changes <- struct{}{}:
+	default:
+	}
 }
 
 func (f *fakeMetrics) IncStarts(outcome string) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.starts[outcome]++
+	f.mu.Unlock()
+	f.notifyChange()
 }
 
 func (f *fakeMetrics) IncDecodeMode(mode string) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.decodeMode[mode]++
+	f.mu.Unlock()
+	f.notifyChange()
 }
 
 func (f *fakeMetrics) IncReencodePromotions() {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.reencodePromos++
+	f.mu.Unlock()
+	f.notifyChange()
 }
 
 func (f *fakeMetrics) snapshot() (starts, decodeMode map[string]int, promos int) {
@@ -762,18 +810,23 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 	// runs right after close(s.ready)). GetOrStart returns as soon as
 	// ready is closed, so under race detection + coverage instrumentation
 	// the test goroutine can win the race to snapshot before
-	// readyWatcher schedules its IncStarts call. Poll with a deadline
-	// like the other transmux tests do for eventually-consistent state
-	// (cf. IdleReaper above, ReapsStartupZombies below).
-	deadline2 := time.Now().Add(2 * time.Second)
+	// readyWatcher schedules its IncStarts call. Espera la señal de
+	// fakeMetrics.changes en vez de pollear con sleep.
+	deadline2 := time.After(2 * time.Second)
 	var starts, modes map[string]int
 	var promos int
-	for time.Now().Before(deadline2) {
+	timedOut := false
+	for !timedOut {
 		starts, modes, promos = metrics.snapshot()
 		if starts["ok"] >= 1 {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-metrics.changes:
+		case <-deadline2:
+			timedOut = true
+			starts, modes, promos = metrics.snapshot()
+		}
 	}
 	if promos != 1 {
 		t.Errorf("reencode promotions: got %d want 1", promos)
