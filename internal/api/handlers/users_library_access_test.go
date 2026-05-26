@@ -69,6 +69,7 @@ func (e *libraryAccessEnv) do(method, path string, body any) *httptest.ResponseR
 // ─── GetLibraryAccess ───────────────────────────────────────────────────────
 
 func TestUserHandler_GetLibraryAccess_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -106,6 +107,7 @@ func TestUserHandler_GetLibraryAccess_HappyPath(t *testing.T) {
 // Profile ids must transparently look up the parent's grants so the
 // admin UI can render the inherited set in one round-trip.
 func TestUserHandler_GetLibraryAccess_NormalisesProfileToParent(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		if id != "u-profile" {
@@ -140,6 +142,7 @@ func TestUserHandler_GetLibraryAccess_NormalisesProfileToParent(t *testing.T) {
 }
 
 func TestUserHandler_GetLibraryAccess_UserNotFound_404(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, _ string) (*authmodel.User, error) {
 		return nil, domain.NewNotFound("user")
@@ -154,6 +157,7 @@ func TestUserHandler_GetLibraryAccess_UserNotFound_404(t *testing.T) {
 // future test setups that forget to pass libraries don't crash the
 // process.
 func TestUserHandler_GetLibraryAccess_NoLibrariesWired_503(t *testing.T) {
+	t.Parallel()
 	handler := NewUserHandler(&userFakeService{}, nil, nil, testutil.NopLogger())
 	r := chi.NewRouter()
 	r.Get("/api/v1/users/{id}/library-access", handler.GetLibraryAccess)
@@ -169,6 +173,7 @@ func TestUserHandler_GetLibraryAccess_NoLibrariesWired_503(t *testing.T) {
 // ─── SetLibraryAccess ───────────────────────────────────────────────────────
 
 func TestUserHandler_SetLibraryAccess_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -196,6 +201,7 @@ func TestUserHandler_SetLibraryAccess_HappyPath(t *testing.T) {
 }
 
 func TestUserHandler_SetLibraryAccess_RejectsProfile_400(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id, ParentUserID: "u-parent"}, nil
@@ -212,6 +218,7 @@ func TestUserHandler_SetLibraryAccess_RejectsProfile_400(t *testing.T) {
 }
 
 func TestUserHandler_SetLibraryAccess_UnknownLibrary_404(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -234,6 +241,7 @@ func TestUserHandler_SetLibraryAccess_UnknownLibrary_404(t *testing.T) {
 }
 
 func TestUserHandler_SetLibraryAccess_EmptyClearsAll(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -253,6 +261,7 @@ func TestUserHandler_SetLibraryAccess_EmptyClearsAll(t *testing.T) {
 }
 
 func TestUserHandler_SetLibraryAccess_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/u-1/library-access",
 		bytes.NewBufferString("{not json"))
@@ -264,6 +273,7 @@ func TestUserHandler_SetLibraryAccess_InvalidJSON_400(t *testing.T) {
 }
 
 func TestUserHandler_SetLibraryAccess_DeduplicatesIDs(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -286,6 +296,7 @@ func TestUserHandler_SetLibraryAccess_DeduplicatesIDs(t *testing.T) {
 }
 
 func TestUserHandler_SetLibraryAccess_EmptyValue_400(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -307,6 +318,7 @@ func TestUserHandler_SetLibraryAccess_EmptyValue_400(t *testing.T) {
 // ─── CreatePersonalIPTV ─────────────────────────────────────────────────────
 
 func TestUserHandler_CreatePersonalIPTV_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -354,6 +366,7 @@ func TestUserHandler_CreatePersonalIPTV_HappyPath(t *testing.T) {
 }
 
 func TestUserHandler_CreatePersonalIPTV_RejectsProfile_400(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id, ParentUserID: "u-parent"}, nil
@@ -371,6 +384,7 @@ func TestUserHandler_CreatePersonalIPTV_RejectsProfile_400(t *testing.T) {
 }
 
 func TestUserHandler_CreatePersonalIPTV_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/u-1/iptv-libraries",
 		bytes.NewBufferString("{not json"))
@@ -382,6 +396,7 @@ func TestUserHandler_CreatePersonalIPTV_InvalidJSON_400(t *testing.T) {
 }
 
 func TestUserHandler_CreatePersonalIPTV_ValidationError_PropagatesAs400(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
@@ -399,6 +414,7 @@ func TestUserHandler_CreatePersonalIPTV_ValidationError_PropagatesAs400(t *testi
 }
 
 func TestUserHandler_CreatePersonalIPTV_UserNotFound_404(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, _ string) (*authmodel.User, error) {
 		return nil, domain.NewNotFound("user")
@@ -413,6 +429,7 @@ func TestUserHandler_CreatePersonalIPTV_UserNotFound_404(t *testing.T) {
 }
 
 func TestUserHandler_CreatePersonalIPTV_NoLibrariesWired_503(t *testing.T) {
+	t.Parallel()
 	handler := NewUserHandler(&userFakeService{}, nil, nil, testutil.NopLogger())
 	r := chi.NewRouter()
 	r.Post("/api/v1/users/{id}/iptv-libraries", handler.CreatePersonalIPTV)
@@ -430,6 +447,7 @@ func TestUserHandler_CreatePersonalIPTV_NoLibrariesWired_503(t *testing.T) {
 // as 500, not panic or 200. Keeps the contract for the frontend hook
 // honest.
 func TestUserHandler_CreatePersonalIPTV_UnknownError_500(t *testing.T) {
+	t.Parallel()
 	env := newLibraryAccessEnv(t)
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil

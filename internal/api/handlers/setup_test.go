@@ -136,6 +136,7 @@ func setupDecodeData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any
 // ─── Status ─────────────────────────────────────────────────────────────────
 
 func TestSetupHandler_Status_AlreadyComplete(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(_ context.Context) bool { return false }
 	rr := env.do(http.MethodGet, "/api/v1/setup/status", "")
@@ -149,6 +150,7 @@ func TestSetupHandler_Status_AlreadyComplete(t *testing.T) {
 }
 
 func TestSetupHandler_Status_NoUsers_AccountStep(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.users.countFn = func(_ context.Context) (int, error) { return 0, nil }
 	rr := env.do(http.MethodGet, "/api/v1/setup/status", "")
@@ -159,6 +161,7 @@ func TestSetupHandler_Status_NoUsers_AccountStep(t *testing.T) {
 }
 
 func TestSetupHandler_Status_UserButNoLibs_LibrariesStep(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.users.countFn = func(_ context.Context) (int, error) { return 1, nil }
 	env.libs.listFn = func(_ context.Context) ([]*librarymodel.Library, error) { return nil, nil }
@@ -170,6 +173,7 @@ func TestSetupHandler_Status_UserButNoLibs_LibrariesStep(t *testing.T) {
 }
 
 func TestSetupHandler_Status_LibsExist_SettingsStep(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.users.countFn = func(_ context.Context) (int, error) { return 1, nil }
 	env.libs.listFn = func(_ context.Context) ([]*librarymodel.Library, error) {
@@ -185,6 +189,7 @@ func TestSetupHandler_Status_LibsExist_SettingsStep(t *testing.T) {
 // ─── Browse ─────────────────────────────────────────────────────────────────
 
 func TestSetupHandler_Browse_ServiceError_400(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.browseFn = func(_ string) (*setup.BrowseResult, error) {
 		return nil, errors.New("permission denied")
@@ -196,6 +201,7 @@ func TestSetupHandler_Browse_ServiceError_400(t *testing.T) {
 }
 
 func TestSetupHandler_Browse_DefaultsRootPath(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	var gotPath string
 	env.setup.browseFn = func(p string) (*setup.BrowseResult, error) {
@@ -209,6 +215,7 @@ func TestSetupHandler_Browse_DefaultsRootPath(t *testing.T) {
 }
 
 func TestSetupHandler_Browse_SetsCacheControl(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.browseFn = func(p string) (*setup.BrowseResult, error) {
 		return &setup.BrowseResult{Current: p}, nil
@@ -222,6 +229,7 @@ func TestSetupHandler_Browse_SetsCacheControl(t *testing.T) {
 // ─── CreateLibraries ────────────────────────────────────────────────────────
 
 func TestSetupHandler_CreateLibraries_Empty_400(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/setup/libraries", `{"libraries":[]}`)
 	if rr.Code != http.StatusBadRequest {
@@ -230,6 +238,7 @@ func TestSetupHandler_CreateLibraries_Empty_400(t *testing.T) {
 }
 
 func TestSetupHandler_CreateLibraries_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/setup/libraries", `{bogus`)
 	if rr.Code != http.StatusBadRequest {
@@ -238,6 +247,7 @@ func TestSetupHandler_CreateLibraries_InvalidJSON_400(t *testing.T) {
 }
 
 func TestSetupHandler_CreateLibraries_Happy_CreatesEach(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	var created []library.CreateRequest
 	env.libs.createFn = func(_ context.Context, req library.CreateRequest) (*librarymodel.Library, error) {
@@ -258,6 +268,7 @@ func TestSetupHandler_CreateLibraries_Happy_CreatesEach(t *testing.T) {
 }
 
 func TestSetupHandler_CreateLibraries_ServiceError_StopsAtFailure(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	calls := 0
 	env.libs.createFn = func(_ context.Context, _ library.CreateRequest) (*librarymodel.Library, error) {
@@ -282,6 +293,7 @@ func TestSetupHandler_CreateLibraries_ServiceError_StopsAtFailure(t *testing.T) 
 // ─── UpdateSettings ─────────────────────────────────────────────────────────
 
 func TestSetupHandler_UpdateSettings_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	rr := env.do(http.MethodPut, "/api/v1/setup/settings", `{`)
 	if rr.Code != http.StatusBadRequest {
@@ -290,6 +302,7 @@ func TestSetupHandler_UpdateSettings_InvalidJSON_400(t *testing.T) {
 }
 
 func TestSetupHandler_UpdateSettings_NoAPIKey_OK(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	body := `{"transcoding_enabled":true,"hw_accel":"none"}`
 	rr := env.do(http.MethodPut, "/api/v1/setup/settings", body)
@@ -303,6 +316,7 @@ func TestSetupHandler_UpdateSettings_NoAPIKey_OK(t *testing.T) {
 }
 
 func TestSetupHandler_UpdateSettings_PersistsTMDBKey(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	body := `{"tmdb_api_key":"my-key","transcoding_enabled":false}`
 	rr := env.do(http.MethodPut, "/api/v1/setup/settings", body)
@@ -319,6 +333,7 @@ func TestSetupHandler_UpdateSettings_PersistsTMDBKey(t *testing.T) {
 }
 
 func TestSetupHandler_UpdateSettings_UpsertError_500(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.providers.upsertErr = errors.New("write fail")
 	rr := env.do(http.MethodPut, "/api/v1/setup/settings", `{"tmdb_api_key":"k"}`)
@@ -330,6 +345,7 @@ func TestSetupHandler_UpdateSettings_UpsertError_500(t *testing.T) {
 // ─── Capabilities ───────────────────────────────────────────────────────────
 
 func TestSetupHandler_Capabilities_ReturnsWhatServiceReports(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.capsFn = func() *setup.SystemCapabilities {
 		return &setup.SystemCapabilities{
@@ -354,6 +370,7 @@ func TestSetupHandler_Capabilities_ReturnsWhatServiceReports(t *testing.T) {
 // ─── Complete ───────────────────────────────────────────────────────────────
 
 func TestSetupHandler_Complete_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/setup/complete", `{`)
 	if rr.Code != http.StatusBadRequest {
@@ -362,6 +379,7 @@ func TestSetupHandler_Complete_InvalidJSON_400(t *testing.T) {
 }
 
 func TestSetupHandler_Complete_ServiceError_500(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.completeFn = func(_ bool) error { return errors.New("boom") }
 	rr := env.do(http.MethodPost, "/api/v1/setup/complete", `{"start_scan":false}`)
@@ -371,6 +389,7 @@ func TestSetupHandler_Complete_ServiceError_500(t *testing.T) {
 }
 
 func TestSetupHandler_Complete_PropagatesStartScan(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	var got bool
 	env.setup.completeFn = func(scan bool) error { got = scan; return nil }
@@ -394,6 +413,7 @@ func TestSetupHandler_Complete_PropagatesStartScan(t *testing.T) {
 // leak anything.
 
 func TestSetupHandler_PostCompletion_Browse_403(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(context.Context) bool { return false }
 	rr := env.do(http.MethodGet, "/api/v1/setup/browse?path=/", "")
@@ -406,6 +426,7 @@ func TestSetupHandler_PostCompletion_Browse_403(t *testing.T) {
 }
 
 func TestSetupHandler_PostCompletion_Capabilities_403(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(context.Context) bool { return false }
 	rr := env.do(http.MethodGet, "/api/v1/setup/capabilities", "")
@@ -415,6 +436,7 @@ func TestSetupHandler_PostCompletion_Capabilities_403(t *testing.T) {
 }
 
 func TestSetupHandler_PostCompletion_CreateLibraries_403(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(context.Context) bool { return false }
 	rr := env.do(http.MethodPost, "/api/v1/setup/libraries",
@@ -425,6 +447,7 @@ func TestSetupHandler_PostCompletion_CreateLibraries_403(t *testing.T) {
 }
 
 func TestSetupHandler_PostCompletion_UpdateSettings_403(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(context.Context) bool { return false }
 	rr := env.do(http.MethodPut, "/api/v1/setup/settings", `{}`)
@@ -434,6 +457,7 @@ func TestSetupHandler_PostCompletion_UpdateSettings_403(t *testing.T) {
 }
 
 func TestSetupHandler_PostCompletion_Complete_403(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(context.Context) bool { return false }
 	rr := env.do(http.MethodPost, "/api/v1/setup/complete", `{"start_scan":false}`)
@@ -446,6 +470,7 @@ func TestSetupHandler_PostCompletion_Complete_403(t *testing.T) {
 // carve-out so a future "lock everything when needs_setup=false"
 // refactor doesn't accidentally break the redirect logic.
 func TestSetupHandler_PostCompletion_Status_StillOpen(t *testing.T) {
+	t.Parallel()
 	env := newSetupTestEnv(t)
 	env.setup.needsSetupFn = func(context.Context) bool { return false }
 	rr := env.do(http.MethodGet, "/api/v1/setup/status", "")

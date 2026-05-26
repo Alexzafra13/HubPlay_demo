@@ -325,6 +325,7 @@ func userClaims() *auth.Claims  { return &auth.Claims{UserID: "u-2", Role: "user
 // ─── Create ─────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Create_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.createFn = func(_ context.Context, req library.CreateRequest) (*librarymodel.Library, error) {
 		return &librarymodel.Library{
@@ -345,6 +346,7 @@ func TestLibraryHandler_Create_HappyPath(t *testing.T) {
 }
 
 func TestLibraryHandler_Create_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/libraries", `{not json`, nil)
 	if rr.Code != http.StatusBadRequest {
@@ -353,6 +355,7 @@ func TestLibraryHandler_Create_InvalidJSON_400(t *testing.T) {
 }
 
 func TestLibraryHandler_Create_ServiceError_Mapped(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.createFn = func(_ context.Context, _ library.CreateRequest) (*librarymodel.Library, error) {
 		return nil, domain.NewAlreadyExists("library")
@@ -366,6 +369,7 @@ func TestLibraryHandler_Create_ServiceError_Mapped(t *testing.T) {
 // ─── List ───────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_List_Unauthenticated_401(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/libraries", "", nil)
 	if rr.Code != http.StatusUnauthorized {
@@ -374,6 +378,7 @@ func TestLibraryHandler_List_Unauthenticated_401(t *testing.T) {
 }
 
 func TestLibraryHandler_List_Admin_UsesListAll(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	adminHit, userHit := false, false
 	env.svc.listFn = func(_ context.Context) ([]*librarymodel.Library, error) {
@@ -394,6 +399,7 @@ func TestLibraryHandler_List_Admin_UsesListAll(t *testing.T) {
 }
 
 func TestLibraryHandler_List_User_UsesListForUser(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.listForUserFn = func(_ context.Context, userID string) ([]*librarymodel.Library, error) {
 		if userID != "u-2" {
@@ -420,6 +426,7 @@ func TestLibraryHandler_List_User_UsesListForUser(t *testing.T) {
 // ─── Get ────────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Get_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.getByIDFn = func(_ context.Context, id string) (*librarymodel.Library, error) {
 		return &librarymodel.Library{ID: id, Name: "Movies"}, nil
@@ -436,6 +443,7 @@ func TestLibraryHandler_Get_HappyPath(t *testing.T) {
 }
 
 func TestLibraryHandler_Get_NotFound_404(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	// Default getByIDFn nil → returns NewNotFound("library") via the fake's fallback.
 	rr := env.do(http.MethodGet, "/api/v1/libraries/missing", "", nil)
@@ -447,6 +455,7 @@ func TestLibraryHandler_Get_NotFound_404(t *testing.T) {
 // ─── Update ─────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Update_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.updateFn = func(_ context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error) {
 		return &librarymodel.Library{ID: id, Name: req.Name, ContentType: req.ContentType}, nil
@@ -463,6 +472,7 @@ func TestLibraryHandler_Update_HappyPath(t *testing.T) {
 }
 
 func TestLibraryHandler_Update_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	rr := env.do(http.MethodPut, "/api/v1/libraries/lib-1", `{not}`, nil)
 	if rr.Code != http.StatusBadRequest {
@@ -473,6 +483,7 @@ func TestLibraryHandler_Update_InvalidJSON_400(t *testing.T) {
 // ─── Delete ─────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Delete_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	var got string
 	env.svc.deleteFn = func(_ context.Context, id string) error { got = id; return nil }
@@ -486,6 +497,7 @@ func TestLibraryHandler_Delete_HappyPath(t *testing.T) {
 }
 
 func TestLibraryHandler_Delete_NotFound_404(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.deleteFn = func(_ context.Context, _ string) error { return domain.NewNotFound("library") }
 	rr := env.do(http.MethodDelete, "/api/v1/libraries/missing", "", nil)
@@ -497,6 +509,7 @@ func TestLibraryHandler_Delete_NotFound_404(t *testing.T) {
 // ─── Scan ───────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Scan_Accepted(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	var gotRefresh bool
 	env.svc.scanFn = func(_ context.Context, _ string, refresh ...bool) error {
@@ -515,6 +528,7 @@ func TestLibraryHandler_Scan_Accepted(t *testing.T) {
 }
 
 func TestLibraryHandler_Scan_ServiceError_Mapped(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.scanFn = func(_ context.Context, _ string, _ ...bool) error {
 		return domain.NewNotFound("library")
@@ -528,6 +542,7 @@ func TestLibraryHandler_Scan_ServiceError_Mapped(t *testing.T) {
 // ─── Browse ─────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Browse_SensitivePath_403(t *testing.T) {
+	t.Parallel()
 	// The sensitive-path allowlist (internal/api/handlers/library.go)
 	// is Unix-only — `/etc`, `/proc`, `/sys`, `/root` etc. all resolve
 	// to `C:\etc` on Windows, which then trips the dir-not-found path
@@ -544,6 +559,7 @@ func TestLibraryHandler_Browse_SensitivePath_403(t *testing.T) {
 }
 
 func TestLibraryHandler_Browse_NonexistentPath_400(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	rr := env.do(http.MethodGet,
 		"/api/v1/libraries/browse?path=/definitely/does/not/exist/zzz", "", nil)
@@ -553,6 +569,7 @@ func TestLibraryHandler_Browse_NonexistentPath_400(t *testing.T) {
 }
 
 func TestLibraryHandler_Browse_ListsSubdirectories(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	root := t.TempDir()
 	// Create two subdirs + one hidden dir (should be skipped) + one file.
@@ -582,6 +599,7 @@ func TestLibraryHandler_Browse_ListsSubdirectories(t *testing.T) {
 // ─── Items ──────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Items_RespectsFilter(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	var gotFilter librarymodel.ItemFilter
 	env.svc.listItemsFn = func(_ context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
@@ -605,6 +623,7 @@ func TestLibraryHandler_Items_RespectsFilter(t *testing.T) {
 }
 
 func TestLibraryHandler_Items_NextCursorOnFullPage(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return []*librarymodel.Item{
@@ -619,6 +638,7 @@ func TestLibraryHandler_Items_NextCursorOnFullPage(t *testing.T) {
 }
 
 func TestLibraryHandler_Items_NoCursorWhenPartialPage(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return []*librarymodel.Item{{ID: "a"}}, 1, nil
@@ -631,6 +651,7 @@ func TestLibraryHandler_Items_NoCursorWhenPartialPage(t *testing.T) {
 }
 
 func TestLibraryHandler_Items_EnrichesWithMetadata(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return []*librarymodel.Item{{ID: "it-1", Title: "Movie"}}, 1, nil
@@ -652,6 +673,7 @@ func TestLibraryHandler_Items_EnrichesWithMetadata(t *testing.T) {
 }
 
 func TestLibraryHandler_Items_IncludesUserDataWhenAuthenticated(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return []*librarymodel.Item{
@@ -713,6 +735,7 @@ func TestLibraryHandler_Items_IncludesUserDataWhenAuthenticated(t *testing.T) {
 }
 
 func TestLibraryHandler_Items_OmitsUserDataWhenAnonymous(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return []*librarymodel.Item{{ID: "it-1", DurationTicks: 1_000}}, 1, nil
@@ -734,6 +757,7 @@ func TestLibraryHandler_Items_OmitsUserDataWhenAnonymous(t *testing.T) {
 // ─── LatestItems ────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_LatestItems_RespectsQueryParams(t *testing.T) {
+	t.Parallel()
 	env := newLibTestEnv(t)
 	var gotLib, gotType string
 	var gotLimit int

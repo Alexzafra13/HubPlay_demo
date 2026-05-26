@@ -159,6 +159,7 @@ func itemDecodeData(t *testing.T, rr *httptest.ResponseRecorder) any {
 // ─── Get ────────────────────────────────────────────────────────────────────
 
 func TestItemHandler_Get_NotFound_404(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	// Default getItemFn returns domain.NewNotFound via the fake.
 	rr := env.do(http.MethodGet, "/api/v1/items/missing/")
@@ -168,6 +169,7 @@ func TestItemHandler_Get_NotFound_404(t *testing.T) {
 }
 
 func TestItemHandler_Get_ServiceError_500(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, _ string) (*librarymodel.Item, error) {
 		return nil, errors.New("db down")
@@ -179,6 +181,7 @@ func TestItemHandler_Get_ServiceError_500(t *testing.T) {
 }
 
 func TestItemHandler_Get_HappyPath_Minimal(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, LibraryID: "lib-1", Type: "movie", Title: "Foo", Year: 2020}, nil
@@ -194,6 +197,7 @@ func TestItemHandler_Get_HappyPath_Minimal(t *testing.T) {
 }
 
 func TestItemHandler_Get_IncludesStreams(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
@@ -213,6 +217,7 @@ func TestItemHandler_Get_IncludesStreams(t *testing.T) {
 }
 
 func TestItemHandler_Get_ExtractsPrimaryPosterFromImages(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
@@ -239,6 +244,7 @@ func TestItemHandler_Get_ExtractsPrimaryPosterFromImages(t *testing.T) {
 }
 
 func TestItemHandler_Get_AttachesMetadata(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
@@ -259,6 +265,7 @@ func TestItemHandler_Get_AttachesMetadata(t *testing.T) {
 }
 
 func TestItemHandler_Get_IncludesUserDataWhenAuthenticated(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 1_000}, nil
@@ -286,6 +293,7 @@ func TestItemHandler_Get_IncludesUserDataWhenAuthenticated(t *testing.T) {
 }
 
 func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
@@ -300,6 +308,7 @@ func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 }
 
 func TestItemHandler_Get_IncludesPeopleWithPhotos(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
@@ -341,6 +350,7 @@ func TestItemHandler_Get_IncludesPeopleWithPhotos(t *testing.T) {
 }
 
 func TestItemHandler_Get_IncludesExternalIDs(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
@@ -365,6 +375,7 @@ func TestItemHandler_Get_IncludesExternalIDs(t *testing.T) {
 }
 
 func TestItemHandler_Get_OmitsExternalIDsWhenAbsent(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
@@ -381,6 +392,7 @@ func TestItemHandler_Get_OmitsExternalIDsWhenAbsent(t *testing.T) {
 }
 
 func TestItemHandler_Get_IncludesChapters(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 60_000_000_000}, nil
@@ -415,6 +427,7 @@ func TestItemHandler_Get_IncludesChapters(t *testing.T) {
 }
 
 func TestItemHandler_Get_OmitsChaptersWhenAbsent(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
@@ -429,6 +442,7 @@ func TestItemHandler_Get_OmitsChaptersWhenAbsent(t *testing.T) {
 }
 
 func TestItemHandler_TrickplayManifest_DisabledReturns503(t *testing.T) {
+	t.Parallel()
 	// trickplayDir is "" by default in newItemTestEnv (matches a
 	// deployment that hasn't enabled the feature). Both endpoints
 	// must report a clear 503 + machine-readable code so the player
@@ -492,6 +506,7 @@ func trickplayEnv(t *testing.T) (*itemTestEnv, string) {
 // touch ffmpeg. Regression guard for the async refactor that ships
 // with the 504-fix.
 func TestItemHandler_TrickplayManifest_FreshCacheServesImmediately(t *testing.T) {
+	t.Parallel()
 	env, dir := trickplayEnv(t)
 	itemDir := filepath.Join(dir, "it-1")
 	trickplayWriteCache(t, itemDir, imaging.TrickplayManifestVersion)
@@ -512,6 +527,7 @@ func TestItemHandler_TrickplayManifest_FreshCacheServesImmediately(t *testing.T)
 // player. After the async refactor, a cache-miss must return 503
 // + Retry-After IMMEDIATELY (no ffmpeg work in the request goroutine).
 func TestItemHandler_TrickplayManifest_PendingDoesNotBlock(t *testing.T) {
+	t.Parallel()
 	env, _ := trickplayEnv(t)
 	// Wire a valid item so the goroutine spawn path runs (it'll fail
 	// behind the scenes because /dev/null isn't a real video, but the
@@ -544,6 +560,7 @@ func TestItemHandler_TrickplayManifest_PendingDoesNotBlock(t *testing.T) {
 // detects the older stamp via trickplayCacheFresh and falls through
 // to the regen-kickoff branch (which now returns 503 pending).
 func TestItemHandler_TrickplayManifest_StaleCacheReturnsPending(t *testing.T) {
+	t.Parallel()
 	env, dir := trickplayEnv(t)
 	itemDir := filepath.Join(dir, "it-stale")
 	trickplayWriteCache(t, itemDir, 0) // legacy v1 stamp
@@ -561,6 +578,7 @@ func TestItemHandler_TrickplayManifest_StaleCacheReturnsPending(t *testing.T) {
 // ─── Children ───────────────────────────────────────────────────────────────
 
 func TestItemHandler_Children_Empty(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/items/p-1/children")
 	if rr.Code != http.StatusOK {
@@ -573,6 +591,7 @@ func TestItemHandler_Children_Empty(t *testing.T) {
 }
 
 func TestItemHandler_Children_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getChildrenFn = func(_ context.Context, _ string) ([]*librarymodel.Item, error) {
 		return []*librarymodel.Item{
@@ -588,6 +607,7 @@ func TestItemHandler_Children_HappyPath(t *testing.T) {
 }
 
 func TestItemHandler_Children_ServiceError(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.getChildrenFn = func(_ context.Context, _ string) ([]*librarymodel.Item, error) {
 		return nil, domain.NewNotFound("item")
@@ -601,6 +621,7 @@ func TestItemHandler_Children_ServiceError(t *testing.T) {
 // ─── Search ─────────────────────────────────────────────────────────────────
 
 func TestItemHandler_Search_MissingQuery_400(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/items/search")
 	if rr.Code != http.StatusBadRequest {
@@ -609,6 +630,7 @@ func TestItemHandler_Search_MissingQuery_400(t *testing.T) {
 }
 
 func TestItemHandler_Search_PassesFilterAndReturnsTotal(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	var gotFilter librarymodel.ItemFilter
 	env.svc.listItemsFn = func(_ context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
@@ -634,6 +656,7 @@ func TestItemHandler_Search_PassesFilterAndReturnsTotal(t *testing.T) {
 }
 
 func TestItemHandler_Search_ServiceError(t *testing.T) {
+	t.Parallel()
 	env := newItemTestEnv(t)
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return nil, 0, errors.New("fts broken")
