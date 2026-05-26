@@ -53,6 +53,10 @@ type iptvFakeService struct {
 	publishFailedCalls  []struct{ LibraryID, Error string }
 	runRefreshM3UDoneCh chan string
 
+	// Notify channels para tests deterministas (buffer 16, non-blocking).
+	refreshM3UNotify   chan struct{}
+	publishFailedNotify chan struct{}
+
 	// Per-user channel-favorites set, keyed by userID → set of channelIDs.
 	// Nil until the first write; methods lazily initialize.
 	favoritesByUser map[string]map[string]struct{}
@@ -153,7 +157,14 @@ func (s *iptvFakeService) RefreshM3U(_ context.Context, libraryID string) (int, 
 	s.refreshM3UCalls = append(s.refreshM3UCalls, libraryID)
 	err := s.refreshM3UErr
 	n := s.refreshM3UCount
+	notify := s.refreshM3UNotify
 	s.mu.Unlock()
+	if notify != nil {
+		select {
+		case notify <- struct{}{}:
+		default:
+		}
+	}
 	return n, err
 }
 
@@ -197,7 +208,14 @@ func (s *iptvFakeService) PublishRefreshFailed(libraryID string, err error) {
 	}
 	s.mu.Lock()
 	s.publishFailedCalls = append(s.publishFailedCalls, struct{ LibraryID, Error string }{libraryID, msg})
+	notify := s.publishFailedNotify
 	s.mu.Unlock()
+	if notify != nil {
+		select {
+		case notify <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // SpawnBackground en tests corre fn sincrónicamente con un ctx
@@ -1175,6 +1193,7 @@ func TestIPTVHandler_RefreshM3U_AsyncFailure_PublishesEvent(t *testing.T) {
 	env.svc.runRefreshM3UErr = errors.New("boom")
 	doneCh := make(chan string, 1)
 	env.svc.runRefreshM3UDoneCh = doneCh
+	env.svc.publishFailedNotify = make(chan struct{}, 4)
 
 	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/iptv/refresh-m3u", "")
 	if rr.Code != http.StatusAccepted {
@@ -1187,17 +1206,12 @@ func TestIPTVHandler_RefreshM3U_AsyncFailure_PublishesEvent(t *testing.T) {
 		t.Fatal("background RunRefreshM3U was not called within 500ms")
 	}
 
-	// PublishRefreshFailed runs after RunRefreshM3U returns; poll
-	// briefly so we don't depend on goroutine scheduling order.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		env.svc.mu.Lock()
-		got := len(env.svc.publishFailedCalls)
-		env.svc.mu.Unlock()
-		if got > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	// PublishRefreshFailed corre después de RunRefreshM3U — espera la
+	// señal en vez de pollear.
+	select {
+	case <-env.svc.publishFailedNotify:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("PublishRefreshFailed was not called within 500ms")
 	}
 
 	env.svc.mu.Lock()
@@ -1260,6 +1274,7 @@ func TestIPTVHandler_ImportPublicIPTV_UnknownCountry_400(t *testing.T) {
 
 func TestIPTVHandler_ImportPublicIPTV_CreatesLibrary(t *testing.T) {
 	env := newIPTVTestEnv(t)
+	env.svc.refreshM3UNotify = make(chan struct{}, 4)
 	rr := env.do(http.MethodPost, "/api/v1/iptv/public/import", `{"country":"us","name":"MyUS"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status: got %d want 201, body: %s", rr.Code, rr.Body.String())
@@ -1274,18 +1289,12 @@ func TestIPTVHandler_ImportPublicIPTV_CreatesLibrary(t *testing.T) {
 	if lib.M3UURL == "" {
 		t.Error("M3UURL not set from country")
 	}
-	// The handler fires off RefreshM3U in a goroutine — wait briefly to confirm.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		env.svc.mu.Lock()
-		called := len(env.svc.refreshM3UCalls) > 0
-		env.svc.mu.Unlock()
-		if called {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	// El handler dispara RefreshM3U en goroutine — espera la señal.
+	select {
+	case <-env.svc.refreshM3UNotify:
+	case <-time.After(500 * time.Millisecond):
+		t.Error("background RefreshM3U was not called within 500ms")
 	}
-	t.Error("background RefreshM3U was not called within 500ms")
 }
 
 func TestIPTVHandler_ImportPublicIPTV_DefaultLibraryName(t *testing.T) {

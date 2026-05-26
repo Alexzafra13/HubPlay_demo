@@ -636,19 +636,28 @@ func TestService_SwitchProfile_NoPin_NotRateLimited(t *testing.T) {
 	}
 }
 
-// recordingSubscriber collects events for assertions. The bus
-// dispatches handlers in goroutines (see internal/event/bus.go),
-// so waitForEvents polls the snapshot until the expected count
-// arrives or the deadline expires.
+// recordingSubscriber collects events for assertions. El bus dispatcha
+// handlers en goroutines (ver internal/event/bus.go); cada handle()
+// señaliza notify, así que waitForCount espera deterministamente sin
+// time.Sleep.
 type recordingSubscriber struct {
 	mu     sync.Mutex
 	events []event.Event
+	notify chan struct{} // buffer 32; signaled on each handle.
+}
+
+func newRecordingSubscriber() *recordingSubscriber {
+	return &recordingSubscriber{notify: make(chan struct{}, 32)}
 }
 
 func (r *recordingSubscriber) handle(e event.Event) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.events = append(r.events, e)
+	r.mu.Unlock()
+	select {
+	case r.notify <- struct{}{}:
+	default:
+	}
 }
 
 func (r *recordingSubscriber) snapshot() []event.Event {
@@ -661,13 +670,13 @@ func (r *recordingSubscriber) snapshot() []event.Event {
 
 func (r *recordingSubscriber) waitForCount(t *testing.T, want int) []event.Event {
 	t.Helper()
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		got := r.snapshot()
-		if len(got) >= want {
-			return got
+	deadline := time.After(1 * time.Second)
+	for len(r.snapshot()) < want {
+		select {
+		case <-r.notify:
+		case <-deadline:
+			return r.snapshot()
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	return r.snapshot()
 }
@@ -680,7 +689,7 @@ func TestService_RevokeSession_PublishesUserLoggedOut(t *testing.T) {
 	svc, _, _ := newTestAuthService(t)
 	bus := event.NewBus(testutil.NopLogger())
 	svc.SetEventBus(bus)
-	rec := &recordingSubscriber{}
+	rec := newRecordingSubscriber()
 	bus.Subscribe(event.UserLoggedOut, rec.handle)
 
 	user := registerTestUser(t, svc)
@@ -724,7 +733,7 @@ func TestService_RevokeSession_ForeignSession_NoPublish(t *testing.T) {
 	svc, _, _ := newTestAuthService(t)
 	bus := event.NewBus(testutil.NopLogger())
 	svc.SetEventBus(bus)
-	rec := &recordingSubscriber{}
+	rec := newRecordingSubscriber()
 	bus.Subscribe(event.UserLoggedOut, rec.handle)
 
 	owner := registerTestUser(t, svc)
