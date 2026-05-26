@@ -44,13 +44,10 @@ func TestEventHandler_Stream_DeliversPublishedEvent(t *testing.T) {
 		t.Errorf("content-type: %q", ct)
 	}
 
-	// Give the handler time to register its subscriptions, then publish.
+	// Espera a que el handler registre sus suscripciones antes de publicar.
 	waitForHandlerCount(t, bus, event.ItemAdded, 1)
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		bus.Publish(event.Event{Type: event.ItemAdded, Data: map[string]any{"id": "42"}})
-	}()
+	bus.Publish(event.Event{Type: event.ItemAdded, Data: map[string]any{"id": "42"}})
 
 	reader := bufio.NewReader(resp.Body)
 	deadline := time.Now().Add(2 * time.Second)
@@ -127,28 +124,18 @@ func TestEventHandler_Stream_UnsubscribesOnClientDisconnect(t *testing.T) {
 	cancel()
 	_ = resp.Body.Close()
 
-	// Wait for the handler goroutine to notice and unregister.
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		if bus.HandlerCount(event.ItemAdded) == 0 &&
-			bus.HandlerCount(event.TranscodeStarted) == 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	// El handler goroutine debe detectar el cancel y desuscribir los 12 tipos.
+	if !bus.WaitForHandlerCount(event.ItemAdded, 0, time.Second) ||
+		!bus.WaitForHandlerCount(event.TranscodeStarted, 0, time.Second) {
+		t.Fatalf("handlers still registered after disconnect: ItemAdded=%d TranscodeStarted=%d",
+			bus.HandlerCount(event.ItemAdded), bus.HandlerCount(event.TranscodeStarted))
 	}
-	t.Fatalf("handlers still registered after disconnect: ItemAdded=%d TranscodeStarted=%d",
-		bus.HandlerCount(event.ItemAdded), bus.HandlerCount(event.TranscodeStarted))
 }
 
-// waitForHandlerCount polls bus.HandlerCount until it matches want, or fails.
+// waitForHandlerCount bloquea hasta que bus.HandlerCount(et) == want o falla.
 func waitForHandlerCount(t *testing.T, bus *event.Bus, et event.Type, want int) {
 	t.Helper()
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		if bus.HandlerCount(et) == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !bus.WaitForHandlerCount(et, want, time.Second) {
+		t.Fatalf("waited for %s count=%d, got %d", et, want, bus.HandlerCount(et))
 	}
-	t.Fatalf("waited for %s count=%d, got %d", et, want, bus.HandlerCount(et))
 }
