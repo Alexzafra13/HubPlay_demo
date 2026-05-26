@@ -6,6 +6,54 @@
 
 ---
 
+## 🧪 Sesión 2026-05-26 (parte 2) — F15-2 clock injection + F15-7 t.Parallel() ×4.8
+
+Continuación de la sesión 2026-05-26. Tres commits en `claude/project-review-status-PHIHv`.
+
+### F15-2 clock injection (3 componentes nuevos)
+
+| Componente | `time.Now()` reemplazados | Notas |
+|---|---:|---|
+| `auth/ratelimit.go` | 3 | Lockout/window/cleanup ahora determinísticos. 4 tests nuevos con `clock.Mock`. |
+| `retention/runner.go` | 1 | Cutoff del audit prune verificable con mock. 1 test nuevo. |
+| `library/service.go` | 3 | Create/CreatePersonalIPTV/Update usan `s.clock.Now()`. |
+
+Total clock-injected en codebase: 16 → 19 ficheros de producción.
+
+### F15-7 t.Parallel() expansion
+
+| Fichero(s) | Tests añadidos |
+|---|---:|
+| stream/decision_test | 18 |
+| upload/validator_test | 17 |
+| iptv/circuit_breaker_test (excl. ConcurrentAccess) | 9 |
+| handlers/collections_test | 2 |
+| handlers: progress, setup, library, items, users_library_access, upload_browse, auth | 152 |
+| domain/errors, federation/url, iptv/m3u_language, stream/capabilities | 47 |
+| auth/ratelimit_test (tests nuevos) | 4 (+1 retention) |
+
+**Total t.Parallel()**: 65 → 314 (**×4.8**). Excluidos por races en fakes:
+handlers/image_test, imaging/safety_test, iptv/{preflight,proxy_security,xmltv}_test.
+
+### F16 bajas — cerradas al 100 %
+
+La sesión anterior (#440) documentó F16-11/13/18/19 como decisiones
+deliberadas. El commit message de #440 ya cerraba F16-10 (VacuumInto
+helper), F16-14 (código cambiado, audit outdated), F16-17 (cosmético).
+**F16 completamente cerrado**: alta 1/1, medium 8/8, bajas 10/10.
+
+### Pendientes priorizadas (próximas sesiones)
+
+- **F15-2 restante** — clock injection en scanner (13 calls, 17-param constructor → necesita refactor), notification/sweeper (2), upload (4), db repos (muchos)
+- **F15-7 restante** — t.Parallel() en ficheros con races (requiere mutex en fakes): image_test, imaging/safety_test, iptv/{preflight,proxy_security,xmltv}_test
+- **F15-3..6, F15-9..12** — media/baja
+- **F14-7-a** — sub-loggers `.With()` × 145 sites (~2h)
+- **VideoPlayer 3ª ola** — 787 LoC
+- **LL Transcoder stateless** — sesión grande propia
+- **Distribución** — installer Windows firmado, auto-update, TLS LAN
+
+---
+
 ## 🎯 Sesión 2026-05-26 (cierre completo) — F15-1 100% + F16 medium 100% + 3/10 F16 bajas
 
 Sesión larga (7+1 PRs). Cierra el F15-1 ALTA por completo y los 3 issues
