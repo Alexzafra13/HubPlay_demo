@@ -36,10 +36,17 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]map[string]any, 0, len(configs))
 	for _, c := range configs {
-		// Parse config JSON into a map for the frontend
+		// Parse config JSON into a map for the frontend. Fail-soft: si el
+		// JSON está corrupto el frontend recibe un map vacío (mejor que
+		// 500 — el resto de campos del provider siguen siendo útiles).
+		// Log permite diagnosticar si alguien edita config_json a mano y
+		// rompe el shape.
 		cfgMap := make(map[string]string)
 		if c.ConfigJSON != "" {
-			_ = json.Unmarshal([]byte(c.ConfigJSON), &cfgMap)
+			if err := json.Unmarshal([]byte(c.ConfigJSON), &cfgMap); err != nil {
+				h.logger.Warn("provider config json malformed",
+					"provider", c.Name, "error", err)
+			}
 		}
 		entry := map[string]any{
 			"name":        c.Name,

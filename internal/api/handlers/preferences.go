@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
@@ -91,6 +93,17 @@ func (h *PreferencesHandler) SetMine(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(body.Value) > 8*1024 {
 		respondError(w, r, http.StatusBadRequest, "VALUE_TOO_LARGE", "value must be ≤ 8 KB")
+		return
+	}
+	// Rechaza UTF-8 inválido y NULs: el repo lo persiste verbatim a una
+	// columna TEXT — null bytes truncan en algunos drivers SQLite y
+	// secuencias inválidas rompen el render del frontend.
+	if !utf8.ValidString(body.Value) {
+		respondError(w, r, http.StatusBadRequest, "INVALID_UTF8", "value must be valid UTF-8")
+		return
+	}
+	if strings.ContainsRune(body.Value, 0) {
+		respondError(w, r, http.StatusBadRequest, "INVALID_VALUE", "value must not contain null bytes")
 		return
 	}
 
