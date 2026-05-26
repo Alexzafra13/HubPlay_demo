@@ -294,6 +294,11 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 	// page. Falling back to the series' artwork covers seasons that
 	// TMDb only ships with a poster (no backdrop) and orphan episodes
 	// whose season was never scanned.
+	//
+	// Sin cap explícito (F16-13 baja, DoS muy bajo): `items` ya viene
+	// paginado por el repo (limit ≤ 100), así que idSet ≤ 300 entradas
+	// en el peor caso (item + parent + series). Acotado por contrato
+	// de upstream, no por tamaño defensivo.
 	idSet := make(map[string]struct{}, len(items)*3)
 	for _, item := range items {
 		idSet[item.ItemID] = struct{}{}

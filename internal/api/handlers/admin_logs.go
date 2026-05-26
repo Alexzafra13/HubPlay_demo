@@ -36,6 +36,11 @@ func NewAdminLogsHandler(buffer *logging.Buffer, limiter *SSELimiter) *AdminLogs
 // `?limit=N`. Caller is admin-gated by the router middleware.
 func (h *AdminLogsHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
 	if h.buffer == nil {
+		// F16-11 (audit): buffer == nil es config deliberada (logger
+		// sin ring buffer). Devolvemos 200 + `available: false` en
+		// vez de 503 para que el panel pinte "logs deshabilitados"
+		// como estado normal, no como error que el operador debe
+		// arreglar.
 		respondJSON(w, http.StatusOK, map[string]any{
 			"data":      []logging.Entry{},
 			"available": false,
