@@ -137,7 +137,12 @@ func TestFetchPeerLibraries_DoesNotRetry4xx(t *testing.T) {
 // Previously a slow peer + cancelled user could keep the goroutine
 // alive for the full peerFetchBackoff sequence.
 func TestFetchPeerLibraries_HonoursCancelledContext(t *testing.T) {
+	firstReq := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case firstReq <- struct{}{}:
+		default:
+		}
 		http.Error(w, "down", http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
@@ -145,9 +150,10 @@ func TestFetchPeerLibraries_HonoursCancelledContext(t *testing.T) {
 	mgr := newRetryTestManager(t, srv)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// Cancel mid-first-backoff so the loop bails before attempt 2.
+	// Cancel en cuanto el primer attempt llegue al server — el loop
+	// estará empezando el backoff y debe respetar ctx inmediatamente.
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		<-firstReq
 		cancel()
 	}()
 
@@ -157,8 +163,8 @@ func TestFetchPeerLibraries_HonoursCancelledContext(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error after cancellation")
 	}
-	// peerFetchBackoff is 250ms; we should bail well before the full
-	// 250+500ms total a no-cancellation run would take.
+	// peerFetchBackoff es 250 ms; debemos salir mucho antes de los
+	// 250 + 500 ms totales que daría un run sin cancelación.
 	if elapsed > 200*time.Millisecond {
 		t.Fatalf("cancel was not honoured promptly (elapsed=%v)", elapsed)
 	}
