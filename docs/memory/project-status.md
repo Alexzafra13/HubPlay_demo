@@ -6,6 +6,156 @@
 
 ---
 
+## 🧪 Sesión 2026-05-26 — F15-1 (parte 2): time.Sleep → seams determinísticos
+
+Continuación del F15-1 ALTA arrancado en PR #426. Tres PRs encadenadas
+eliminan **20 `time.Sleep`** de tests aplicando el patrón notify-channel
++ Wait helpers establecido en PR #426 (watcher/retention/event-bus).
+
+### PRs
+
+| PR | Tema | Sleeps |
+|---|---|---:|
+| [#429](https://github.com/Alexzafra13/HubPlay_demo/pull/429) | SSE events_test + me_events_test | 8 |
+| [#430](https://github.com/Alexzafra13/HubPlay_demo/pull/430) | iptv scheduler + prober_worker | 8 |
+| [#431](https://github.com/Alexzafra13/HubPlay_demo/pull/431) | iptv_test + auth/service + federation/client_retry | 4 |
+
+### Seams nuevos añadidos
+
+| Componente | Seam | Para |
+|---|---|---|
+| `event.Bus` | `changes chan struct{}` (32) + `WaitForHandlerCount(et, want, timeout)` | Tests de SSE subscribe/unsub sin polling. |
+| `handlers.SSELimiter` | `changes chan struct{}` (32) + `WaitForGlobal(want, timeout)` | Espera release del slot tras disconnect. |
+| `iptv.Scheduler` | `startedCh chan struct{}` + `Started() <-chan struct{}` cerrado al entrar el loop en el select | Evita el sleep "allow goroutine to enter select". |
+
+Los demás seams viven en los fakes locales del test (notify channels en
+`fakeRunner`, `fakeLibLister`, `fakeChanLister`, `panicLibLister`,
+`blockingChanLister`, `iptvFakeService`, `recordingSubscriber`).
+
+### Patrón canónico
+
+```go
+// En el componente / fake
+type X struct {
+    ...
+    changes chan struct{} // buffer 32, non-blocking signal
+}
+
+func (x *X) doThing() {
+    ...
+    select { case x.changes <- struct{}{}: default: } // non-blocking
+}
+
+// Helper (production o test-only)
+func (x *X) WaitForFoo(want int, timeout time.Duration) bool {
+    deadline := time.After(timeout)
+    for x.fooCount() != want {
+        select {
+        case <-x.changes:
+        case <-deadline:
+            return x.fooCount() == want
+        }
+    }
+    return true
+}
+
+// Test
+if !x.WaitForFoo(0, time.Second) {
+    t.Fatal("foo did not reach 0")
+}
+```
+
+### Sleeps deferidos (batch 2b + batch 4)
+
+| Fichero | # | Razón |
+|---|---:|---|
+| `iptv/transmux_test.go` | 10 | Requiere notify en `TransmuxManager` producción; algunos sleeps son legítimos (TTL/reaper tests). PR aparte. |
+| `iptv/prober_test.go::ConcurrencyCap` | 1 | Simulación de upstream lento (leader holds slot for piggybackers). |
+| `api/handlers/auth_device_test.go` | 2 | Requiere clock injection en device-auth service + bus introspection para "subscription ready". |
+| `api/handlers/stream_test.go::WaitForFile` | 1 | Sleep en goroutine simula "file appears late" — es el comportamiento que testa. |
+| `federation/stream_test.go::CloseStopsSweeper` | 1 | Scheduler de Go drenando goroutines. Goleak cubre via CI. |
+| `stream/manager_test.go::StartGroup` | 1 | Singleflight leader holds slot — sin seam externo. |
+| Time-based legítimos | ~5 | `db/channel_watch_history` (timestamps), `streaming_deadline` (WriteTimeout), `updates/checker` (Windows 15ms clock), `provider/httpcache` (singleflight similar). |
+
+### Aprendizajes
+
+- **No todos los time.Sleep son malos**. Tests que verifican comportamiento
+  time-based real (TTL, reaper, deadline propagation, simulación de
+  upstream lento) usan sleep legítimamente. La fix no es eliminar; es
+  reemplazar SOLO los polls "while !state { sleep }" por waits en señal.
+- **El bus de eventos + el SSE limiter ahora tienen `WaitForXxx`**
+  promovidos a API pública con comentario "Test-only". Convención
+  consistente con `bus.HandlerCount` que ya existía con ese disclaimer.
+- **El patrón notify-channel buffer 32 + send non-blocking** se
+  consolida como el camino estándar para señalizar transiciones
+  entre componente y test. Producción nunca lee → cero overhead;
+  test selecciona sobre el chan con timeout para deadline garantizado.
+- **Algunos polls eran simplemente redundantes**: en `events_test.go`
+  línea 51 + `me_events_test.go` líneas 70/112/164 había sleeps "para
+  asegurar que el handler suscribió" cuando líneas arriba ya esperaban
+  via `waitForHandlerCount`. 4 sleeps eliminados sin tocar producción.
+
+### Métricas
+
+- **20 sleeps eliminados** de 14 ficheros (de los 19 originales del F15-1)
+- **3 seams en producción** (event.Bus, SSELimiter, iptv.Scheduler) — APIs
+  públicas con documentación "Test-only".
+- **5 fakes** con notify channels añadidas.
+- **0 cambios de behaviour**: tests pasan sin tocar la lógica testada.
+
+---
+
+## 📋 Sesión 2026-05-25 (parte V, extensión) — PRs #426-#428 (no documentadas previamente)
+
+Trabajo cerrado el mismo 2026-05-25 después de #425 que no estaba en la
+memoria. Tres PRs incrementales en `claude/project-review-IYCoR`:
+
+### PR #426 — F14-7-a sub-loggers + F15-1 parcial
+
+- **F14-7-a sub-loggers `.With()` para context fields repetidos**: 11
+  ficheros (library/{watcher, segment_detector, segment_fingerprinter,
+  service}, scanner/{scanner, scan_walk, enrich, enrich_season_episode,
+  media_ingest}, iptv/{service_m3u, service_epg}). Cada método que opera
+  sobre una entidad crea `log := w.logger.With("library_id", id)` al
+  entry y reemplaza las repeticiones manuales.
+- **F15-1 parcial**: añade seams determinísticos (`WaitForWalksDone`,
+  `WaitForReconcileDone`, `WaitForSweep`, canales de notificación) para
+  eliminar `time.Sleep` en watcher_test (6), retention/runner_test (2),
+  event/bus_test (4). Establece el patrón notify-channel + `WaitForXxx`
+  que la sesión F15-1 parte 2 (PRs #429-#431) replica.
+
+### PR #427 — F16-2/4/8 + F15-1 service_lock
+
+- **F16-2/4 parsePagination helper**: nuevo
+  `parsePagination`/`parsePaginationFromValues` que valida `offset >= 0`,
+  `limit >= 0` y cap a 500. Aplicado a 9 sites en 6 handlers (library,
+  item_search, users, audit_log, me_peers, federation_public).
+- **F16-8 SSE drop observability counter**: atomic counter de SSE drops
+  por conexión; loguea total al desconectar si > 0 (events.go,
+  me_events.go). Permite detectar clientes lentos sin bloquear el bus.
+- **F15-1 service_lock_test**: el `time.Sleep(50ms)` para esperar a que
+  la primera goroutine adquiriera el lock se reemplaza por un canal de
+  señal desde el httptest server. Pasa en ~2s sin race.
+
+### PR #428 — VideoPlayer 2ª ola
+
+- **VideoPlayer 817 → 787 LoC** (−30) consolidando 4 useState de overlays
+  (upNextActive, externalSubsModalOpen, activeExternalSub, showHelp) en
+  un `useReducer` dentro de nuevo hook `usePlayerOverlays`.
+- VideoPlayer baja de **5 useState a 1** (sólo playbackRate).
+- Cierra los issues de React Doctor `prefer-useReducer` y
+  `no-cascading-set-state` para VideoPlayer.
+
+### F16 — estado tras #427
+
+De los 8 issues medium originales, **3 cerrados** (F16-2 + F16-4 +
+F16-8). Quedan 5: race async iptv_admin, auth check redundante,
+paginación restante en algunos endpoints aún no migrados,
+deduplicación SSE en clientes con misma userID, telemetría de
+conexiones SSE.
+
+---
+
 ## 🔒 Sesión 2026-05-25 (parte IV) — Security: migrar middleware.RealIP a ClientIPFromXFF
 
 chi v5.3.0 deprecó `middleware.RealIP` por 3 CVE de IP spoofing (incl.
@@ -103,12 +253,12 @@ Todos los jobs verdes: Test Backend, Test Backend (Postgres), Lint, Frontend, kn
 
 ### Tests (F15)
 
-- **F15-1 ALTA** — `time.Sleep` en 19 ficheros → seams determinísticos
+- ~~**F15-1 ALTA** — `time.Sleep` en 19 ficheros → seams determinísticos~~ — **~70 % cerrado**: PR #426 (12 sleeps en watcher/retention/event-bus/service_lock), PRs #429-#431 (20 sleeps en SSE/iptv/auth/federation). Quedan 10 en transmux_test (batch 2b — requiere notify en TransmuxManager) + ~7 legítimos/difíciles (auth_device clock, stream WaitForFile simulation, federation sweeper, singleflight leader, time-based reales).
 - **F15-2..12** — media/baja (time.Now no inyectado, t.Parallel infrautilizado, etc.)
 
-### Handlers (F16, 8 media)
+### Handlers (F16, 5 medium pendientes)
 
-Paginación inconsistente, SSE drops sin observabilidad, race async iptv_admin, auth check redundante.
+PR #427 cerró F16-2/4 (parsePagination helper × 9 sites) + F16-8 (SSE drop observability). Quedan: race async iptv_admin, auth check redundante, paginación restante, dedup SSE same-user, telemetría de conexiones SSE.
 
 ### Arquitectónicos (sesión grande cada uno)
 
