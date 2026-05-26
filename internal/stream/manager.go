@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -53,6 +54,7 @@ type Manager struct {
 	stopClean  chan struct{}
 	metrics    MetricsSink
 	bus        *event.Bus // opcional; nil-safe
+	clock      clock.Clock
 	// startGroup serializa el slow path de StartSession por session key.
 	// Colapsa racers paralelos (init burst, double-click, hls.js mount)
 	// en una sola ejecución vía singleflight.
@@ -115,6 +117,12 @@ type Deps struct {
 	Metrics               MetricsSink
 	EventBus              *event.Bus
 	ForceDirectPlayLookup func(context.Context) bool
+
+	// Clock abstrae time.Now() para los timestamps de sesión
+	// (LastAccessed, StartedAt, LastRestartTime, ventana de rate-limit
+	// de restart, cutoff del idle cleanup). Nil = clock.New() (real).
+	// Cierra olor F15-2 para este servicio.
+	Clock clock.Clock
 }
 
 // NewManager crea un streaming manager.
@@ -148,6 +156,11 @@ func NewManager(deps Deps) *Manager {
 	)
 	cfg = tuned
 
+	clk := deps.Clock
+	if clk == nil {
+		clk = clock.New()
+	}
+
 	m := &Manager{
 		sessions: make(map[string]*ManagedSession),
 		transcoder: NewTranscoder(TranscoderConfig{
@@ -165,6 +178,7 @@ func NewManager(deps Deps) *Manager {
 		stopClean: make(chan struct{}),
 		metrics:   noopSink{},
 		hwAccel:   hwResult,
+		clock:     clk,
 	}
 
 	if deps.Metrics != nil {
@@ -176,6 +190,13 @@ func NewManager(deps Deps) *Manager {
 
 	go m.cleanupLoop()
 	return m
+}
+
+// now consulta el reloj inyectado. Wrapper trivial para que las llamadas
+// a timestamping (LastAccessed, StartedAt, restart-window, idle cutoff)
+// se lean cortas.
+func (m *Manager) now() time.Time {
+	return m.clock.Now()
 }
 
 // SetMetrics conecta un sink de observability. Nil es no-op.
@@ -267,7 +288,7 @@ func (m *Manager) StartSession(ctx context.Context, req StartSessionRequest) (*M
 	// Fast path: sesión ya activa (>99% de las veces post-init).
 	m.mu.Lock()
 	if ms, ok := m.sessions[key]; ok {
-		ms.LastAccessed = time.Now()
+		ms.LastAccessed = m.now()
 		m.mu.Unlock()
 		return ms, nil
 	}
@@ -336,7 +357,7 @@ func (m *Manager) tryGetExistingSession(key string) *ManagedSession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ms, ok := m.sessions[key]; ok {
-		ms.LastAccessed = time.Now()
+		ms.LastAccessed = m.now()
 		return ms
 	}
 	return nil
@@ -424,11 +445,11 @@ func (m *Manager) buildDirectPlaySession(key, userID, itemID string, decision Pl
 		Session: &Session{
 			ID:        key,
 			ItemID:    itemID,
-			StartedAt: time.Now(),
+			StartedAt: m.now(),
 		},
 		UserID:       userID,
 		Decision:     decision,
-		LastAccessed: time.Now(),
+		LastAccessed: m.now(),
 	}
 }
 
@@ -462,9 +483,9 @@ func (m *Manager) spawnTranscodeSession(key, userID, itemID, inputPath string, a
 		AudioStreamIndex:   audioStreamIndex,
 		BurnSubtitle:       burnSub,
 		Decision:           decision,
-		LastAccessed:       time.Now(),
+		LastAccessed:       m.now(),
 		LastRestartSegment: startSegment,
-		LastRestartTime:    time.Now(),
+		LastRestartTime:    m.now(),
 	}
 
 	m.mu.Lock()
@@ -544,7 +565,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	}
 
 	// Sliding-window rate limit.
-	now := time.Now()
+	now := m.now()
 	if now.Sub(ms.restartWindowStart) > restartRateLimitWindow {
 		ms.restartWindowStart = now
 		ms.restartWindowCount = 0
@@ -587,9 +608,9 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 
 	m.mu.Lock()
 	ms.Session = newSession
-	ms.LastAccessed = time.Now()
+	ms.LastAccessed = m.now()
 	ms.LastRestartSegment = segmentIndex
-	ms.LastRestartTime = time.Now()
+	ms.LastRestartTime = m.now()
 	m.mu.Unlock()
 
 	m.logger.Info("session restarted at segment",
@@ -605,7 +626,7 @@ func (m *Manager) TouchSession(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ms, ok := m.sessions[key]; ok {
-		ms.LastAccessed = time.Now()
+		ms.LastAccessed = m.now()
 	}
 }
 
@@ -659,7 +680,7 @@ func (m *Manager) GetSession(key string) (*ManagedSession, bool) {
 	defer m.mu.Unlock()
 	ms, ok := m.sessions[key]
 	if ok {
-		ms.LastAccessed = time.Now()
+		ms.LastAccessed = m.now()
 	}
 	return ms, ok
 }
@@ -775,7 +796,7 @@ func (m *Manager) cleanupLoop() {
 }
 
 func (m *Manager) cleanupIdle(maxIdle time.Duration) {
-	now := time.Now()
+	now := m.now()
 	var toRemove []string
 	var toStop []*ManagedSession
 
