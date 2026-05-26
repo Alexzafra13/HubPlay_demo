@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/event"
 )
@@ -296,6 +297,7 @@ func newTestManager(t *testing.T) *Manager {
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),
 		metrics:    noopSink{},
+		clock:      clock.New(),
 	}
 }
 
