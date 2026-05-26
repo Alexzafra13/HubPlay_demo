@@ -224,6 +224,13 @@ type TransmuxManager struct {
 	stop     chan struct{}
 	stopOnce sync.Once
 	stopped  chan struct{}
+
+	// changes señaliza cada cambio de estado observable (sesión
+	// añadida/eliminada, decodeMode promovido). Buffer 32 + envío
+	// non-blocking: producción nunca lee, así que los tokens se solapan
+	// sin afectar al hot path. Sólo lo consumen los WaitForXxx helpers
+	// de tests.
+	changes chan struct{}
 }
 
 type decodeModeEntry struct {
@@ -323,9 +330,20 @@ func NewTransmuxManager(cfg TransmuxManagerConfig, logger *slog.Logger) *Transmu
 		decodeMode: make(map[string]decodeModeEntry),
 		stop:       make(chan struct{}),
 		stopped:    make(chan struct{}),
+		changes:    make(chan struct{}, 32),
 	}
 	go m.reapLoop()
 	return m
+}
+
+// notifyChange envía un token al canal de cambios; non-blocking, los
+// tokens se solapan si nadie está leyendo. Pinchado en cada mutación
+// de m.sessions y m.decodeMode.
+func (m *TransmuxManager) notifyChange() {
+	select {
+	case m.changes <- struct{}{}:
+	default:
+	}
 }
 
 // reencodeFallbackEnabled returns whether the manager should auto-promote
@@ -374,6 +392,7 @@ func (m *TransmuxManager) promoteToReencode(channelID string) {
 	}
 	wasReencode := hadEntry && prev.mode == decodeModeReencode
 	m.decodeModeMu.Unlock()
+	m.notifyChange()
 	if wasReencode {
 		return
 	}
@@ -587,6 +606,7 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 	go session.stderrTail.consume(stderrPipe)
 
 	m.sessions[channelID] = session
+	m.notifyChange()
 	m.logger.Info("transmux session started",
 		"channel", channelID,
 		"upstream", upstreamURL,
@@ -755,6 +775,7 @@ func (m *TransmuxManager) Stop(channelID string) {
 	m.mu.Unlock()
 	if ok {
 		m.terminate(s)
+		m.notifyChange()
 	}
 }
 
@@ -763,6 +784,40 @@ func (m *TransmuxManager) ActiveSessions() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
+}
+
+// WaitForActiveSessions bloquea hasta que ActiveSessions() == want o
+// el timeout vence. Devuelve true si la condición se cumplió. Test-only:
+// producción nunca depende de transiciones puntuales del contador.
+func (m *TransmuxManager) WaitForActiveSessions(want int, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		if m.ActiveSessions() == want {
+			return true
+		}
+		select {
+		case <-m.changes:
+		case <-deadline:
+			return m.ActiveSessions() == want
+		}
+	}
+}
+
+// WaitForDecodeMode bloquea hasta que pickDecodeMode(channelID) == want
+// o el timeout vence. Test-only — usar fuera de tests rompe el contrato
+// de mode-fallback que asume re-evaluación bajo demanda.
+func (m *TransmuxManager) WaitForDecodeMode(channelID string, want decodeMode, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		if m.pickDecodeMode(channelID) == want {
+			return true
+		}
+		select {
+		case <-m.changes:
+		case <-deadline:
+			return m.pickDecodeMode(channelID) == want
+		}
+	}
 }
 
 // ActiveReencodeSessions reports how many of the active sessions are
@@ -810,6 +865,9 @@ func (m *TransmuxManager) Shutdown() {
 	}
 	m.sessions = make(map[string]*TransmuxSession)
 	m.mu.Unlock()
+	if len(sessions) > 0 {
+		m.notifyChange()
+	}
 
 	for _, s := range sessions {
 		m.terminate(s)
@@ -880,6 +938,9 @@ func (m *TransmuxManager) reapOnce() {
 		}
 	}
 	m.mu.Unlock()
+	if len(toStop) > 0 {
+		m.notifyChange()
+	}
 
 	for i, s := range toStop {
 		switch toStopReason[i] {
@@ -919,14 +980,19 @@ func isReady(s *TransmuxSession) bool {
 // for the single shutdown path so behaviour stays identical.
 func (m *TransmuxManager) evict(s *TransmuxSession) {
 	m.mu.Lock()
+	removed := false
 	if cur, ok := m.sessions[s.ChannelID]; ok && cur == s {
 		delete(m.sessions, s.ChannelID)
+		removed = true
 	}
 	m.mu.Unlock()
 	// processWatcher will clean up the dir; we skip terminate so we
 	// don't double-cancel an already-exited process.
 	s.stopped.Store(true)
 	cleanupWorkDir(s.WorkDir)
+	if removed {
+		m.notifyChange()
+	}
 }
 
 // terminate cancels the ffmpeg context, waits briefly for the

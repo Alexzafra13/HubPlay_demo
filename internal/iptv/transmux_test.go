@@ -367,17 +367,9 @@ func TestTransmuxManager_IdleReaper_TerminatesUntouchedSession(t *testing.T) {
 		t.Fatalf("pre-reap ActiveSessions: got %d want 1", got)
 	}
 
-	// IdleTimeout=200ms + ReaperInterval=50ms; allow generous margin
-	// so a slow CI host doesn't flake.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if m.ActiveSessions() == 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if got := m.ActiveSessions(); got != 0 {
-		t.Errorf("post-reap ActiveSessions: got %d want 0", got)
+	// IdleTimeout=200ms + ReaperInterval=50ms; 3s da margen al CI lento.
+	if !m.WaitForActiveSessions(0, 3*time.Second) {
+		t.Errorf("post-reap ActiveSessions: got %d want 0", m.ActiveSessions())
 	}
 }
 
@@ -420,7 +412,12 @@ func TestTransmuxManager_Touch_KeepsSessionAlive(t *testing.T) {
 		}
 	}()
 
-	// Wait long enough that an un-touched session would have been reaped.
+	// Sleep LEGÍTIMO (F15-1 batch 4): este test verifica que Touch
+	// resetea el idle-timer. La única forma de comprobarlo es esperar
+	// 3× el IdleTimeout (500ms) — si la sesión sigue viva tras ese
+	// margen, Touch funciona. No hay seam externo porque el
+	// comportamiento bajo test ES "el reaper NO actúa pese al paso del
+	// tiempo".
 	time.Sleep(1500 * time.Millisecond)
 	if got := m.ActiveSessions(); got != 1 {
 		t.Errorf("expected session kept alive by Touch, got %d active", got)
@@ -656,13 +653,10 @@ func TestTransmuxManager_FFmpegStderrSurfacedOnCrash(t *testing.T) {
 	defer cancel()
 
 	_, _ = m.GetOrStart(ctx, "ch-stderr", "http://upstream/stderr")
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(logBuf.String(), "ffmpeg_stderr_tail") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	// processWatcher hace logger.Info("ffmpeg_stderr_tail", ...) antes
+	// de evict(), así que cuando ActiveSessions baja a 0 el log ya está
+	// escrito en el buffer.
+	m.WaitForActiveSessions(0, 2*time.Second)
 	got := logBuf.String()
 	if !strings.Contains(got, "ffmpeg_stderr_tail") {
 		t.Errorf("falta la clave ffmpeg_stderr_tail en el log: %s", got)
@@ -765,20 +759,12 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 	if _, err := m.GetOrStart(ctx, "ch-codec", "http://upstream/codec"); !errors.Is(err, ErrTransmuxFailed) {
 		t.Fatalf("first attempt: expected ErrTransmuxFailed, got %v", err)
 	}
-	// Wait for processWatcher to record + promote (async after Wait).
-	// Under `-race -coverprofile` in CI the watcher goroutine can be
-	// preempted past 5s (observed: run 26152130700 failed exactly at
-	// 5.01s). The promotion is a sticky state change — once set it
-	// stays set — so polling longer costs nothing on a healthy run.
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if mode := m.pickDecodeMode("ch-codec"); mode == decodeModeReencode {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if mode := m.pickDecodeMode("ch-codec"); mode != decodeModeReencode {
-		t.Fatalf("channel not promoted to reencode after codec crash; mode=%s", mode)
+	// processWatcher promociona async tras cmd.Wait(). Bajo
+	// `-race -coverprofile` se ha observado al watcher preempted >5s
+	// (run 26152130700). 15s deja margen sin penalizar el happy path.
+	if !m.WaitForDecodeMode("ch-codec", decodeModeReencode, 15*time.Second) {
+		t.Fatalf("channel not promoted to reencode after codec crash; mode=%s",
+			m.pickDecodeMode("ch-codec"))
 	}
 
 	// Second attempt: reencode, ffmpeg shim falls through to ok path.
@@ -856,8 +842,9 @@ func TestTransmuxManager_DoesNotPromoteOnNetworkCrash(t *testing.T) {
 	defer cancel()
 
 	_, _ = m.GetOrStart(ctx, "ch-net", "http://upstream/net")
-	// Wait for processWatcher to settle.
-	time.Sleep(300 * time.Millisecond)
+	// processWatcher decide promote (o no) ANTES de evict; cuando
+	// ActiveSessions baja a 0, la decisión ya está tomada.
+	m.WaitForActiveSessions(0, 2*time.Second)
 
 	if mode := m.pickDecodeMode("ch-net"); mode != decodeModeDirect {
 		t.Errorf("network crash should not promote to reencode; got %s", mode)
@@ -1180,16 +1167,9 @@ func TestTransmuxManager_ReapsStartupZombies(t *testing.T) {
 		t.Fatalf("session should still be in map after waitReady timeout; got %d", got)
 	}
 
-	// Wait long enough for reapOnce to see (now - StartedAt) > 2*ReadyTimeout.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if m.ActiveSessions() == 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if got := m.ActiveSessions(); got != 0 {
-		t.Errorf("zombie session not reaped after startup grace; ActiveSessions=%d", got)
+	// Espera a que reapOnce vea (now - StartedAt) > 2*ReadyTimeout.
+	if !m.WaitForActiveSessions(0, 2*time.Second) {
+		t.Errorf("zombie session not reaped after startup grace; ActiveSessions=%d", m.ActiveSessions())
 	}
 }
 
@@ -1213,13 +1193,7 @@ func TestTransmuxManager_PerSpawnVersionedWorkDir(t *testing.T) {
 
 	// Force the first session to evict.
 	m.Stop("ch-versioned")
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if m.ActiveSessions() == 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	m.WaitForActiveSessions(0, 2*time.Second)
 
 	second, err := m.GetOrStart(ctx, "ch-versioned", "http://upstream/v2")
 	if err != nil {
