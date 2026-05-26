@@ -8,12 +8,14 @@ import (
 )
 
 func TestParseCapabilitiesHeader_Empty(t *testing.T) {
+	t.Parallel()
 	if got := ParseCapabilitiesHeader(""); got != nil {
 		t.Errorf("empty header should return nil, got %+v", got)
 	}
 }
 
 func TestParseCapabilitiesHeader_NoRecognisedKeys(t *testing.T) {
+	t.Parallel()
 	// A client that sends only forward-compat keys (e.g. an unknown
 	// "subtitle=srt" we haven't shipped support for yet) should be
 	// treated the same as if it sent nothing — the decision falls back
@@ -24,6 +26,7 @@ func TestParseCapabilitiesHeader_NoRecognisedKeys(t *testing.T) {
 }
 
 func TestParseCapabilitiesHeader_HappyPath(t *testing.T) {
+	t.Parallel()
 	got := ParseCapabilitiesHeader("video=h264,h265,av1; audio=aac,eac3; container=mp4,mkv")
 	if got == nil {
 		t.Fatal("expected non-nil capabilities")
@@ -43,6 +46,7 @@ func TestParseCapabilitiesHeader_HappyPath(t *testing.T) {
 }
 
 func TestParseCapabilitiesHeader_ToleratesWhitespaceAndCase(t *testing.T) {
+	t.Parallel()
 	// Real clients format the header in different ways; the parser
 	// shouldn't be picky about case or whitespace around tokens. The
 	// decision side reads codecs lowercased.
@@ -62,6 +66,7 @@ func TestParseCapabilitiesHeader_ToleratesWhitespaceAndCase(t *testing.T) {
 }
 
 func TestParseCapabilitiesHeader_DropsMalformedSegments(t *testing.T) {
+	t.Parallel()
 	// A typo or spurious token in the middle of an otherwise-valid
 	// header should not poison the rest of the parse — the malformed
 	// segment is silently dropped and the rest still resolves.
@@ -75,6 +80,7 @@ func TestParseCapabilitiesHeader_DropsMalformedSegments(t *testing.T) {
 }
 
 func TestCapabilitiesFromRequest(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set(HeaderCapabilities, "video=hevc; audio=truehd; container=mkv")
 	caps := CapabilitiesFromRequest(req)
@@ -90,6 +96,7 @@ func TestCapabilitiesFromRequest(t *testing.T) {
 // so a partial declaration ("video only") still gets sane audio +
 // container checks instead of failing every comparison.
 func TestEffectiveCapabilities_BackfillsMissingBuckets(t *testing.T) {
+	t.Parallel()
 	partial := &Capabilities{
 		VideoCodecs: map[string]bool{"hevc": true},
 		// AudioCodecs and Containers left nil
@@ -110,6 +117,7 @@ func TestEffectiveCapabilities_BackfillsMissingBuckets(t *testing.T) {
 // This is the regression test for "current web client must keep working
 // when it doesn't send the header yet".
 func TestDecide_NilCaps_LegacyWebDefaults(t *testing.T) {
+	t.Parallel()
 	item := &librarymodel.Item{Container: "mp4"}
 	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -136,6 +144,7 @@ func TestDecide_NilCaps_LegacyWebDefaults(t *testing.T) {
 // The capability win: a client declaring HEVC + EAC3 + MKV gets
 // DirectPlay on a file the web defaults forced to Transcode.
 func TestDecide_DeclaredCaps_UnlockDirectPlay(t *testing.T) {
+	t.Parallel()
 	caps := &Capabilities{
 		VideoCodecs: map[string]bool{"hevc": true, "h264": true},
 		AudioCodecs: map[string]bool{"eac3": true, "aac": true},
@@ -159,6 +168,7 @@ func TestDecide_DeclaredCaps_UnlockDirectPlay(t *testing.T) {
 // play, we still DirectStream (remux) — same as the old behaviour for
 // MKV → MP4 over the web client.
 func TestDecide_DeclaredCaps_RemuxToCompatibleContainer(t *testing.T) {
+	t.Parallel()
 	caps := &Capabilities{
 		VideoCodecs: map[string]bool{"h264": true},
 		AudioCodecs: map[string]bool{"aac": true},
@@ -189,6 +199,7 @@ func TestDecide_DeclaredCaps_RemuxToCompatibleContainer(t *testing.T) {
 // documented in the header doc-comment stays the actually-parsed
 // shape — the next person extending capabilities will copy this row.
 func TestParseCapabilitiesHeader_HDRFormats(t *testing.T) {
+	t.Parallel()
 	got := ParseCapabilitiesHeader("video=hevc; hdr=HDR10,HLG,DoVi")
 	if got == nil {
 		t.Fatal("expected non-nil")
@@ -206,6 +217,7 @@ func TestParseCapabilitiesHeader_HDRFormats(t *testing.T) {
 // browser. A regression that adds "hdr10" here would silently re-
 // introduce the washed-out grey playback this work fixes.
 func TestDefaultWebCapabilities_NoHDR(t *testing.T) {
+	t.Parallel()
 	def := DefaultWebCapabilities()
 	if len(def.HDRFormats) != 0 {
 		t.Errorf("DefaultWebCapabilities.HDRFormats must be empty, got %+v", def.HDRFormats)
@@ -216,6 +228,7 @@ func TestDefaultWebCapabilities_NoHDR(t *testing.T) {
 // default — which keeps the field non-nil so downstream callers
 // don't need a nil guard. The map stays empty either way.
 func TestEffectiveCapabilities_HDRBackfill(t *testing.T) {
+	t.Parallel()
 	c := &Capabilities{
 		VideoCodecs: map[string]bool{"h264": true},
 		// HDRFormats nil
@@ -232,6 +245,7 @@ func TestEffectiveCapabilities_HDRBackfill(t *testing.T) {
 // Codec the client doesn't declare → Transcode, regardless of how many
 // other capabilities it sends. The waterfall stops short.
 func TestDecide_DeclaredCaps_TranscodeOnUnsupportedCodec(t *testing.T) {
+	t.Parallel()
 	// Client says "I do hevc" but the file is av1; client doesn't
 	// declare av1 so we fall through to transcode.
 	caps := &Capabilities{

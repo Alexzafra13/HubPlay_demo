@@ -7,6 +7,7 @@ import (
 // Empty allowlist must short-circuit to keep-everything (the no-
 // filter contract that legacy libraries rely on).
 func TestMatchesLanguageFilter_NoFilterKeepsAll(t *testing.T) {
+	t.Parallel()
 	cases := []M3UChannel{
 		{Name: "TVE 1", Language: "es"},
 		{Name: "Random", GroupName: "Random Group"},
@@ -28,6 +29,7 @@ func TestMatchesLanguageFilter_NoFilterKeepsAll(t *testing.T) {
 
 // Heuristic 1: tvg-language with the ISO code wins immediately.
 func TestMatchesLanguageFilter_TVGLanguageISOCode(t *testing.T) {
+	t.Parallel()
 	ch := M3UChannel{Name: "TVE 1", Language: "es"}
 	if !MatchesLanguageFilter(ch, []string{"es"}) {
 		t.Error("tvg-language=es with allow=[es] should match")
@@ -40,6 +42,7 @@ func TestMatchesLanguageFilter_TVGLanguageISOCode(t *testing.T) {
 // Heuristic 1 also accepts the English name ("Spanish") because
 // some feeds tag languages in human form.
 func TestMatchesLanguageFilter_TVGLanguageHumanName(t *testing.T) {
+	t.Parallel()
 	ch := M3UChannel{Name: "Telecinco", Language: "Spanish"}
 	if !MatchesLanguageFilter(ch, []string{"es"}) {
 		t.Error("tvg-language=Spanish should map to es")
@@ -48,6 +51,7 @@ func TestMatchesLanguageFilter_TVGLanguageHumanName(t *testing.T) {
 
 // Heuristic 1 splits multi-language tokens.
 func TestMatchesLanguageFilter_MultiLanguageTokenAnyMatches(t *testing.T) {
+	t.Parallel()
 	ch := M3UChannel{Name: "Multilingual", Language: "Spanish, English"}
 	if !MatchesLanguageFilter(ch, []string{"en"}) {
 		t.Error("any token in tvg-language should be enough")
@@ -57,6 +61,7 @@ func TestMatchesLanguageFilter_MultiLanguageTokenAnyMatches(t *testing.T) {
 // Heuristic 2: tvg-country resolves to the dominant language for
 // unambiguous countries.
 func TestMatchesLanguageFilter_CountryMappedToLanguage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		country string
 		allow   string
@@ -85,6 +90,7 @@ func TestMatchesLanguageFilter_CountryMappedToLanguage(t *testing.T) {
 // most common pattern in real-world Xtream feeds where neither
 // tvg-language nor tvg-country is set.
 func TestMatchesLanguageFilter_GroupTitleKeyword(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		group string
 		allow string
@@ -119,6 +125,7 @@ func TestMatchesLanguageFilter_GroupTitleKeyword(t *testing.T) {
 // Heuristic 4: name prefix. Drives results when the only signal is
 // in the visible channel name (very common in dirty feeds).
 func TestMatchesLanguageFilter_NamePrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		allow string
@@ -152,6 +159,7 @@ func TestMatchesLanguageFilter_NamePrefix(t *testing.T) {
 // sure rule). Dropping every untagged channel would be too
 // aggressive on feeds with no metadata.
 func TestMatchesLanguageFilter_NoSignalAllowsThrough(t *testing.T) {
+	t.Parallel()
 	ch := M3UChannel{Name: "MysteryChannel"}
 	if !MatchesLanguageFilter(ch, []string{"es"}) {
 		t.Error("channel with zero language signal should be allowed")
@@ -161,6 +169,7 @@ func TestMatchesLanguageFilter_NoSignalAllowsThrough(t *testing.T) {
 // Channels WITH a signal that doesn't match are dropped. This is
 // the contract that gives the filter its value.
 func TestMatchesLanguageFilter_WrongLanguageWithSignalIsDropped(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		ch   M3UChannel
@@ -181,6 +190,7 @@ func TestMatchesLanguageFilter_WrongLanguageWithSignalIsDropped(t *testing.T) {
 
 // Multi-language allowlist: any of the allowed codes is enough.
 func TestMatchesLanguageFilter_MultiAllowAnyMatches(t *testing.T) {
+	t.Parallel()
 	ch := M3UChannel{Name: "TVE 1", Language: "es"}
 	if !MatchesLanguageFilter(ch, []string{"en", "es", "fr"}) {
 		t.Error("any allowed code should be enough")
@@ -191,6 +201,7 @@ func TestMatchesLanguageFilter_MultiAllowAnyMatches(t *testing.T) {
 // boundary because the regex has historically been the most
 // accident-prone part of language heuristics.
 func TestExtractNamePrefixCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in        string
 		want      bool

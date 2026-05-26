@@ -9,6 +9,7 @@ import (
 )
 
 func TestValidationError_Unwrap(t *testing.T) {
+	t.Parallel()
 	err := NewValidationError(map[string]string{
 		"username": "too short",
 		"password": "required",
@@ -32,6 +33,7 @@ func TestValidationError_Unwrap(t *testing.T) {
 }
 
 func TestValidationError_ErrorMessage(t *testing.T) {
+	t.Parallel()
 	err := NewValidationError(map[string]string{"field": "invalid"})
 	msg := err.Error()
 	if msg == "" {
@@ -40,6 +42,7 @@ func TestValidationError_ErrorMessage(t *testing.T) {
 }
 
 func TestSentinelErrors_AreDistinct(t *testing.T) {
+	t.Parallel()
 	errs := []error{
 		ErrNotFound, ErrAlreadyExists, ErrConflict,
 		ErrUnauthorized, ErrForbidden, ErrInvalidToken,
@@ -57,6 +60,7 @@ func TestSentinelErrors_AreDistinct(t *testing.T) {
 }
 
 func TestWrappedError_PreservesSentinel(t *testing.T) {
+	t.Parallel()
 	wrapped := fmt.Errorf("item 123: %w", ErrNotFound)
 	if !errors.Is(wrapped, ErrNotFound) {
 		t.Error("wrapped error should still match ErrNotFound")
@@ -71,6 +75,7 @@ func TestWrappedError_PreservesSentinel(t *testing.T) {
 // ----------------------- AppError tests -----------------------
 
 func TestAppError_MatchesSentinelViaIs(t *testing.T) {
+	t.Parallel()
 	// Each constructor is bound to a sentinel so legacy errors.Is checks
 	// keep working. This guards the behavioural contract (a single broken
 	// kind mapping would ripple through every handler).
@@ -102,6 +107,7 @@ func TestAppError_MatchesSentinelViaIs(t *testing.T) {
 }
 
 func TestAppError_HTTPStatusAndCode(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  *AppError
@@ -137,6 +143,7 @@ func TestAppError_HTTPStatusAndCode(t *testing.T) {
 }
 
 func TestAppError_WithCause_UnwrapsToCause(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("upstream boom")
 	appErr := NewInternal(cause)
 
@@ -149,6 +156,7 @@ func TestAppError_WithCause_UnwrapsToCause(t *testing.T) {
 }
 
 func TestAppError_WithCause_DoesNotLeakInMessage(t *testing.T) {
+	t.Parallel()
 	// The user-facing Message must not include the cause (that's logs-only).
 	// Error() may append the cause for operators; Message must stay clean.
 	cause := errors.New("SECRET_DB_DSN=foo")
@@ -160,6 +168,7 @@ func TestAppError_WithCause_DoesNotLeakInMessage(t *testing.T) {
 }
 
 func TestAppError_TranscodeBusy_CarriesRetryAfterAndDetails(t *testing.T) {
+	t.Parallel()
 	appErr := NewTranscodeBusy(3, 4)
 
 	if appErr.RetryAfter <= 0 {
@@ -177,6 +186,7 @@ func TestAppError_TranscodeBusy_CarriesRetryAfterAndDetails(t *testing.T) {
 }
 
 func TestAppError_Validation_CarriesFields(t *testing.T) {
+	t.Parallel()
 	appErr := NewValidation(map[string]string{"name": "required"})
 	details, ok := appErr.Details["fields"].(map[string]string)
 	if !ok {
@@ -188,6 +198,7 @@ func TestAppError_Validation_CarriesFields(t *testing.T) {
 }
 
 func TestAppError_Builders(t *testing.T) {
+	t.Parallel()
 	appErr := NewNotFound("movie").
 		WithCause(errors.New("db closed")).
 		WithHint("refresh cache").
