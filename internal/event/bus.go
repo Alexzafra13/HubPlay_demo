@@ -113,12 +113,19 @@ type Bus struct {
 	handlers map[Type][]subscription
 	nextID   uint64
 	logger   *slog.Logger
+
+	// changes señaliza cada Subscribe / unsubscribe para que los tests
+	// puedan esperar transiciones sin polling con time.Sleep. Buffer 32
+	// + envío non-blocking: producción nunca lee, así que un test parado
+	// no afecta al hot path.
+	changes chan struct{}
 }
 
 func NewBus(logger *slog.Logger) *Bus {
 	return &Bus{
 		handlers: make(map[Type][]subscription),
 		logger:   logger.With("module", "eventbus"),
+		changes:  make(chan struct{}, 32),
 	}
 }
 
@@ -131,17 +138,29 @@ func (b *Bus) Subscribe(eventType Type, handler Handler) func() {
 	id := b.nextID
 	b.handlers[eventType] = append(b.handlers[eventType], subscription{id: id, fn: handler})
 	b.mu.Unlock()
+	b.notifyChange()
 
 	return func() {
 		b.mu.Lock()
-		defer b.mu.Unlock()
 		subs := b.handlers[eventType]
 		for i, s := range subs {
 			if s.id == id {
 				b.handlers[eventType] = append(subs[:i], subs[i+1:]...)
+				b.mu.Unlock()
+				b.notifyChange()
 				return
 			}
 		}
+		b.mu.Unlock()
+	}
+}
+
+// notifyChange envía un token al canal de cambios; non-blocking, los
+// tokens se solapan si nadie está leyendo.
+func (b *Bus) notifyChange() {
+	select {
+	case b.changes <- struct{}{}:
+	default:
 	}
 }
 
@@ -190,4 +209,20 @@ func (b *Bus) HandlerCount(eventType Type) int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return len(b.handlers[eventType])
+}
+
+// WaitForHandlerCount bloquea hasta que HandlerCount(eventType) == want
+// o el timeout vence. Devuelve true si la condición se cumplió. Test-only.
+func (b *Bus) WaitForHandlerCount(eventType Type, want int, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		if b.HandlerCount(eventType) == want {
+			return true
+		}
+		select {
+		case <-b.changes:
+		case <-deadline:
+			return b.HandlerCount(eventType) == want
+		}
+	}
 }

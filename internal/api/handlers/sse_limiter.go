@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 // Defaults sized for a self-hosted server: a household of ~10 users
@@ -39,6 +40,11 @@ type SSELimiter struct {
 	mu      sync.Mutex
 	global  int
 	perUser map[string]int
+
+	// changes señaliza cada Acquire/release para que los tests puedan
+	// esperar transiciones sin polling con time.Sleep. Buffer 32 +
+	// envío non-blocking: producción nunca lee.
+	changes chan struct{}
 }
 
 func NewSSELimiter(globalMax, perUserMax int) *SSELimiter {
@@ -52,6 +58,7 @@ func NewSSELimiter(globalMax, perUserMax int) *SSELimiter {
 		globalMax:  globalMax,
 		perUserMax: perUserMax,
 		perUser:    make(map[string]int),
+		changes:    make(chan struct{}, 32),
 	}
 }
 
@@ -63,22 +70,24 @@ func NewSSELimiter(globalMax, perUserMax int) *SSELimiter {
 // future unauthenticated SSE surface.
 func (l *SSELimiter) Acquire(userID string) (release func(), err error) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.global >= l.globalMax {
+		l.mu.Unlock()
 		return nil, ErrSSEGlobalCap
 	}
 	if userID != "" && l.perUser[userID] >= l.perUserMax {
+		l.mu.Unlock()
 		return nil, ErrSSEPerUserCap
 	}
 	l.global++
 	if userID != "" {
 		l.perUser[userID]++
 	}
+	l.mu.Unlock()
+	l.notifyChange()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			l.mu.Lock()
-			defer l.mu.Unlock()
 			l.global--
 			if userID != "" {
 				l.perUser[userID]--
@@ -86,8 +95,17 @@ func (l *SSELimiter) Acquire(userID string) (release func(), err error) {
 					delete(l.perUser, userID)
 				}
 			}
+			l.mu.Unlock()
+			l.notifyChange()
 		})
 	}, nil
+}
+
+func (l *SSELimiter) notifyChange() {
+	select {
+	case l.changes <- struct{}{}:
+	default:
+	}
 }
 
 // Snapshot returns the current global count and a copy of the
@@ -101,4 +119,26 @@ func (l *SSELimiter) Snapshot() (global int, perUser map[string]int) {
 		out[k] = v
 	}
 	return l.global, out
+}
+
+// WaitForGlobal bloquea hasta que el contador global == want o el
+// timeout vence. Devuelve true si la condición se cumplió. Test-only.
+func (l *SSELimiter) WaitForGlobal(want int, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		l.mu.Lock()
+		got := l.global
+		l.mu.Unlock()
+		if got == want {
+			return true
+		}
+		select {
+		case <-l.changes:
+		case <-deadline:
+			l.mu.Lock()
+			got := l.global
+			l.mu.Unlock()
+			return got == want
+		}
+	}
 }

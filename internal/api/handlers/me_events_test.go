@@ -61,18 +61,15 @@ func TestMeEvents_DeliversOwnEvents(t *testing.T) {
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	// Wait for the handler to register all 3 user-scoped subscriptions.
+	// Espera a que el handler registre las 3 suscripciones user-scoped antes de publicar.
 	waitForHandlerCount(t, bus, event.ProgressUpdated, 1)
 	waitForHandlerCount(t, bus, event.PlayedToggled, 1)
 	waitForHandlerCount(t, bus, event.FavoriteToggled, 1)
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		bus.Publish(event.Event{
-			Type: event.ProgressUpdated,
-			Data: map[string]any{"user_id": "u-1", "item_id": "it-7", "position_ticks": int64(123)},
-		})
-	}()
+	bus.Publish(event.Event{
+		Type: event.ProgressUpdated,
+		Data: map[string]any{"user_id": "u-1", "item_id": "it-7", "position_ticks": int64(123)},
+	})
 
 	reader := bufio.NewReader(resp.Body)
 	deadline := time.Now().Add(2 * time.Second)
@@ -108,19 +105,16 @@ func TestMeEvents_DropsEventsForOtherUsers(t *testing.T) {
 
 	waitForHandlerCount(t, bus, event.FavoriteToggled, 1)
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		// Other user — must be dropped.
-		bus.Publish(event.Event{
-			Type: event.FavoriteToggled,
-			Data: map[string]any{"user_id": "u-2", "item_id": "leak-attempt", "is_favorite": true},
-		})
-		// Same user — must arrive.
-		bus.Publish(event.Event{
-			Type: event.FavoriteToggled,
-			Data: map[string]any{"user_id": "u-1", "item_id": "ok-event", "is_favorite": true},
-		})
-	}()
+	// Otro usuario — debe descartarse.
+	bus.Publish(event.Event{
+		Type: event.FavoriteToggled,
+		Data: map[string]any{"user_id": "u-2", "item_id": "leak-attempt", "is_favorite": true},
+	})
+	// Mismo usuario — debe llegar.
+	bus.Publish(event.Event{
+		Type: event.FavoriteToggled,
+		Data: map[string]any{"user_id": "u-1", "item_id": "ok-event", "is_favorite": true},
+	})
 
 	reader := bufio.NewReader(resp.Body)
 	deadline := time.Now().Add(2 * time.Second)
@@ -160,19 +154,15 @@ func TestMeEvents_DropsEventsWithoutUserID(t *testing.T) {
 
 	waitForHandlerCount(t, bus, event.PlayedToggled, 1)
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		// nil Data, missing user_id, wrong type — all three must drop.
-		bus.Publish(event.Event{Type: event.PlayedToggled, Data: nil})
-		bus.Publish(event.Event{Type: event.PlayedToggled, Data: map[string]any{"item_id": "no-uid"}})
-		bus.Publish(event.Event{Type: event.PlayedToggled, Data: map[string]any{"user_id": 42, "item_id": "wrong-type"}})
-		// Then a real one we DO expect to see, so the test has a
-		// positive signal to wait for.
-		bus.Publish(event.Event{
-			Type: event.PlayedToggled,
-			Data: map[string]any{"user_id": "u-1", "item_id": "real-event", "played": true},
-		})
-	}()
+	// nil Data, sin user_id, tipo erróneo — los tres deben descartarse.
+	bus.Publish(event.Event{Type: event.PlayedToggled, Data: nil})
+	bus.Publish(event.Event{Type: event.PlayedToggled, Data: map[string]any{"item_id": "no-uid"}})
+	bus.Publish(event.Event{Type: event.PlayedToggled, Data: map[string]any{"user_id": 42, "item_id": "wrong-type"}})
+	// Y uno real para tener señal positiva que esperar.
+	bus.Publish(event.Event{
+		Type: event.PlayedToggled,
+		Data: map[string]any{"user_id": "u-1", "item_id": "real-event", "played": true},
+	})
 
 	reader := bufio.NewReader(resp.Body)
 	deadline := time.Now().Add(2 * time.Second)
@@ -236,18 +226,11 @@ func TestMeEvents_RejectsWhenPerUserCapReached(t *testing.T) {
 		t.Errorf("Retry-After header missing on 503")
 	}
 
-	// Releasing the first slot must let a fresh connection through.
+	// Liberar el primer slot debe permitir entrar a una nueva conexión.
 	cancel1()
 	_ = resp1.Body.Close()
-	// Wait for the unsubscribe + release to land.
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		if global, _ := limiter.Snapshot(); global == 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if global, _ := limiter.Snapshot(); global != 0 {
+	if !limiter.WaitForGlobal(0, time.Second) {
+		global, _ := limiter.Snapshot()
 		t.Fatalf("limiter did not release after disconnect: global=%d", global)
 	}
 }
@@ -274,17 +257,12 @@ func TestMeEvents_UnsubscribesOnDisconnect(t *testing.T) {
 	cancel()
 	resp.Body.Close() //nolint:errcheck
 
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		if bus.HandlerCount(event.ProgressUpdated) == 0 &&
-			bus.HandlerCount(event.PlayedToggled) == 0 &&
-			bus.HandlerCount(event.FavoriteToggled) == 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !bus.WaitForHandlerCount(event.ProgressUpdated, 0, time.Second) ||
+		!bus.WaitForHandlerCount(event.PlayedToggled, 0, time.Second) ||
+		!bus.WaitForHandlerCount(event.FavoriteToggled, 0, time.Second) {
+		t.Fatalf("handlers still registered after disconnect: progress=%d played=%d favourite=%d",
+			bus.HandlerCount(event.ProgressUpdated),
+			bus.HandlerCount(event.PlayedToggled),
+			bus.HandlerCount(event.FavoriteToggled))
 	}
-	t.Fatalf("handlers still registered after disconnect: progress=%d played=%d favourite=%d",
-		bus.HandlerCount(event.ProgressUpdated),
-		bus.HandlerCount(event.PlayedToggled),
-		bus.HandlerCount(event.FavoriteToggled))
 }
