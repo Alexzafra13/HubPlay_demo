@@ -69,6 +69,10 @@ func TestChannelWatchHistory_RecordUpsertsRow(t *testing.T) {
 
 	// Second record on the same pair must update the timestamp, not
 	// create a duplicate row.
+	// Sleep LEGÍTIMO (F15-1 batch 4): la BD usa CURRENT_TIMESTAMP a
+	// resolución de milisegundo (SQLite + Postgres); 2 records back-to-back
+	// en <1ms colisionan en el mismo instante y la aserción "second.After(first)"
+	// falla. No es polling — es una separación deliberada de timestamps.
 	time.Sleep(2 * time.Millisecond)
 	second, err := repos.ChannelWatchHistory.RecordByStreamURL(ctx, "u-alice", streamURLFor(ids[0]))
 	if err != nil {
@@ -97,6 +101,8 @@ func TestChannelWatchHistory_ListOrderedByRecency(t *testing.T) {
 		if _, err := repos.ChannelWatchHistory.RecordByStreamURL(ctx, "u-alice", streamURLFor(id)); err != nil {
 			t.Fatal(err)
 		}
+		// Sleep LEGÍTIMO (F15-1 batch 4): separación de timestamps
+		// CURRENT_TIMESTAMP — ver TestChannelWatchHistory_RecordIsIdempotent.
 		time.Sleep(2 * time.Millisecond)
 	}
 	channels, _, err := repos.ChannelWatchHistory.ListChannelsByUser(ctx, "u-alice", 10)
@@ -120,6 +126,8 @@ func TestChannelWatchHistory_ListRespectsLimit(t *testing.T) {
 	ctx := context.Background()
 	for _, id := range ids {
 		_, _ = repos.ChannelWatchHistory.RecordByStreamURL(ctx, "u-alice", streamURLFor(id))
+		// Sleep LEGÍTIMO (F15-1 batch 4): separación de timestamps
+		// CURRENT_TIMESTAMP — ver TestChannelWatchHistory_RecordIsIdempotent.
 		time.Sleep(2 * time.Millisecond)
 	}
 	channels, _, err := repos.ChannelWatchHistory.ListChannelsByUser(ctx, "u-alice", 3)

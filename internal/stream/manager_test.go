@@ -783,10 +783,12 @@ func TestManager_StartGroup_CollapsesConcurrent(t *testing.T) {
 	defer m.Shutdown()
 
 	var counter int32
-	// Sleep long enough that all N goroutines are guaranteed to be
-	// blocked inside Do() by the time the leader's fn returns. With
-	// N=5 spawned in a tight loop, 50 ms is comfortably more than
-	// the goroutine-startup window.
+	// Sleep LEGÍTIMO (F15-1 batch 4): el leader del singleflight retiene
+	// la slot el tiempo suficiente para que las N goroutines acumulen en
+	// Do() antes del return. Sin retención, las llamadas se serializan y
+	// el test de "colapsa N concurrent → 1 fn execution" pierde sentido.
+	// No hay seam externo en singleflight para "espera a que N callers
+	// estén bloqueados".
 	fn := func() (any, error) {
 		atomic.AddInt32(&counter, 1)
 		time.Sleep(50 * time.Millisecond)

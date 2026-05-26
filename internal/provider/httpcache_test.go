@@ -232,7 +232,11 @@ func TestCachingTransport_SingleflightCollapsesConcurrent(t *testing.T) {
 	var hits int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt64(&hits, 1)
-		// Hold the connection a moment so the other goroutines pile up.
+		// Sleep LEGÍTIMO (F15-1 batch 4): el handler mantiene la
+		// conexión un instante para que las N goroutines concurrentes
+		// se acumulen dentro del singleflight Do(). Sin esta pausa el
+		// leader retorna antes de que los seguidores entren, y el test
+		// de "colapso de N llamadas concurrentes" deja de ser válido.
 		time.Sleep(50 * time.Millisecond)
 		_, _ = w.Write([]byte(`shared`))
 	}))
