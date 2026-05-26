@@ -84,9 +84,8 @@ func NewFederationImageHandler(
 // delegated to ImageHandler.ServeImageByID so the federation surface
 // inherits the same caching behaviour as the local one.
 func (h *FederationImageHandler) ItemPoster(w http.ResponseWriter, r *http.Request) {
-	peer := federation.PeerFromContext(r.Context())
+	peer := requirePeer(w, r)
 	if peer == nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
 		return
 	}
 	itemID := requireParam(w, r, "itemId")
