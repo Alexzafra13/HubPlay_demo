@@ -46,8 +46,9 @@ type Scheduler struct {
 	// we'd rather log an error than hang the worker.
 	runTimeout time.Duration
 
-	stopCh chan struct{}
-	doneCh chan struct{}
+	stopCh    chan struct{}
+	doneCh    chan struct{}
+	startedCh chan struct{} // cerrado cuando loop entra al select; test-only.
 
 	// rootCancel is the CancelFunc paired with the context the loop
 	// derived from Start's ctx. Stop uses it as a last-resort lever
@@ -70,6 +71,7 @@ func NewScheduler(repo *db.IPTVScheduleRepository, runner jobRunner, logger *slo
 		runTimeout:   10 * time.Minute,
 		stopCh:       make(chan struct{}),
 		doneCh:       make(chan struct{}),
+		startedCh:    make(chan struct{}),
 		now:          func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -84,6 +86,10 @@ func (s *Scheduler) Start(ctx context.Context) {
 	s.rootCancel = cancel
 	go s.loop(rootCtx)
 }
+
+// Started devuelve un canal cerrado cuando el loop ha entrado en el
+// select. Test-only: producción debe confiar en que Stop es síncrono.
+func (s *Scheduler) Started() <-chan struct{} { return s.startedCh }
 
 // Stop signals the loop to drain and waits until the current run (if
 // any) finishes. The context bounds the wait: passing a deadline
@@ -116,6 +122,8 @@ func (s *Scheduler) loop(ctx context.Context) {
 
 	ticker := time.NewTicker(s.tickInterval)
 	defer ticker.Stop()
+
+	close(s.startedCh)
 
 	for {
 		select {
