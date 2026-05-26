@@ -89,7 +89,7 @@ func newTestServiceWithRoot(t *testing.T, root string) (*library.Service, string
 	)
 	svc := library.NewService(
 		repos.Libraries, repos.Items, repos.MediaStreams, repos.Images,
-		repos.Channels, repos.ItemValues, scnr, slog.Default(),
+		repos.Channels, repos.ItemValues, scnr, nil, slog.Default(),
 	)
 	t.Cleanup(svc.Shutdown)
 

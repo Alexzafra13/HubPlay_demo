@@ -11,6 +11,7 @@ import (
 )
 
 func TestValidatePeerURL_AcceptsPublicHTTPS(t *testing.T) {
+	t.Parallel()
 	// External hostname that resolves to a public IP. Use a well-known
 	// stable host. We don't actually contact it — net.LookupIP only.
 	if err := validatePeerURL("https://example.com"); err != nil {
@@ -19,6 +20,7 @@ func TestValidatePeerURL_AcceptsPublicHTTPS(t *testing.T) {
 }
 
 func TestValidatePeerURL_AcceptsLiteralPublicIP(t *testing.T) {
+	t.Parallel()
 	// Literal public IP, no DNS roundtrip. 1.1.1.1 is a routable public
 	// address; the validator must accept it.
 	if err := validatePeerURL("https://1.1.1.1:8443"); err != nil {
@@ -27,6 +29,7 @@ func TestValidatePeerURL_AcceptsLiteralPublicIP(t *testing.T) {
 }
 
 func TestValidatePeerURL_AcceptsRFC1918(t *testing.T) {
+	t.Parallel()
 	// Homelab + docker-compose federation rely on RFC1918 working.
 	for _, addr := range []string{
 		"http://10.0.0.5:8096",
@@ -40,6 +43,7 @@ func TestValidatePeerURL_AcceptsRFC1918(t *testing.T) {
 }
 
 func TestValidatePeerURL_RejectsLoopback(t *testing.T) {
+	t.Parallel()
 	for _, addr := range []string{
 		"http://127.0.0.1:8096",
 		"http://127.0.0.5:8096",
@@ -57,6 +61,7 @@ func TestValidatePeerURL_RejectsLoopback(t *testing.T) {
 }
 
 func TestValidatePeerURL_RejectsLinkLocal(t *testing.T) {
+	t.Parallel()
 	addr := "http://169.254.0.1:8096"
 	if err := validatePeerURL(addr); !errors.Is(err, domain.ErrPeerURLUnsafe) {
 		t.Errorf("%s should be rejected (link-local), got: %v", addr, err)
@@ -64,6 +69,7 @@ func TestValidatePeerURL_RejectsLinkLocal(t *testing.T) {
 }
 
 func TestValidatePeerURL_RejectsUnspecified(t *testing.T) {
+	t.Parallel()
 	addr := "http://0.0.0.0:8096"
 	if err := validatePeerURL(addr); !errors.Is(err, domain.ErrPeerURLUnsafe) {
 		t.Errorf("%s should be rejected (unspecified), got: %v", addr, err)
@@ -71,12 +77,14 @@ func TestValidatePeerURL_RejectsUnspecified(t *testing.T) {
 }
 
 func TestValidatePeerURL_RejectsEmpty(t *testing.T) {
+	t.Parallel()
 	if err := validatePeerURL(""); !errors.Is(err, domain.ErrPeerURLUnsafe) {
 		t.Errorf("empty URL should be rejected, got: %v", err)
 	}
 }
 
 func TestValidatePeerURL_RejectsBadScheme(t *testing.T) {
+	t.Parallel()
 	for _, addr := range []string{
 		"file:///etc/passwd",
 		"ftp://example.com",
@@ -90,6 +98,7 @@ func TestValidatePeerURL_RejectsBadScheme(t *testing.T) {
 }
 
 func TestValidatePeerURL_RejectsMissingHost(t *testing.T) {
+	t.Parallel()
 	if err := validatePeerURL("http://"); !errors.Is(err, domain.ErrPeerURLUnsafe) {
 		t.Errorf("URL without host should be rejected, got: %v", err)
 	}
@@ -100,6 +109,7 @@ func TestValidatePeerURL_RejectsMissingHost(t *testing.T) {
 // var becomes a constant), the integration test rig stops being able
 // to wire httptest.Server URLs.
 func TestValidatePeerURL_TestSeamRespected(t *testing.T) {
+	t.Parallel()
 	saved := blockedPeerIP
 	blockedPeerIP = func(_ net.IP) bool { return false }
 	defer func() { blockedPeerIP = saved }()
@@ -115,6 +125,7 @@ func TestValidatePeerURL_TestSeamRespected(t *testing.T) {
 // MUST be rejected before persistence. Otherwise pairing with the
 // invite + then making us probe localhost is the SSRF.
 func TestHandleInboundHandshake_RejectsHostileLoopbackAdvertisedURL(t *testing.T) {
+	t.Parallel()
 	// Default predicate IS production; we want it active for this
 	// test. No allowLoopbackForTests call here.
 	t.Helper()

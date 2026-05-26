@@ -252,6 +252,7 @@ func defaultClaims() *auth.Claims { return &auth.Claims{UserID: "user-1", Userna
 // ─── GetProgress ────────────────────────────────────────────────────────────
 
 func TestProgressHandler_GetProgress_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/me/progress/item-1", "", nil)
 	if rr.Code != http.StatusUnauthorized {
@@ -260,6 +261,7 @@ func TestProgressHandler_GetProgress_Unauthenticated(t *testing.T) {
 }
 
 func TestProgressHandler_GetProgress_EmptyReturnsZeroPayload(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/me/progress/item-1", "", defaultClaims())
 	if rr.Code != http.StatusOK {
@@ -282,6 +284,7 @@ func TestProgressHandler_GetProgress_EmptyReturnsZeroPayload(t *testing.T) {
 }
 
 func TestProgressHandler_GetProgress_PopulatedReturnsState(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{
 		UserID: "user-1", ItemID: "item-1",
@@ -307,6 +310,7 @@ func TestProgressHandler_GetProgress_PopulatedReturnsState(t *testing.T) {
 }
 
 func TestProgressHandler_GetProgress_RepoError_500(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	env.userData.failGet = true
 	rr := env.do(http.MethodGet, "/api/v1/me/progress/item-1", "", defaultClaims())
@@ -318,6 +322,7 @@ func TestProgressHandler_GetProgress_RepoError_500(t *testing.T) {
 // ─── UpdateProgress ─────────────────────────────────────────────────────────
 
 func TestProgressHandler_UpdateProgress_WritesState(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodPut, "/api/v1/me/progress/item-1",
 		`{"position_ticks": 5000, "completed": false}`, defaultClaims())
@@ -335,6 +340,7 @@ func TestProgressHandler_UpdateProgress_WritesState(t *testing.T) {
 }
 
 func TestProgressHandler_UpdateProgress_InvalidJSON_400(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodPut, "/api/v1/me/progress/item-1",
 		`{not valid json`, defaultClaims())
@@ -344,6 +350,7 @@ func TestProgressHandler_UpdateProgress_InvalidJSON_400(t *testing.T) {
 }
 
 func TestProgressHandler_UpdateProgress_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodPut, "/api/v1/me/progress/item-1",
 		`{"position_ticks": 1}`, nil)
@@ -353,6 +360,7 @@ func TestProgressHandler_UpdateProgress_Unauthenticated(t *testing.T) {
 }
 
 func TestProgressHandler_UpdateProgress_CompletedRespected(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodPut, "/api/v1/me/progress/item-1",
 		`{"position_ticks": 100, "completed": true}`, defaultClaims())
@@ -368,6 +376,7 @@ func TestProgressHandler_UpdateProgress_CompletedRespected(t *testing.T) {
 // ─── MarkPlayed / MarkUnplayed ──────────────────────────────────────────────
 
 func TestProgressHandler_MarkPlayed_SetsCompleted(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/me/progress/item-1/played", "", defaultClaims())
 	if rr.Code != http.StatusNoContent {
@@ -380,6 +389,7 @@ func TestProgressHandler_MarkPlayed_SetsCompleted(t *testing.T) {
 }
 
 func TestProgressHandler_MarkUnplayed_DeletesRecord(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{Completed: true}
 	rr := env.do(http.MethodDelete, "/api/v1/me/progress/item-1/played", "", defaultClaims())
@@ -394,6 +404,7 @@ func TestProgressHandler_MarkUnplayed_DeletesRecord(t *testing.T) {
 // ─── RemoveFromContinueWatching ─────────────────────────────────────────────
 
 func TestProgressHandler_RemoveFromContinueWatching_ZeroesPosition(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	// Pre-seed a partly-watched, favorited record to verify we zero
 	// position WITHOUT collateral damage to play_count + is_favorite.
@@ -423,6 +434,7 @@ func TestProgressHandler_RemoveFromContinueWatching_ZeroesPosition(t *testing.T)
 }
 
 func TestProgressHandler_RemoveFromContinueWatching_Idempotent_NoRow(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	// No row exists — endpoint must still succeed (no 404 / 500).
 	rr := env.do(http.MethodDelete, "/api/v1/me/continue-watching/ghost-item", "", defaultClaims())
@@ -434,6 +446,7 @@ func TestProgressHandler_RemoveFromContinueWatching_Idempotent_NoRow(t *testing.
 // ─── ToggleFavorite ─────────────────────────────────────────────────────────
 
 func TestProgressHandler_ToggleFavorite_FirstTime_Enables(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/me/favorite/item-1", "", defaultClaims())
 	if rr.Code != http.StatusOK {
@@ -446,6 +459,7 @@ func TestProgressHandler_ToggleFavorite_FirstTime_Enables(t *testing.T) {
 }
 
 func TestProgressHandler_ToggleFavorite_Inverts(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{IsFavorite: true}
 	rr := env.do(http.MethodPost, "/api/v1/me/favorite/item-1", "", defaultClaims())
@@ -458,6 +472,7 @@ func TestProgressHandler_ToggleFavorite_Inverts(t *testing.T) {
 // ─── ContinueWatching ───────────────────────────────────────────────────────
 
 func TestProgressHandler_ContinueWatching_Empty(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/me/continue-watching", "", defaultClaims())
 	if rr.Code != http.StatusOK {
@@ -472,6 +487,7 @@ func TestProgressHandler_ContinueWatching_Empty(t *testing.T) {
 }
 
 func TestProgressHandler_ContinueWatching_ShapesEntries(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	now := time.Now()
 	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
@@ -500,6 +516,7 @@ func TestProgressHandler_ContinueWatching_ShapesEntries(t *testing.T) {
 }
 
 func TestProgressHandler_ContinueWatching_EpisodeSurfacesSeasonAndSeriesArt(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	now := time.Now()
 	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
@@ -585,6 +602,7 @@ func TestProgressHandler_ContinueWatching_EpisodeSurfacesSeasonAndSeriesArt(t *t
 }
 
 func TestProgressHandler_ContinueWatching_MovieSkipsSeasonEnrichment(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	now := time.Now()
 	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
@@ -612,6 +630,7 @@ func TestProgressHandler_ContinueWatching_MovieSkipsSeasonEnrichment(t *testing.
 }
 
 func TestProgressHandler_ContinueWatching_LimitValidated(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	var gotLimit int
 	env.userData.continueFn = func(_ context.Context, _ string, limit int) ([]*db.ContinueWatchingItem, error) {
@@ -638,6 +657,7 @@ func TestProgressHandler_ContinueWatching_LimitValidated(t *testing.T) {
 // ─── Favorites ──────────────────────────────────────────────────────────────
 
 func TestProgressHandler_Favorites_RespectsPagination(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	var gotLimit, gotOffset int
 	env.userData.favsFn = func(_ context.Context, _ string, limit, offset int) ([]*db.FavoriteItem, error) {
@@ -654,6 +674,7 @@ func TestProgressHandler_Favorites_RespectsPagination(t *testing.T) {
 }
 
 func TestProgressHandler_Favorites_RejectsNegativeOffset(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	var gotOffset int
 	env.userData.favsFn = func(_ context.Context, _ string, _, offset int) ([]*db.FavoriteItem, error) {
@@ -669,6 +690,7 @@ func TestProgressHandler_Favorites_RejectsNegativeOffset(t *testing.T) {
 // ─── NextUp ─────────────────────────────────────────────────────────────────
 
 func TestProgressHandler_NextUp_ShapesEpisodes(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	s2, e3 := 2, 3
 	env.userData.nextUpFn = func(_ context.Context, _ string, _ int) ([]*db.NextUpItem, error) {
@@ -697,6 +719,7 @@ func TestProgressHandler_NextUp_ShapesEpisodes(t *testing.T) {
 }
 
 func TestProgressHandler_NextUp_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/me/next-up", "", nil)
 	if rr.Code != http.StatusUnauthorized {
@@ -741,6 +764,7 @@ func newProgressTestEnvWithBus(t *testing.T) (*progressTestEnv, *recordingBus) {
 }
 
 func TestProgressHandler_UpdateProgress_PublishesEvent(t *testing.T) {
+	t.Parallel()
 	env, bus := newProgressTestEnvWithBus(t)
 	rr := env.do(http.MethodPut, "/api/v1/me/progress/it-1",
 		`{"position_ticks": 12345}`, defaultClaims())
@@ -763,6 +787,7 @@ func TestProgressHandler_UpdateProgress_PublishesEvent(t *testing.T) {
 }
 
 func TestProgressHandler_MarkPlayed_PublishesEvent(t *testing.T) {
+	t.Parallel()
 	env, bus := newProgressTestEnvWithBus(t)
 	rr := env.do(http.MethodPost, "/api/v1/me/progress/it-2/played", "", defaultClaims())
 	if rr.Code != http.StatusNoContent {
@@ -781,6 +806,7 @@ func TestProgressHandler_MarkPlayed_PublishesEvent(t *testing.T) {
 }
 
 func TestProgressHandler_MarkUnplayed_PublishesPlayedFalse(t *testing.T) {
+	t.Parallel()
 	env, bus := newProgressTestEnvWithBus(t)
 	rr := env.do(http.MethodDelete, "/api/v1/me/progress/it-3/played", "", defaultClaims())
 	if rr.Code != http.StatusNoContent {
@@ -795,6 +821,7 @@ func TestProgressHandler_MarkUnplayed_PublishesPlayedFalse(t *testing.T) {
 }
 
 func TestProgressHandler_ToggleFavorite_PublishesEvent(t *testing.T) {
+	t.Parallel()
 	env, bus := newProgressTestEnvWithBus(t)
 	rr := env.do(http.MethodPost, "/api/v1/me/favorite/it-4", "", defaultClaims())
 	if rr.Code != http.StatusOK {
@@ -815,6 +842,7 @@ func TestProgressHandler_ToggleFavorite_PublishesEvent(t *testing.T) {
 // nil bus must not panic. Test rigs that don't care about publication
 // pass nil; the publish() helper short-circuits.
 func TestProgressHandler_NilBus_NoOpPublish(t *testing.T) {
+	t.Parallel()
 	env := newProgressTestEnv(t) // nil bus
 	rr := env.do(http.MethodPut, "/api/v1/me/progress/it-x",
 		`{"position_ticks": 1}`, defaultClaims())

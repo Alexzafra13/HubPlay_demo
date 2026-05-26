@@ -193,6 +193,7 @@ func testAuthCfg() config.AuthConfig {
 }
 
 func TestAuthHandler_Login_Success(t *testing.T) {
+	t.Parallel()
 	token := &auth.AuthToken{
 		AccessToken:  "access-123",
 		RefreshToken: "refresh-456",
@@ -274,6 +275,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 }
 
 func TestAuthHandler_Login_InvalidCredentials(t *testing.T) {
+	t.Parallel()
 	authSvc := &mockAuthService{
 		loginFn: func(_ context.Context, _, _, _, _, _ string) (*auth.AuthToken, error) {
 			return nil, domain.ErrUnauthorized
@@ -296,6 +298,7 @@ func TestAuthHandler_Login_InvalidCredentials(t *testing.T) {
 }
 
 func TestAuthHandler_Login_InvalidBody(t *testing.T) {
+	t.Parallel()
 	handler := NewAuthHandler(&mockAuthService{}, &mockUserService{}, nil, testAuthCfg(), nil, testLogger())
 
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader("not json"))
@@ -314,6 +317,7 @@ func TestAuthHandler_Login_InvalidBody(t *testing.T) {
 // caller can create the first admin. This is the legitimate "first run"
 // path that the React wizard hits.
 func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
+	t.Parallel()
 	created := &authmodel.User{
 		ID:          "u1",
 		Username:    "admin",
@@ -372,6 +376,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 // adelante — el usuario ya tiene cuenta y debe poder loguear. El bug
 // del owner es recuperable manualmente; perder el auto-login no.
 func TestAuthHandler_Setup_SurvivesEnsureOwnerFailure(t *testing.T) {
+	t.Parallel()
 	created := &authmodel.User{
 		ID: "u1", Username: "admin", DisplayName: "Admin",
 		Role: "admin", IsActive: true,
@@ -415,6 +420,7 @@ func TestAuthHandler_Setup_SurvivesEnsureOwnerFailure(t *testing.T) {
 // the wizard logic — would silently break authentication. This test
 // pins the contract so that cannot regress.
 func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
+	t.Parallel()
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called when users already exist")
@@ -454,6 +460,7 @@ func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
 // TestAuthHandler_Setup_BlockedWhenManyUsersExist guards against the
 // "off-by-one" refactor mistake (changing `> 0` to `> 1`, etc.).
 func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
+	t.Parallel()
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called")
@@ -478,6 +485,7 @@ func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
 }
 
 func TestUserHandler_Me(t *testing.T) {
+	t.Parallel()
 	user := &authmodel.User{
 		ID:          "u1",
 		Username:    "admin",
@@ -521,6 +529,7 @@ func TestUserHandler_Me(t *testing.T) {
 }
 
 func TestUserHandler_Me_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	handler := NewUserHandler(&mockUserService{}, nil, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
@@ -533,6 +542,7 @@ func TestUserHandler_Me_Unauthenticated(t *testing.T) {
 }
 
 func TestUserHandler_Me_NotFound(t *testing.T) {
+	t.Parallel()
 	userSvc := &mockUserService{
 		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
 			return nil, domain.ErrNotFound
@@ -562,6 +572,7 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 // Sólo el owner. Sin este check, un admin comprometido escala
 // privilegios creando admins paralelos a placer.
 func TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin(t *testing.T) {
+	t.Parallel()
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called when non-owner asks for an admin")
@@ -592,6 +603,7 @@ func TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin(t *testing.T) {
 }
 
 func TestAuthHandler_Register_OwnerCanCreateAdmin(t *testing.T) {
+	t.Parallel()
 	created := &authmodel.User{ID: "new-admin", Username: "bob", DisplayName: "Bob", Role: "admin"}
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, req auth.RegisterRequest) (*authmodel.User, error) {
@@ -626,6 +638,7 @@ func TestAuthHandler_Register_OwnerCanCreateAdmin(t *testing.T) {
 // cara: can_manage_users sigue siendo suficiente para crear usuarios
 // normales — sólo crear admins requiere ser owner.
 func TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers(t *testing.T) {
+	t.Parallel()
 	created := &authmodel.User{ID: "u-regular", Username: "alice", DisplayName: "Alice", Role: "user"}
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
@@ -663,6 +676,7 @@ func TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers(t *testing.T) {
 // library service must be probed for existence before user creation so
 // a typo doesn't strand a half-created account.
 func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
+	t.Parallel()
 	createdUser := &authmodel.User{ID: "new-u", Username: "alice", DisplayName: "Alice", Role: "user"}
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
@@ -701,6 +715,7 @@ func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
 // the parent (ADR-014). Anything else would create orphan rows the
 // predicate never consults.
 func TestAuthHandler_Register_GrantsOnProfile_400(t *testing.T) {
+	t.Parallel()
 	libSvc := &libFakeService{}
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
@@ -732,6 +747,7 @@ func TestAuthHandler_Register_GrantsOnProfile_400(t *testing.T) {
 // Unknown library_id during validation MUST short-circuit before the
 // user row is created. The mock Register fatals if invoked.
 func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
+	t.Parallel()
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called when library validation fails")
@@ -766,6 +782,7 @@ func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
 // nil (test setups don't always wire the library service). The grants
 // branch is purely opt-in.
 func TestAuthHandler_Register_NoGrants_NilLibraries_OK(t *testing.T) {
+	t.Parallel()
 	created := &authmodel.User{ID: "u1", Username: "alice", DisplayName: "Alice", Role: "user"}
 	authSvc := &mockAuthService{
 		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {

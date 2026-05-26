@@ -115,6 +115,7 @@ func New(ctx context.Context, deps Deps) (*Module, error) {
 		deps.Channels,
 		deps.ItemValues,
 		scnr,
+		nil,
 		deps.Logger,
 	)
 

@@ -69,6 +69,7 @@ func makeLib(t *testing.T, id, name string) (*librarymodel.Library, string) {
 // ─── Browse ─────────────────────────────────────────────────────────
 
 func TestUploadBrowse_ListsSubdirs(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	// Crea sub-dirs reales.
 	_ = os.MkdirAll(filepath.Join(root, "Action"), 0o755)
@@ -122,6 +123,7 @@ func TestUploadBrowse_ListsSubdirs(t *testing.T) {
 }
 
 func TestUploadBrowse_RejectsTraversal(t *testing.T) {
+	t.Parallel()
 	lib, _ := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -134,6 +136,7 @@ func TestUploadBrowse_RejectsTraversal(t *testing.T) {
 }
 
 func TestUploadBrowse_NotFoundOnLibraryWithoutAccess(t *testing.T) {
+	t.Parallel()
 	// El user no tiene acceso a "lib-secret" → 404 (NO 403).
 	svc := &fakeListForUserSvc{libs: nil}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -148,6 +151,7 @@ func TestUploadBrowse_NotFoundOnLibraryWithoutAccess(t *testing.T) {
 // ─── CreateFolder ───────────────────────────────────────────────────
 
 func TestUploadBrowse_CreateFolder_HappyPath(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -165,6 +169,7 @@ func TestUploadBrowse_CreateFolder_HappyPath(t *testing.T) {
 }
 
 func TestUploadBrowse_CreateFolder_Idempotent(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.MkdirAll(filepath.Join(root, "AlreadyHere"), 0o755)
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
@@ -179,6 +184,7 @@ func TestUploadBrowse_CreateFolder_Idempotent(t *testing.T) {
 }
 
 func TestUploadBrowse_CreateFolder_RejectsEmpty(t *testing.T) {
+	t.Parallel()
 	lib, _ := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -192,6 +198,7 @@ func TestUploadBrowse_CreateFolder_RejectsEmpty(t *testing.T) {
 }
 
 func TestUploadBrowse_CreateFolder_RejectsTraversal(t *testing.T) {
+	t.Parallel()
 	lib, _ := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -216,6 +223,7 @@ func mountBrowseFull(h *handlers.UploadBrowseHandler) http.Handler {
 }
 
 func TestUploadBrowse_DeleteFile(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	path := filepath.Join(root, "movie.mkv")
 	_ = os.WriteFile(path, []byte("data"), 0o640)
@@ -234,6 +242,7 @@ func TestUploadBrowse_DeleteFile(t *testing.T) {
 }
 
 func TestUploadBrowse_DeleteEmptyDir(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.MkdirAll(filepath.Join(root, "empty"), 0o755)
 
@@ -248,6 +257,7 @@ func TestUploadBrowse_DeleteEmptyDir(t *testing.T) {
 }
 
 func TestUploadBrowse_DeleteNonEmptyDir_RequiresRecursive(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.MkdirAll(filepath.Join(root, "movies", "drama"), 0o755)
 	_ = os.WriteFile(filepath.Join(root, "movies", "drama", "x.mkv"), []byte("x"), 0o640)
@@ -277,6 +287,7 @@ func TestUploadBrowse_DeleteNonEmptyDir_RequiresRecursive(t *testing.T) {
 }
 
 func TestUploadBrowse_DeleteMissing_Idempotent(t *testing.T) {
+	t.Parallel()
 	lib, _ := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -289,6 +300,7 @@ func TestUploadBrowse_DeleteMissing_Idempotent(t *testing.T) {
 }
 
 func TestUploadBrowse_DeleteRoot_Rejected(t *testing.T) {
+	t.Parallel()
 	lib, _ := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -303,6 +315,7 @@ func TestUploadBrowse_DeleteRoot_Rejected(t *testing.T) {
 // ─── RenameEntry ────────────────────────────────────────────────────
 
 func TestUploadBrowse_Rename_File(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.WriteFile(filepath.Join(root, "old.mkv"), []byte("data"), 0o640)
 
@@ -324,6 +337,7 @@ func TestUploadBrowse_Rename_File(t *testing.T) {
 }
 
 func TestUploadBrowse_Rename_RejectsExistingTarget(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.WriteFile(filepath.Join(root, "old.mkv"), []byte("a"), 0o640)
 	_ = os.WriteFile(filepath.Join(root, "new.mkv"), []byte("b"), 0o640)
@@ -345,6 +359,7 @@ func TestUploadBrowse_Rename_RejectsExistingTarget(t *testing.T) {
 }
 
 func TestUploadBrowse_Rename_MissingSource(t *testing.T) {
+	t.Parallel()
 	lib, _ := makeLib(t, "lib-mov", "Movies")
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
 	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
@@ -358,6 +373,7 @@ func TestUploadBrowse_Rename_MissingSource(t *testing.T) {
 }
 
 func TestUploadBrowse_Rename_SamePath_Rejected(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.WriteFile(filepath.Join(root, "same.mkv"), []byte("x"), 0o640)
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
@@ -372,6 +388,7 @@ func TestUploadBrowse_Rename_SamePath_Rejected(t *testing.T) {
 }
 
 func TestUploadBrowse_Rename_CreatesIntermediateDirs(t *testing.T) {
+	t.Parallel()
 	lib, root := makeLib(t, "lib-mov", "Movies")
 	_ = os.WriteFile(filepath.Join(root, "loose.mkv"), []byte("x"), 0o640)
 	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}

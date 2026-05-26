@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hubplay/internal/clock"
 	"hubplay/internal/config"
 )
 
@@ -26,6 +27,7 @@ type Runner struct {
 	cfg    config.RetentionConfig
 	epg    EPGCleaner
 	audit  AuditPruner
+	clock  clock.Clock
 	logger *slog.Logger
 	stopCh chan struct{}
 
@@ -34,14 +36,18 @@ type Runner struct {
 }
 
 // New: epg y audit pueden ser nil — se omite el sweep correspondiente.
-func New(cfg config.RetentionConfig, epg EPGCleaner, audit AuditPruner, logger *slog.Logger) *Runner {
+func New(cfg config.RetentionConfig, epg EPGCleaner, audit AuditPruner, clk clock.Clock, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if clk == nil {
+		clk = clock.New()
 	}
 	return &Runner{
 		cfg:              cfg,
 		epg:              epg,
 		audit:            audit,
+		clock:            clk,
 		logger:           logger.With("module", "retention"),
 		stopCh:           make(chan struct{}),
 		sweepsDoneNotify: make(chan struct{}, 32),
@@ -94,7 +100,7 @@ func (r *Runner) sweep(ctx context.Context) {
 	}
 
 	if r.audit != nil && r.cfg.FederationAuditLog > 0 {
-		cutoff := time.Now().Add(-r.cfg.FederationAuditLog)
+		cutoff := r.clock.Now().Add(-r.cfg.FederationAuditLog)
 		n, err := r.audit.PruneAuditBefore(ctx, cutoff)
 		switch {
 		case err != nil:
