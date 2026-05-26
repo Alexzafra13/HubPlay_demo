@@ -29,6 +29,12 @@ type AdminAuthHandler struct {
 // NewAdminAuthHandler builds the handler. now may be nil (defaults to
 // time.Now); observe may be nil (defaults to a no-op) so unit tests can
 // construct handlers without Prometheus.
+//
+// F16-19 (audit): el silent no-op de observe es deliberado para que el
+// constructor sea utilizable desde tests sin un sink real. Las
+// rotaciones siguen siendo visibles vía logs (h.logger.Info)
+// independientemente de observe — el observer es para Prometheus
+// counters, no para auditoría.
 func NewAdminAuthHandler(keys *auth.KeyStore, now func() time.Time, observe rotationObserver, logger *slog.Logger) *AdminAuthHandler {
 	if now == nil {
 		now = time.Now

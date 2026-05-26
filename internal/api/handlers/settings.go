@@ -427,6 +427,12 @@ func validateSettingValue(key, value string) (string, error) {
 		}
 		return "false", nil
 	case settingHWAccelPreferred:
+		// F16-18 (audit): ToLower defensivo + comparación contra
+		// hwAccelChoices (todos lowercase) — acepta "VAAPI"/"VaApi"
+		// del UI sin romper el contrato downstream que compara
+		// strings exactos. Si en el futuro alguien añade un choice
+		// con mayúsculas a hwAccelChoices, esta normalización lo
+		// rechazaría correctamente; mantenerla preserva el invariante.
 		v := strings.ToLower(value)
 		for _, ok := range hwAccelChoices {
 			if v == ok {
