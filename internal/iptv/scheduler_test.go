@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +23,20 @@ type fakeRunner struct {
 	m3uErr    error
 	epgErr    error
 	callDelay time.Duration
+	// calls señaliza cada llamada (M3U o EPG) para que los tests puedan
+	// esperar invocaciones sin polling.
+	calls chan struct{}
+}
+
+func newFakeRunner() *fakeRunner {
+	return &fakeRunner{calls: make(chan struct{}, 32)}
+}
+
+func (f *fakeRunner) notifyCall() {
+	select {
+	case f.calls <- struct{}{}:
+	default:
+	}
 }
 
 func (f *fakeRunner) RefreshM3U(ctx context.Context, _ string) (int, error) {
@@ -32,6 +45,7 @@ func (f *fakeRunner) RefreshM3U(ctx context.Context, _ string) (int, error) {
 	delay := f.callDelay
 	err := f.m3uErr
 	f.mu.Unlock()
+	f.notifyCall()
 	if delay > 0 {
 		select {
 		case <-time.After(delay):
@@ -47,6 +61,7 @@ func (f *fakeRunner) RefreshEPG(ctx context.Context, _ string) (int, error) {
 	delay := f.callDelay
 	err := f.epgErr
 	f.mu.Unlock()
+	f.notifyCall()
 	if delay > 0 {
 		select {
 		case <-time.After(delay):
@@ -73,7 +88,7 @@ func newSchedFixture(t *testing.T) (*db.Repositories, *fakeRunner, *Scheduler) {
 	}); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
-	runner := &fakeRunner{}
+	runner := newFakeRunner()
 	sched := NewScheduler(repos.IPTVSchedules, runner, testutil.TestLogger())
 	return repos, runner, sched
 }
@@ -364,14 +379,11 @@ func TestScheduler_StartStopRunsLoop(t *testing.T) {
 	defer cancel()
 	sched.Start(ctx)
 
-	// Wait for at least one call within 500 ms.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		m3u, _ := runner.counts()
-		if m3u > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Espera la primera invocación dentro de 500 ms.
+	select {
+	case <-runner.calls:
+	case <-time.After(500 * time.Millisecond):
+		t.Error("scheduler loop never fired the due job")
 	}
 	sched.Stop(context.Background())
 
@@ -390,21 +402,16 @@ func TestScheduler_StopIsSynchronous(t *testing.T) {
 
 	ctx := context.Background()
 	sched.Start(ctx)
-	// Allow the goroutine to enter the select.
-	time.Sleep(10 * time.Millisecond)
+	<-sched.Started()
 
-	done := int32(0)
+	done := make(chan struct{})
 	go func() {
 		sched.Stop(context.Background())
-		atomic.StoreInt32(&done, 1)
+		close(done)
 	}()
-	// After Stop returns, done should be 1 promptly.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if atomic.LoadInt32(&done) == 1 {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Error("Stop did not return within 500 ms")
 	}
-	t.Error("Stop did not return within 500 ms")
 }

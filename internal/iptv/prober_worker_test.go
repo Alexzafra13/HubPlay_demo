@@ -19,9 +19,22 @@ import (
 type fakeLibLister struct {
 	libs []*librarymodel.Library
 	err  error
+
+	mu       sync.Mutex
+	listed   int
+	notify   chan struct{} // opcional; señaliza cada List() para tests.
 }
 
 func (f *fakeLibLister) List(_ context.Context) ([]*librarymodel.Library, error) {
+	f.mu.Lock()
+	f.listed++
+	f.mu.Unlock()
+	if f.notify != nil {
+		select {
+		case f.notify <- struct{}{}:
+		default:
+		}
+	}
 	return f.libs, f.err
 }
 
@@ -33,20 +46,33 @@ type fakeChanLister struct {
 	calls    map[string]int
 	failOnce bool
 	failErr  error
+	// notify señaliza cada ListByLibrary; nil = sin notificación.
+	notify chan struct{}
 }
 
 func (f *fakeChanLister) ListByLibrary(_ context.Context, libraryID string, _ bool) ([]*iptvmodel.Channel, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.calls == nil {
 		f.calls = map[string]int{}
 	}
 	f.calls[libraryID]++
-	if f.failOnce {
+	failOnce := f.failOnce
+	if failOnce {
 		f.failOnce = false
-		return nil, f.failErr
 	}
-	return f.byLib[libraryID], nil
+	failErr := f.failErr
+	byLib := f.byLib[libraryID]
+	f.mu.Unlock()
+	if f.notify != nil {
+		select {
+		case f.notify <- struct{}{}:
+		default:
+		}
+	}
+	if failOnce {
+		return nil, failErr
+	}
+	return byLib, nil
 }
 
 func (f *fakeChanLister) callCount(lib string) int {
@@ -82,10 +108,13 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 		{ID: "L3", ContentType: "shows"},
 		{ID: "L4", ContentType: "livetv"},
 	}}
-	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{
-		"L2": {{ID: "c1", StreamURL: ""}},
-		"L4": {{ID: "c2", StreamURL: ""}},
-	}}
+	chans := &fakeChanLister{
+		byLib: map[string][]*iptvmodel.Channel{
+			"L2": {{ID: "c1", StreamURL: ""}},
+			"L4": {{ID: "c2", StreamURL: ""}},
+		},
+		notify: make(chan struct{}, 32),
+	}
 	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	if err != nil {
 		t.Fatalf("NewProberWorker: %v", err)
@@ -95,13 +124,15 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 	w.Start(context.Background())
 	defer func() { _ = w.Stop(context.Background()) }()
 
-	// Wait for the initial run to finish (initial delay + one pass).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if chans.callCount("L2") > 0 && chans.callCount("L4") > 0 {
-			break
+	// Espera al run inicial: 2 librerías livetv ⇒ 2 ListByLibrary.
+	deadline := time.After(2 * time.Second)
+	for chans.callCount("L2") == 0 || chans.callCount("L4") == 0 {
+		select {
+		case <-chans.notify:
+		case <-deadline:
+			t.Fatalf("initial run timed out: L2=%d L4=%d",
+				chans.callCount("L2"), chans.callCount("L4"))
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 
 	if chans.callCount("L1") != 0 || chans.callCount("L3") != 0 {
@@ -117,7 +148,10 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 	t.Parallel()
 	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
-	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
+	chans := &fakeChanLister{
+		byLib:  map[string][]*iptvmodel.Channel{"L1": {}},
+		notify: make(chan struct{}, 32),
+	}
 
 	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	if err != nil {
@@ -128,15 +162,15 @@ func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 	w.Start(context.Background())
 	defer func() { _ = w.Stop(context.Background()) }()
 
-	// We expect at least 3 calls within ~250 ms (1 initial + ~5 ticks).
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if chans.callCount("L1") >= 3 {
-			return
+	// Esperamos ≥ 3 calls (1 inicial + ~5 ticks dentro de 500 ms).
+	deadline := time.After(500 * time.Millisecond)
+	for chans.callCount("L1") < 3 {
+		select {
+		case <-chans.notify:
+		case <-deadline:
+			t.Fatalf("worker did not tick: calls=%d", chans.callCount("L1"))
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("worker did not tick: calls=%d", chans.callCount("L1"))
 }
 
 func TestProberWorker_StopDrainsAndIsIdempotent(t *testing.T) {
@@ -168,7 +202,7 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 	hang := make(chan struct{})
 	defer close(hang)
 	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
-	chans := &blockingChanLister{hang: hang}
+	chans := &blockingChanLister{hang: hang, called: make(chan struct{}, 1)}
 
 	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	if err != nil {
@@ -178,8 +212,12 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 	w.SetInitialDelay(time.Millisecond)
 	w.Start(context.Background())
 
-	// Give the loop time to enter the in-flight ListByLibrary call.
-	time.Sleep(50 * time.Millisecond)
+	// Espera a que el loop entre en la llamada in-flight ListByLibrary.
+	select {
+	case <-chans.called:
+	case <-time.After(time.Second):
+		t.Fatal("worker never entered ListByLibrary")
+	}
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -190,20 +228,25 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 }
 
 type blockingChanLister struct {
-	hang chan struct{}
+	hang   chan struct{}
+	called chan struct{} // señaliza una vez al entrar en ListByLibrary.
 }
 
-// ListByLibrary blocks on `hang` and ignores ctx — that's the whole
-// point: simulate a wedged downstream call so Stop must rely on its
-// own deadline, not on ctx-cancellation propagating into the work.
+// ListByLibrary señaliza `called` (la primera vez) y bloquea en `hang`,
+// ignorando ctx — simula un downstream wedged para forzar a Stop a
+// depender de su propio deadline.
 func (b *blockingChanLister) ListByLibrary(_ context.Context, _ string, _ bool) ([]*iptvmodel.Channel, error) {
+	select {
+	case b.called <- struct{}{}:
+	default:
+	}
 	<-b.hang
 	return nil, nil
 }
 
 func TestProberWorker_LibraryListErrorIsLoggedNotFatal(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{err: errors.New("db down")}
+	libs := &fakeLibLister{err: errors.New("db down"), notify: make(chan struct{}, 32)}
 	chans := &fakeChanLister{}
 	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	if err != nil {
@@ -214,9 +257,18 @@ func TestProberWorker_LibraryListErrorIsLoggedNotFatal(t *testing.T) {
 	w.Start(context.Background())
 	defer func() { _ = w.Stop(context.Background()) }()
 
-	// Just confirm the worker keeps running through a few ticks
-	// without panicking — no channel calls should ever happen.
-	time.Sleep(120 * time.Millisecond)
+	// Confirma que el worker sigue tickeando tras el error inicial —
+	// esperamos al menos 3 List() (1 inicial + 2 ticks).
+	deadline := time.After(2 * time.Second)
+	got := 0
+	for got < 3 {
+		select {
+		case <-libs.notify:
+			got++
+		case <-deadline:
+			t.Fatalf("worker did not tick after libs.List error: got %d List() calls", got)
+		}
+	}
 	if chans.callCount("anything") != 0 {
 		t.Fatalf("no library-list response means no channel calls, got %v", chans.calls)
 	}
@@ -228,7 +280,8 @@ func TestProberWorker_PanicInPrologueIsRecovered(t *testing.T) {
 	// (or a corrupt DB row) inside the prologue. The worker must
 	// log + continue, not exit the goroutine.
 	var calls atomic.Int32
-	libs := &panicLibLister{calls: &calls}
+	notify := make(chan struct{}, 32)
+	libs := &panicLibLister{calls: &calls, notify: notify}
 	chans := &fakeChanLister{}
 	w, err := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	if err != nil {
@@ -239,22 +292,29 @@ func TestProberWorker_PanicInPrologueIsRecovered(t *testing.T) {
 	w.Start(context.Background())
 	defer func() { _ = w.Stop(context.Background()) }()
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if calls.Load() >= 3 {
-			return
+	deadline := time.After(500 * time.Millisecond)
+	for calls.Load() < 3 {
+		select {
+		case <-notify:
+		case <-deadline:
+			t.Fatalf("worker died after panic: calls=%d", calls.Load())
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("worker died after panic: calls=%d", calls.Load())
 }
 
 type panicLibLister struct {
-	calls *atomic.Int32
+	calls  *atomic.Int32
+	notify chan struct{}
 }
 
 func (p *panicLibLister) List(_ context.Context) ([]*librarymodel.Library, error) {
 	p.calls.Add(1)
+	if p.notify != nil {
+		select {
+		case p.notify <- struct{}{}:
+		default:
+		}
+	}
 	panic("boom")
 }
 
