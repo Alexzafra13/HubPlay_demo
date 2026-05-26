@@ -312,9 +312,10 @@ func TestService_HTTPIntegration_ETagRoundTrip(t *testing.T) {
 
 	firstCheckedAt := first.LastChecked
 
-	// Pequeña pausa para que un LastChecked posterior sea estrictamente >
-	// (el reloj de Windows con resolución de 15 ms a veces da el mismo
-	// instante si los dos checks corren back-to-back).
+	// Sleep LEGÍTIMO (F15-1 batch 4): el reloj de Windows tiene
+	// resolución de ~15 ms — dos time.Now() back-to-back pueden dar el
+	// mismo instante. La aserción "second.LastChecked.After(first)"
+	// exige separación real de timestamps.
 	time.Sleep(5 * time.Millisecond)
 
 	// ── Segundo check: el Service debe enviar If-None-Match y recibir 304 ──
@@ -360,8 +361,11 @@ func TestService_Smoke_Start_StopOnCtxCancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		svc.Start(ctx)
-		// Start retorna sólo si la goroutine se canceló. Pequeño sleep
-		// para que el cancel se propague.
+		// Sleep LEGÍTIMO (F15-1 batch 4): smoke-test cerrando done
+		// algo después del retorno de Start para que cualquier goroutine
+		// auxiliar (jitter timer) tenga ocasión de salir antes de la
+		// aserción de NumGoroutine — no hay seam público que indique
+		// "todas las goroutines internas drenadas".
 		time.Sleep(50 * time.Millisecond)
 		close(done)
 	}()

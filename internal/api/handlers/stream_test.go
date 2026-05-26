@@ -654,7 +654,11 @@ func TestWaitForFile_Appears(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "late.txt")
 
-	// Write the file asynchronously after 50ms.
+	// Sleep LEGÍTIMO (F15-1 batch 4): la unidad bajo test es
+	// waitForFile, que ESPERA la aparición de un fichero. Sin retraso
+	// el fichero existe en el primer poll y no estamos testeando la
+	// espera. Es el escenario "file appears late" que la función debe
+	// manejar.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		_ = os.WriteFile(p, []byte("hi"), 0o644)

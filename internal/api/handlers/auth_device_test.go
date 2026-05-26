@@ -158,9 +158,11 @@ func TestDeviceAuthHandler_PollSetsCookies(t *testing.T) {
 	}
 
 	body := strings.NewReader(`{"device_code":"` + pair.DeviceCode + `"}`)
-	// Advance well past the slow-down gap before polling — the
-	// service uses a real clock here because the handler does not
-	// expose a clock injection.
+	// Sleep LEGÍTIMO (F15-1 batch 4): el servicio device-poll
+	// rate-limita con reloj real (no hay clock inyectable expuesto en
+	// el handler) y rechaza polls que caen dentro del slow_down gap.
+	// Adelantar el gap requiere o un seam de clock en device-auth o
+	// dormir.
 	time.Sleep(50 * time.Millisecond)
 	resp, err := http.Post(env.server.URL+"/auth/device/poll", "application/json", body)
 	if err != nil {
@@ -221,6 +223,11 @@ func TestDeviceAuthHandler_EventsStreamApproved(t *testing.T) {
 	// moment the bus fires. Trigger Approve in a goroutine so the
 	// scanner below blocks on the read until both events have landed.
 	go func() {
+		// Sleep LEGÍTIMO (F15-1 batch 4): da margen al SSE consumer
+		// para conectarse + suscribirse al bus antes del Approve. Sin
+		// bus introspection externa no hay seam: el handler suscribe
+		// internamente tras escribir cabeceras, así que el cliente HTTP
+		// ve 200 antes de que la suscripción esté en vivo.
 		time.Sleep(50 * time.Millisecond)
 		_ = env.svc.ApproveDevice(ctx, pair.UserCode, env.user.ID)
 	}()

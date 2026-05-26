@@ -187,6 +187,10 @@ func TestProber_ConcurrencyCap(t *testing.T) {
 			peak = inflight
 		}
 		mu.Unlock()
+		// Sleep LEGÍTIMO (F15-1 batch 4): el handler retiene la conexión
+		// para medir el peak de probes concurrentes. Sin retención los 12
+		// probes se completarían serialmente y peak siempre sería 1 — el
+		// test de SetConcurrency(2) deja de tener sentido.
 		time.Sleep(20 * time.Millisecond)
 		mu.Lock()
 		inflight--

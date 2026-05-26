@@ -103,7 +103,12 @@ func TestManager_CloseStopsSweeperGoroutine(t *testing.T) {
 		}
 		mgr.Close()
 	}
-	// Give scheduled goroutines a moment to fully exit.
+	// Sleep LEGÍTIMO (F15-1 batch 4): el test compara
+	// runtime.NumGoroutine() pre/post un loop de Close. Aunque Close
+	// sea síncrono, las goroutines lazy (timer drains, GC roots) tardan
+	// unos ms en desaparecer del runtime. Goleak cubre el caso de
+	// regresión real vía CI; este sleep solo amortigua el ruido de
+	// scheduler en la aserción "delta > 5".
 	time.Sleep(50 * time.Millisecond)
 
 	if delta := runtime.NumGoroutine() - baseline; delta > 5 {

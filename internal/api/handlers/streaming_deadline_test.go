@@ -45,8 +45,11 @@ func TestDisableWriteDeadline_OnRealServer(t *testing.T) {
 			t.Errorf("first write: %v", err)
 			return
 		}
-		// Sleep past the WriteTimeout. If the deadline weren't
-		// cleared, the second write should fail.
+		// Sleep LEGÍTIMO (F15-1 batch 4): la unidad bajo test es
+		// DisableWriteDeadline. El test debe pasar más tiempo del
+		// WriteTimeout (50ms) para verificar que el deadline NO
+		// dispara — esa es la aserción central. Sin retraso real no
+		// estamos testeando nada.
 		time.Sleep(150 * time.Millisecond)
 		if _, err := w.Write([]byte("second")); err != nil {
 			t.Errorf("second write past short deadline: %v", err)
