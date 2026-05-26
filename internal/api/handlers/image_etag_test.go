@@ -3,6 +3,7 @@ package handlers
 import "testing"
 
 func TestStrongImageETag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		id, w, want string
 	}{
@@ -19,6 +20,7 @@ func TestStrongImageETag(t *testing.T) {
 }
 
 func TestETagMatches(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		ifNoneMatch   string
@@ -35,6 +37,7 @@ func TestETagMatches(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := etagMatches(tt.ifNoneMatch, tt.etag); got != tt.wantMatch {
 				t.Errorf("etagMatches(%q, %q) = %v, want %v",
 					tt.ifNoneMatch, tt.etag, got, tt.wantMatch)

@@ -7,6 +7,7 @@ import (
 )
 
 func TestLogoProxyURL(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		ch   *iptvmodel.Channel
@@ -40,6 +41,7 @@ func TestLogoProxyURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := logoProxyURL(tc.ch)
 			if got != tc.want {
 				t.Errorf("logoProxyURL: got %q want %q", got, tc.want)
@@ -49,6 +51,7 @@ func TestLogoProxyURL(t *testing.T) {
 }
 
 func TestToChannelDTO_LogoURLIsProxiedNotUpstream(t *testing.T) {
+	t.Parallel()
 	// Regression guard: if anyone reverts toChannelDTO to set
 	// LogoURL: ch.LogoURL the upstream URL would leak back into
 	// the API and CSP would block image loads again.

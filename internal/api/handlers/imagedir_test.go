@@ -12,6 +12,7 @@ import (
 // filepath.Clean + filepath.Abs aceptaba el path porque no resolvía
 // symlinks; ahora EvalSymlinks lo detecta y devuelve false.
 func TestIsPathUnderImageDir_Symlink(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	outside := t.TempDir()
 
@@ -35,6 +36,7 @@ func TestIsPathUnderImageDir_Symlink(t *testing.T) {
 // TestIsPathUnderImageDir_HappyPath verifica que un fichero normal
 // dentro de imageDir sí pasa la validación.
 func TestIsPathUnderImageDir_HappyPath(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	normal := filepath.Join(imageDir, "poster.jpg")
 	if err := os.WriteFile(normal, []byte("data"), 0o600); err != nil {
@@ -50,6 +52,7 @@ func TestIsPathUnderImageDir_HappyPath(t *testing.T) {
 // "../etc/passwd" sin symlink — la validación textual ya lo cubría;
 // confirmamos que el refactor de ADR-021 no regresiona.
 func TestIsPathUnderImageDir_TraversalLiteral(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	outside := filepath.Join(imageDir, "..", "outside.txt")
 
@@ -63,6 +66,7 @@ func TestIsPathUnderImageDir_TraversalLiteral(t *testing.T) {
 // existe y está bajo imageDir. Cubre el caso de thumbnails antes de
 // generarlos.
 func TestIsPathUnderImageDir_NonExistentTargetUnderRoot(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	subDir := filepath.Join(imageDir, ".thumbnails")
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
@@ -84,6 +88,7 @@ func TestIsPathUnderImageDir_NonExistentTargetUnderRoot(t *testing.T) {
 // symlink fuera, EvalSymlinks lo detectará en la siguiente
 // invocación.
 func TestIsPathUnderImageDir_NonExistentParentUnderRootAccepted(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	missing := filepath.Join(imageDir, "no-such-dir", "file.jpg")
 
@@ -96,6 +101,7 @@ func TestIsPathUnderImageDir_NonExistentParentUnderRootAccepted(t *testing.T) {
 // textualmente vive fuera de imageDir, aunque el path entero sea
 // inexistente.
 func TestIsPathUnderImageDir_NonExistentOutsideRoot(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	outside := filepath.Join(filepath.Dir(imageDir), "elsewhere", "file.jpg")
 
@@ -108,6 +114,7 @@ func TestIsPathUnderImageDir_NonExistentOutsideRoot(t *testing.T) {
 // sutil: el fichero final no existe pero un directorio intermedio
 // es un symlink que apunta fuera de imageDir.
 func TestIsPathUnderImageDir_SymlinkInParentChain(t *testing.T) {
+	t.Parallel()
 	imageDir := t.TempDir()
 	outside := t.TempDir()
 

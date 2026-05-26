@@ -121,8 +121,9 @@ func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 }
 
 func TestSession_ManifestPath(t *testing.T) {
-	s := &stream.Session{OutputDir: "/tmp/sessions/abc"}
-	expected := filepath.Join("/tmp/sessions/abc", "stream.m3u8")
+	dir := t.TempDir()
+	s := &stream.Session{OutputDir: dir}
+	expected := filepath.Join(dir, "stream.m3u8")
 	if got := s.ManifestPath(); got != expected {
 		t.Errorf("expected %q, got %q", expected, got)
 	}
