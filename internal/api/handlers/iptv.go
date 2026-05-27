@@ -42,6 +42,10 @@ type IPTVHandler struct {
 	*iptvEPGHandler
 	*iptvPersonalisationHandler
 	*iptvAdminOrderHandler
+	*iptvAdminHandler
+	*iptvHealthHandler
+	*iptvFavoritesHandler
+	*iptvLogoHandler
 
 	// Campos del facade — usados por los métodos que aún no han
 	// migrado a sub-handler propio.
@@ -84,6 +88,18 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTV
 		iptvAdminOrderHandler: &iptvAdminOrderHandler{
 			svc: svc, logger: lg,
 		},
+		iptvAdminHandler: &iptvAdminHandler{
+			svc: svc, libraries: libraries, access: access, audit: audit, logger: lg,
+		},
+		iptvHealthHandler: &iptvHealthHandler{
+			svc: svc, access: access, audit: audit, logger: lg,
+		},
+		iptvFavoritesHandler: &iptvFavoritesHandler{
+			svc: svc, libraries: libraries, access: access, logger: lg,
+		},
+		iptvLogoHandler: &iptvLogoHandler{
+			svc: svc, imageDir: imageDir, logger: lg,
+		},
 		svc:       svc,
 		proxy:     proxy,
 		transmux:  transmux,
@@ -97,13 +113,6 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTV
 	}
 }
 
-
-func (h *IPTVHandler) auditEmit() AuditEmitter {
-	if h.audit != nil {
-		return h.audit
-	}
-	return noopAudit{}
-}
 
 // canAccessLibrary delegates to the package-level helper. Thin wrapper
 // kept so every iptv_* file can write `h.canAccessLibrary(r, id)`

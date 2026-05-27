@@ -13,13 +13,41 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	iptvmodel "hubplay/internal/iptv/model"
 )
+
+// channelHealthOps es el contrato mínimo para los endpoints de salud
+// de canales. 7 de ~50 métodos de IPTVService.
+type channelHealthOps interface {
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
+	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*iptvmodel.Channel, error)
+	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
+	ChannelHealthSummary(ctx context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error)
+	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error)
+	ResetChannelHealth(ctx context.Context, channelID string) error
+	SetChannelActive(ctx context.Context, id string, active bool) error
+}
+
+type iptvHealthHandler struct {
+	svc    channelHealthOps
+	access LibraryAccessService
+	audit  AuditEmitter
+	logger *slog.Logger
+}
+
+func (h *iptvHealthHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
+}
 
 // ── Channels without EPG ─────────────────────────────────────────
 //
@@ -30,13 +58,13 @@ import (
 
 // ListChannelsWithoutEPG returns active channels with no programmes
 // in the default guide window.
-func (h *IPTVHandler) ListChannelsWithoutEPG(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) ListChannelsWithoutEPG(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	channels, err := h.svc.ListChannelsWithoutEPG(r.Context(), libraryID)
@@ -61,7 +89,7 @@ type patchChannelRequest struct {
 //
 // A nil TvgID means "field not present in request" (leave alone);
 // an explicit "" means "clear tvg_id AND the persistent override".
-func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -71,8 +99,8 @@ func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -131,13 +159,13 @@ func channelWithoutEPGDTO(ch *iptvmodel.Channel) map[string]any {
 // load. This single small response (~80 bytes) replaces all that
 // chatter; the heavy lists only load when the operator clicks into
 // the matching tab.
-func (h *IPTVHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	sum, err := h.svc.ChannelHealthSummary(r.Context(), libraryID)
@@ -157,13 +185,13 @@ func (h *IPTVHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Reques
 // ListUnhealthyChannels returns channels whose probe-failure count is
 // above the threshold. Optional `?threshold=N` query param; default
 // is the repo constant.
-func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	threshold := 0 // 0 = let repo pick its default
@@ -187,7 +215,7 @@ func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Reque
 // ResetChannelHealth clears the failure counter so the channel is
 // visible again in the user list. Doesn't probe — the operator is
 // asserting the channel works.
-func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -197,8 +225,8 @@ func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request)
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	if err := h.svc.ResetChannelHealth(r.Context(), channelID); err != nil {
@@ -210,7 +238,7 @@ func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request)
 
 // DisableChannel permanently hides a channel from the user list by
 // flipping is_active. Idempotent.
-func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -220,8 +248,8 @@ func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	if err := h.svc.SetChannelActive(r.Context(), channelID, false); err != nil {
@@ -234,7 +262,7 @@ func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
 
 // EnableChannel is the mirror image — lets the admin re-enable a
 // channel that was manually disabled.
-func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
+func (h *iptvHealthHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -244,8 +272,8 @@ func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	if err := h.svc.SetChannelActive(r.Context(), channelID, true); err != nil {

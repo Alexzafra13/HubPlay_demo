@@ -16,7 +16,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,10 +27,30 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
+// channelFavoritesOps es el contrato mínimo para favoritos y
+// continue-watching. 7 de ~50 métodos de IPTVService.
+type channelFavoritesOps interface {
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
+	AddFavorite(ctx context.Context, userID, channelID string) error
+	RemoveFavorite(ctx context.Context, userID, channelID string) error
+	ListFavoriteIDs(ctx context.Context, userID string) ([]string, error)
+	ListFavoriteChannels(ctx context.Context, userID string) ([]*iptvmodel.Channel, error)
+	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
+	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*iptvmodel.Channel, []time.Time, error)
+}
+
+type iptvFavoritesHandler struct {
+	svc       channelFavoritesOps
+	libraries LibraryRepository
+	access    LibraryAccessService
+	logger    *slog.Logger
+}
+
 // ListFavorites returns the caller's favorite channels as full channel DTOs.
-func (h *IPTVHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
+func (h *iptvFavoritesHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -49,7 +71,7 @@ func (h *IPTVHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 // ListFavoriteIDs returns just the IDs — lighter payload used on page load
 // to hydrate the frontend's favorite set without re-shipping channel data
 // the client already has from ListChannels.
-func (h *IPTVHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
+func (h *iptvFavoritesHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -64,7 +86,7 @@ func (h *IPTVHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
 }
 
 // AddFavorite marks a channel favorited by the caller. Idempotent.
-func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
+func (h *iptvFavoritesHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -83,8 +105,8 @@ func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -99,7 +121,7 @@ func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 
 // RemoveFavorite unmarks a channel. Idempotent — returns 200 even if the
 // channel wasn't favorited.
-func (h *IPTVHandler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
+func (h *iptvFavoritesHandler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -116,8 +138,8 @@ func (h *IPTVHandler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
 	// anyway, and failing here would leave stale rows in the table.
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err == nil {
-		if !h.canAccessLibrary(r, ch.LibraryID) {
-			h.denyForbidden(w, r)
+		if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+			iptvDenyForbidden(w, r)
 			return
 		}
 	}
@@ -146,7 +168,7 @@ const (
 // any authenticated user can record their own history, but they must
 // have library access to the channel — otherwise the endpoint would
 // leak channel existence via "can I insert a row against this id?".
-func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request) {
+func (h *iptvFavoritesHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -162,15 +184,15 @@ func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request)
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
 	ts, err := h.svc.RecordWatch(r.Context(), claims.UserID, channelID)
 	if err != nil {
 		if errors.Is(err, db.ErrChannelNotFound) {
-			h.denyForbidden(w, r)
+			iptvDenyForbidden(w, r)
 			return
 		}
 		handleServiceError(w, r, err)
@@ -190,7 +212,7 @@ func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request)
 // ACL: admins see everything, non-admin users see only channels in
 // libraries they have access to. The filter is applied in the service
 // via accessibleLibraries (nil = admin bypass).
-func (h *IPTVHandler) ListContinueWatching(w http.ResponseWriter, r *http.Request) {
+func (h *iptvFavoritesHandler) ListContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
