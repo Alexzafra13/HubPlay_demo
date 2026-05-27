@@ -49,6 +49,9 @@ func (m *Manager) BrowseAllPeerLibraries(ctx context.Context) ([]*SharedLibraryW
 		err  error
 	}
 	results := make(chan result, len(peers))
+	// Timeout per-peer para que un peer colgado no bloquee la
+	// vista completa. Mismo patrón que SearchAllPeers. Cierra SS-5.
+	const perPeerTimeout = 10 * time.Second
 	dispatched := 0
 	for _, p := range peers {
 		if p.Status != PeerPaired {
@@ -56,7 +59,9 @@ func (m *Manager) BrowseAllPeerLibraries(ctx context.Context) ([]*SharedLibraryW
 		}
 		dispatched++
 		go func(peer *Peer) {
-			libs, err := m.FetchPeerLibraries(ctx, peer.ID)
+			callCtx, cancel := context.WithTimeout(ctx, perPeerTimeout)
+			defer cancel()
+			libs, err := m.FetchPeerLibraries(callCtx, peer.ID)
 			results <- result{peer: peer, libs: libs, err: err}
 		}(p)
 	}
