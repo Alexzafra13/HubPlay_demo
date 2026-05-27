@@ -214,29 +214,27 @@ func (h *iptvLogoHandler) ClearChannelLogo(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// serveLocalChannelLogo sirve un archivo de logo subido directamente
-// desde <imageDir>/channel-logos/<basename>. Validamos otra vez el
-// basename como path segment seguro defensivamente — la upsert ya lo
-// validó pero un attacker que pueda escribir directo en la tabla no
-// debería conseguir leer ficheros fuera del directorio designado.
-func (h *iptvLogoHandler) serveLocalChannelLogo(w http.ResponseWriter, r *http.Request, channelID, basename string) {
-	if h.imageDir == "" {
+// serveLocalChannelLogo sirve un archivo de logo subido desde disco.
+// Función package-level para que tanto iptvLogoHandler como
+// iptvChannelHandler la usen sin acoplarse entre sí.
+func serveLocalChannelLogo(w http.ResponseWriter, r *http.Request, imageDir string, logger *slog.Logger, channelID, basename string) {
+	if imageDir == "" {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "image storage not configured")
 		return
 	}
 	if !imaging.IsSafePathSegment(basename) {
-		h.logger.Warn("rejected unsafe channel-logo basename", "channel", channelID, "basename", basename)
+		logger.Warn("rejected unsafe channel-logo basename", "channel", channelID, "basename", basename)
 		respondError(w, r, http.StatusNotFound, "LOGO_UNAVAILABLE", "")
 		return
 	}
-	path := filepath.Join(h.imageDir, channelLogosSubdir, basename)
+	path := filepath.Join(imageDir, channelLogosSubdir, basename)
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			respondError(w, r, http.StatusNotFound, "LOGO_UNAVAILABLE", "uploaded logo file is missing")
 			return
 		}
-		h.logger.Error("read channel-logo file", "channel", channelID, "path", path, "error", err)
+		logger.Error("read channel-logo file", "channel", channelID, "path", path, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "LOGO_READ_FAILED", "")
 		return
 	}
