@@ -12,6 +12,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
+import { useStartPositionSeek } from "@/hooks/useStartPositionSeek";
 import { useStreamSessionCleanup } from "@/hooks/useStreamSessionCleanup";
 import { useVideoElementSync } from "@/hooks/useVideoElementSync";
 import { PlayerControls } from "./PlayerControls";
@@ -181,7 +182,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const { t, i18n } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const seekedToStartRef = useRef(false);
 
   // Zustand as single source of truth for volume/mute/fullscreen
   const volume = usePlayerStore((s) => s.volume);
@@ -427,33 +427,14 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onToggleHelp: toggleHelp,
   });
 
-  // ─── Seek to start position (direct_play) ────────────────────────────────
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !startPosition || seekedToStartRef.current) return;
-
-    const onCanPlay = () => {
-      if (!seekedToStartRef.current && startPosition > 0) {
-        video.currentTime = startPosition;
-        seekedToStartRef.current = true;
-      }
-    };
-
-    video.addEventListener("canplay", onCanPlay);
-    return () => video.removeEventListener("canplay", onCanPlay);
-  }, [startPosition]);
-
-  // When the source URL changes mid-session — runtime audio-track
-  // switch reloads master.m3u8 with a new ?audio=N — reset the
-  // seeked-to-start gate so the next canplay event re-seeks to the
-  // updated startPosition. Without this, picking a different audio
-  // dub while playing dropped the user back at frame 0 of the new
-  // transcode (seekedToStartRef was already true from the first
-  // seek and no further seek would fire).
-  useEffect(() => {
-    seekedToStartRef.current = false;
-  }, [masterPlaylistUrl, directUrl]);
+  // Aplica el offset inicial al primer `canplay`; un cambio de
+  // sourceKey (audio swap → nuevo master.m3u8) resetea el gate
+  // para que el siguiente canplay re-seekee.
+  useStartPositionSeek({
+    videoRef,
+    startPosition,
+    sourceKey: masterPlaylistUrl ?? directUrl,
+  });
 
   // External subs lifecycle.
   // - Opening the modal is a single setter; closing too.
