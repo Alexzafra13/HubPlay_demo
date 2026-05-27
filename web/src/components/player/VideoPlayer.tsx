@@ -12,6 +12,10 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
+import { useExternalSubMode } from "@/hooks/useExternalSubMode";
+import { useFullscreenSync } from "@/hooks/useFullscreenSync";
+import { useStartPositionSeek } from "@/hooks/useStartPositionSeek";
+import { useStreamSessionCleanup } from "@/hooks/useStreamSessionCleanup";
 import { useVideoElementSync } from "@/hooks/useVideoElementSync";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
@@ -180,7 +184,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const { t, i18n } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const seekedToStartRef = useRef(false);
 
   // Zustand as single source of truth for volume/mute/fullscreen
   const volume = usePlayerStore((s) => s.volume);
@@ -410,28 +413,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     }
   }, []);
 
-  // ─── Tab close / navigation cleanup ──────────────────────────────────────
-  //
-  // If the user closes the tab or navigates away (back button, address
-  // bar) without pressing the player's close button, we'd otherwise
-  // leak the transcode session for the server's idle timeout window
-  // (~90 s). Hook into `pagehide` (more reliable than `beforeunload`,
-  // also fires on iOS Safari and on bfcache eviction) and fire a
-  // best-effort DELETE with `keepalive: true` so the request survives
-  // unload. Going through `api.stopStreamSession` (rather than a raw
-  // fetch) picks up the CSRF double-submit token the middleware
-  // requires; without it the request 403'd in production. The
-  // server's idle reaper is still there as a backstop if even
-  // keepalive drops.
-  useEffect(() => {
-    const onPageHide = () => {
-      void api.stopStreamSession(itemId).catch(() => {
-        // Best-effort only — browser may have already torn down fetch.
-      });
-    };
-    window.addEventListener("pagehide", onPageHide);
-    return () => window.removeEventListener("pagehide", onPageHide);
-  }, [itemId]);
+  useStreamSessionCleanup(itemId);
 
   // ─── Keyboard shortcuts ──────────────────────────────────────────────────
 
@@ -447,33 +429,14 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onToggleHelp: toggleHelp,
   });
 
-  // ─── Seek to start position (direct_play) ────────────────────────────────
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !startPosition || seekedToStartRef.current) return;
-
-    const onCanPlay = () => {
-      if (!seekedToStartRef.current && startPosition > 0) {
-        video.currentTime = startPosition;
-        seekedToStartRef.current = true;
-      }
-    };
-
-    video.addEventListener("canplay", onCanPlay);
-    return () => video.removeEventListener("canplay", onCanPlay);
-  }, [startPosition]);
-
-  // When the source URL changes mid-session — runtime audio-track
-  // switch reloads master.m3u8 with a new ?audio=N — reset the
-  // seeked-to-start gate so the next canplay event re-seeks to the
-  // updated startPosition. Without this, picking a different audio
-  // dub while playing dropped the user back at frame 0 of the new
-  // transcode (seekedToStartRef was already true from the first
-  // seek and no further seek would fire).
-  useEffect(() => {
-    seekedToStartRef.current = false;
-  }, [masterPlaylistUrl, directUrl]);
+  // Aplica el offset inicial al primer `canplay`; un cambio de
+  // sourceKey (audio swap → nuevo master.m3u8) resetea el gate
+  // para que el siguiente canplay re-seekee.
+  useStartPositionSeek({
+    videoRef,
+    startPosition,
+    sourceKey: masterPlaylistUrl ?? directUrl,
+  });
 
   // External subs lifecycle.
   // - Opening the modal is a single setter; closing too.
@@ -489,31 +452,16 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     [pickExternalSub, setSubtitleTrack, setActiveFederatedSubIndex],
   );
 
-  // After a new external <track> mounts the browser keeps its mode
-  // at "disabled" by default. We force it to "showing" once it's
-  // actually in the DOM. Keying on the active sub identity guarantees
-  // the effect re-runs when the user picks a different one.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !activeExternalSub) return;
-    // The DOM may not have applied the new <track> on the first
-    // microtask; wait one rAF before flipping the mode.
-    const rafID = window.requestAnimationFrame(() => {
-      const tracks = Array.from(video.textTracks);
-      // The external track is the one whose label starts with
-      // "External:" — set inside the JSX below.
-      const target = tracks.find((t) => t.label.startsWith("External:"));
-      if (target) target.mode = "showing";
-      // Suppress any other text tracks the user didn't ask for so we
-      // don't end up double-rendering cues from an HLS sub.
-      for (const t of tracks) {
-        if (t !== target && t.mode === "showing") {
-          t.mode = "disabled";
-        }
-      }
-    });
-    return () => window.cancelAnimationFrame(rafID);
-  }, [activeExternalSub]);
+  // Tras montar el <track> externo, fuerza su mode a "showing" en
+  // el siguiente rAF (el DOM aún no tiene el elemento en el
+  // microtask inmediato) y suprime cualquier otro track en showing
+  // para no doble-renderizar cues de un HLS sub pre-existente.
+  useExternalSubMode({
+    videoRef,
+    activeKey: activeExternalSub
+      ? `${activeExternalSub.source}:${activeExternalSub.file_id}`
+      : null,
+  });
 
   const {
     mergedSubtitleTracks,
@@ -551,17 +499,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onAudioStreamSelected,
   });
 
-  // ─── Fullscreen change listener ──────────────────────────────────────────
-
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      setFullscreen(!!document.fullscreenElement);
-    };
-
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () =>
-      document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, [setFullscreen]);
+  useFullscreenSync(setFullscreen);
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
