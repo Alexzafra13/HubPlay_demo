@@ -37,7 +37,6 @@ import (
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
 	"hubplay/internal/updates"
-	"hubplay/internal/upload"
 	"hubplay/internal/user"
 )
 
@@ -317,9 +316,6 @@ func run(configPath string) error {
 	// docker swarm / k8s) is expected to do the same.
 	restartRequester := config.NewRestartRequester(cancel, logger)
 
-	// ═══ Phase 5: HTTP Server ═══
-	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
-
 	// Federation: load-or-create this server's Ed25519 identity and wire
 	// the manager. Failures here are non-fatal — federation is opt-in;
 	// if init fails we run with Federation=nil and the routes are skipped
@@ -402,66 +398,12 @@ func run(configPath string) error {
 	hostMetrics := sysmetrics.New(5*time.Second, logger)
 	hostMetrics.Start(ctx)
 
-	// Uploads (PR2 feature). El handler se cablea sólo si está
-	// activado en config — si no, deps.Uploads queda nil y el router
-	// no monta /api/v1/uploads*.
-	var uploadsHandler http.Handler
-	if cfg.Upload.Enabled {
-		stagingDir, err := upload.NewStagingDir(cfg.Upload.StagingDir)
-		if err != nil {
-			return fmt.Errorf("upload staging dir: %w", err)
-		}
-		upSvc := upload.NewService(
-			upload.Config{
-				MaxUploadBytes: cfg.Upload.MaxBytesPerUpload,
-				MinDurationMs:  cfg.Upload.MinDurationMs,
-			},
-			stagingDir,
-			repos.Users,
-			repos.UploadAudit,
-			eventBus,
-			upload.NewLibraryPicker(repos.Libraries),
-			prober,
-			clk,
-			logger,
-		)
-		// basePath debe casar EXACTAMENTE con el path bajo el que se
-		// monta en chi (/api/v1/uploads/). tusd usa este string para
-		// generar el Location: <basePath><id> tras el POST de creación.
-		tusd, err := upload.NewTusdHandler(upSvc, "/api/v1/uploads/")
-		if err != nil {
-			return fmt.Errorf("upload tusd handler: %w", err)
-		}
-		// http.StripPrefix es REQUERIDO entre chi y tusd. Razón:
-		// chi.Mount NO modifica r.URL.Path — sólo actualiza un
-		// RouteContext interno que tusd no consulta. tusd, dentro
-		// de su Handler.ServeHTTP, hace `strings.Trim(r.URL.Path, "/")`
-		// y compara contra "" para decidir si es POST de creación.
-		// Sin strip, tusd ve "/api/v1/uploads/" → no coincide con ""
-		// → cae al default que devuelve 405 method not allowed.  Con
-		// strip, r.URL.Path queda "/", tusd lo trimea a "" → POST
-		// creación OK; en los chunks queda "/<id>", tusd extrae el
-		// id correctamente y rutea a PatchFile.
-		//
-		// El BasePath de la config tusd (/api/v1/uploads/) se preserva
-		// porque tusd lo usa SÓLO para componer el Location: header
-		// que devuelve al cliente — no para route matching.
-		uploadsHandler = http.StripPrefix("/api/v1/uploads", tusd)
-		logger.Info("uploads enabled",
-			"staging_dir", stagingDir.Root(),
-			"max_bytes", cfg.Upload.MaxBytesPerUpload)
+	// ═══ Phase 5: HTTP Server ═══
+	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
 
-		// GC de uploads huérfanos. Si el binario cae mientras un
-		// upload está en vuelo, los chunks + .info quedan en
-		// <staging>/<user>/<id>/ sin que Service.Finish/Aborted
-		// recupere espacio. El GC barre cada hora dirs con TODOS
-		// sus ficheros más antiguos que 24h — tiempo suficiente
-		// para que un "upload pausado" legítimo sobreviva un par
-		// de timeouts de red sin perderse, pero corto para que un
-		// blob abandonado no acumule días.
-		upload.NewGC(stagingDir, time.Hour, 24*time.Hour, clk, logger).Start(ctx)
-	} else {
-		logger.Info("uploads disabled (config.upload.enabled=false)")
+	uploadsHandler, err := buildUploads(ctx, cfg.Upload, repos, eventBus, prober, clk, logger)
+	if err != nil {
+		return err
 	}
 
 	// Audit service (PR5). Cableado antes que los handlers para que
