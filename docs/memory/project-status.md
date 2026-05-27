@@ -6,6 +6,67 @@
 
 ---
 
+## 🧹 Sesión 2026-05-27 (parte 3) — LL Transcoder stateless + SignPath signing + Dependabot + F15-3/4/9 cerrado (3 PRs)
+
+Sesión de cierre múltiple. **3 PRs mergeadas + 3 items del audit analizados y cerrados** sin código nuevo.
+
+### PRs
+
+| PR | Tema | Estado |
+|---|---|---|
+| [#468](https://github.com/Alexzafra13/HubPlay_demo/pull/468) | refactor(stream): Transcoder stateless — tracking único en Manager (cierra olor **LL**) | ✅ merged |
+| [#469](https://github.com/Alexzafra13/HubPlay_demo/pull/469) | ci(release): SignPath Foundation signing del installer Windows (opt-in) | ✅ merged |
+| [#424](https://github.com/Alexzafra13/HubPlay_demo/pull/424) | chore(deps): bump web-deps group (18 npm packages) | ✅ merged |
+
+### LL — Transcoder stateless ([#468](https://github.com/Alexzafra13/HubPlay_demo/pull/468))
+
+Eliminado `Transcoder.sessions map` + `Transcoder.mu` + 4 métodos públicos de tracking (`GetSession`, `Stop`, `StopAll`, `ActiveSessions`). El tracking vive **solamente en `Manager.sessions`**. El `Manager` ya garantizaba unicidad via `singleflight.Group` + fast-path, así que la lógica `if existing, ok := t.sessions[sessionID]` en `Transcoder.Start` era código defensivo muerto. En `cleanupIdle`, `ms.Stop()` (= `Session.Stop()`) ya cancela `cmd` y borra `OutputDir` — la llamada subsiguiente `m.transcoder.Stop(toRemove[i])` era doble cleanup. Net: -130 LoC, 6 olores altos del audit ahora **6/6 cerrados** (cierra el último: LL).
+
+### SignPath signing ([#469](https://github.com/Alexzafra13/HubPlay_demo/pull/469))
+
+Añade firma Authenticode opt-in al installer Windows existente (`HubPlay-Setup-*.exe`). 3 steps nuevos en el job `windows-installer` del release.yml, gated tras `vars.HUBPLAY_SIGNING_ENABLED == 'true'`. Mientras la variable no esté activa, el flujo corre exactamente igual que antes. Release notes condicionados al estado de la firma (texto distinto si firma activa vs no). Documentación: `docs/architecture/windows-installer-signing.md` (~250 LoC) con flow completo de aplicación SignPath Foundation, configuración del dashboard, secrets/vars de GitHub, verificación local con PowerShell/signtool, troubleshooting, rollback.
+
+**Pendiente de Alejandro** (no bloquea nada): aplicar en [signpath.org/apply](https://signpath.org/apply) (10 min formulario, espera 1-2 semanas), configurar el dashboard, añadir 1 secret + 4 vars, cambiar `HUBPLAY_SIGNING_ENABLED` a `true`. Próximo build sale firmado automático.
+
+### F15-3 / F15-4 / F15-9 — análisis y cierre sin código
+
+| Item | Estado | Justificación |
+|---|---|---|
+| **F15-3** (polling `waitForCount`) | ✅ ya cerrado por F15-1 | `auth/service_test.go:671-682` ya usa `select { case <-r.notify; case <-deadline }`. Comentario explícito en línea 641: *"cada handle() señaliza notify, así que waitForCount espera deterministamente sin time.Sleep"*. |
+| **F15-4** (`TestManager_CloseStopsSweeperGoroutine`) | ✅ ya cerrado por F15-1 batch 4 | `federation/stream_test.go:112` mantiene `time.Sleep(50ms)` con comentario explícito *"Sleep LEGÍTIMO (F15-1 batch 4)"*. Es ruido de scheduler en la aserción `delta > 5` para 25 ciclos de Close. Goleak cubre la regresión real. |
+| **F15-9** (`time.After` en 23 tests) | ✅ cerrado por análisis | 37 sitios revisados (no 23 — creció desde el audit). **TODOS son patrones legítimos**: `select { case <-done; case <-time.After(timeout): t.Fatal(...) }` o `deadline := time.After(timeout); for !cond() { select { case <-notify; case <-deadline } }`. El audit hablaba de un anti-pattern *teórico* (timer no recolectado al timeout) que Go 1.23+ **resuelve a nivel runtime**. HubPlay usa 1.24.7 → no hay leak real. Migrar a `context.WithTimeout` añadiría 3-4 h de churn mecánico sin arreglar un solo bug observable. |
+
+### Dependabot #424 — verificación
+
+18 bumps web-deps: 12 patches + 6 minors (incluyendo react-query 5.90→5.100, tailwindcss 4.2→4.3, vitest 4.1.0→4.1.7). Verificado local:
+
+- ✅ `pnpm install --frozen-lockfile` (12.1s)
+- ✅ `pnpm run build` (30s, 107 entries PWA)
+- ✅ `pnpm test` (**646/646**)
+- ✅ `pnpm run lint` (0 errors, 2 warnings preexistentes react-compiler con `useVirtualizer`)
+- ✅ `pnpm run typecheck` silent
+- ✅ `pnpm run knip` 0 unused
+
+Cero breaking changes a pesar de los 10 minors acumulados de react-query y el bump 4.2→4.3 de Tailwind v4.
+
+### Aprendizajes
+
+- **El installer Windows ya existía** desde antes (scripts/installer.iss + job `windows-installer` en release.yml + bundle NSSM como service manager). La tarea "Distribución / installer Windows" del backlog era ambigua — al explorar el repo descubrí que **lo único que faltaba era la firma**. Lección: antes de "implementar lo del backlog", **leer el código existente**; el alcance real puede ser menor del esperado.
+- **Cerrar items por análisis vs por refactor**: cuando un item del audit habla de un anti-pattern teórico (timer leak en `time.After`), verificar si el lenguaje/runtime moderno ya lo resuelve antes de gastar horas migrando. F15-9 era pura ceremonia con Go 1.24.7. Patrón replicable: si el audit dice "no causa fugas reales con Go moderno", probablemente la migración no aporta valor.
+- **SignPath opt-in via repo variable (no secret)**: `vars.HUBPLAY_SIGNING_ENABLED == 'true'` permite gated rollout. Mientras no esté activa, el código nuevo no afecta el flujo actual — cero riesgo al mergear. El operador activa cuando todo lo demás (aprobación SignPath, secrets) esté listo. Patrón replicable para cualquier feature CI que requiera setup externo del operador.
+- **Los UUIDs y slugs no son secrets**: SignPath organization-id, project-slug, signing-policy-slug se ponen como **variables** (no secrets). Permite verlos en logs, cambiarlos sin re-encriptar, y comparar en `if:` (los secrets de GHA no son comparables en condicionales). Solo el API token es secret.
+
+### Pendientes priorizadas (próximas sesiones)
+
+- **F15-5** — God-handler mocks de 16 métodos en `handlers/library_test.go` e `items_test.go`. Reducir fakes + añadir tests de integración con DB real.
+- **F15-6** — Happy path domina (3% de tests con naming `*_Error`/`*_Fail`). Table-driven + edge cases.
+- **F15-10/11/12** — Polish (baja): fakes compartidos, test naming, concurrency tests.
+- **Distribución (resto)** — auto-update del binario en producción, TLS LAN automático (mDNS + Let's Encrypt local), macOS notarized.
+
+**Backlog crítico**: ninguno. Todos los olores altos del audit (6/6) + medios principales cerrados. Lo que queda es polish y distribución avanzada.
+
+---
+
 ## 🎬 Sesión 2026-05-27 (parte 2) — VideoPlayer 3ª ola COMPLETA + ADR-026 follow-ups + F15-2 cerrado (11 PRs)
 
 Sesión larga centrada en cerrar la **3ª ola del refactor del
