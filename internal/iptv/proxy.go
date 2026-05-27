@@ -95,7 +95,7 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 	return &StreamProxy{
 		relays:  make(map[string]*relay),
 		logger:  logger.With("module", "stream-proxy"),
-		breaker: newChannelBreaker(clock.New()),
+		breaker: newChannelBreaker(clock.New(), logger),
 		client: &http.Client{
 			Transport: transport,
 			// No client-level timeout — it also clocks the body read, which

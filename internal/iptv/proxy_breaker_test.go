@@ -97,7 +97,7 @@ func TestProxyURL_HalfOpenTrialSuccess_ClosesBreaker(t *testing.T) {
 	// Inject a mock clock so we can advance past the cooldown window
 	// without sleeping.
 	mc := &clock.Mock{CurrentTime: time.Now()}
-	p.breaker = newChannelBreaker(mc)
+	p.breaker = newChannelBreaker(mc, nil)
 
 	for i := 0; i < breakerThreshold; i++ {
 		p.breaker.RecordFailure("c-recover")
