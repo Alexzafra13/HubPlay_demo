@@ -6,6 +6,79 @@
 
 ---
 
+## 🎬 Sesión 2026-05-27 (parte 2) — VideoPlayer 3ª ola COMPLETA + follow-ups logs (10 PRs)
+
+Sesión larga centrada en cerrar la **3ª ola del refactor del
+VideoPlayer** (787 → 652 LoC, -17.2%) y los **follow-ups del
+ADR-026** (logs centralizados + transmux + circuit breaker).
+
+### PRs mergeadas
+
+| PR | Tema | Estado |
+|---|---|---|
+| [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452) | test cobertura `usePlayerOverlays` (deuda 2ª ola) | ✅ merged |
+| [#454](https://github.com/Alexzafra13/HubPlay_demo/pull/454) | refactor `useVideoElementSync` | ✅ merged |
+| [#459](https://github.com/Alexzafra13/HubPlay_demo/pull/459) | fix urgente lint react-compiler (PR #454 mergeada sin commit del fix → main rojo) | ✅ merged |
+| [#460](https://github.com/Alexzafra13/HubPlay_demo/pull/460) | **4 hooks consolidados**: `useStreamSessionCleanup`, `useStartPositionSeek`, `useFullscreenSync`, `useExternalSubMode` | ✅ merged |
+| [#461](https://github.com/Alexzafra13/HubPlay_demo/pull/461) | `usePlayerActions` — 8 useCallback en un hook (**cierra 3ª ola**) | ✅ merged |
+| [#462](https://github.com/Alexzafra13/HubPlay_demo/pull/462) | log spawn-error en `transmux.startLocked` (ADR-026 item 1/4) | ✅ merged |
+| [#463](https://github.com/Alexzafra13/HubPlay_demo/pull/463) | `handleServiceError` loguea 5xx aunque vengan como `AppError` (ADR-026 item 2/4) | ✅ merged |
+| [#464](https://github.com/Alexzafra13/HubPlay_demo/pull/464) | logger inyectado en `circuit_breaker` + log de las 4 transiciones (ADR-026 item 3/4) | ✅ merged |
+
+PRs cerradas como superseded (su contenido vive en #460):
+[#455](https://github.com/Alexzafra13/HubPlay_demo/pull/455),
+[#456](https://github.com/Alexzafra13/HubPlay_demo/pull/456),
+[#457](https://github.com/Alexzafra13/HubPlay_demo/pull/457),
+[#458](https://github.com/Alexzafra13/HubPlay_demo/pull/458).
+
+### VideoPlayer 3ª ola — hooks extraídos
+
+| Hook | LoC quitadas | Tests | Notas |
+|---|---|---|---|
+| `useVideoElementSync` | -6 | 7 | 2 effects sync volume/mute/playbackRate al `<video>`. Re-aplica rate en remount. |
+| `useStreamSessionCleanup` | -20 | 5 | `pagehide` → `api.stopStreamSession` (evita leak de transcode ~90s). |
+| `useStartPositionSeek` | -19 | 8 | `canplay` listener + ref guard + reset on source change. Hook contiene su propio ref. |
+| `useFullscreenSync` | -9 | 5 | Listener `fullscreenchange` → sync al store. |
+| `useExternalSubMode` | -14 | 7 | rAF + force `track.mode = "showing"`. |
+| `usePlayerActions` | -67 | 26 | 8 useCallback (togglePlay/surfaceTap/seek/volume/mute/fullscreen/close/PiP). |
+
+**VideoPlayer.tsx**: 787 → **652 LoC** (-135 acumulados, -17.2%). 6 useEffect inline → 0. 9 useCallback inline → 1 (sólo `handleExternalSubPicked` queda porque depende de hooks externos).
+
+### ADR-026 follow-ups — estado final
+
+| Item | Cómo cerró | PR |
+|---|---|---|
+| 1. log spawn-error en `transmux.startLocked` | 3 `Warn` antes de cada return de error | [#462](https://github.com/Alexzafra13/HubPlay_demo/pull/462) |
+| 2. verificar `handleServiceError` audita servicios | Fix centralizado: log `Error` cuando `appErr.HTTPStatus >= 500` (evita auditoría servicio por servicio) | [#463](https://github.com/Alexzafra13/HubPlay_demo/pull/463) |
+| 3. logger en `iptv/circuit_breaker.go` | API: `newChannelBreaker(clk, logger)`. 4 transiciones logueadas (open/re-open Warn, half-open Debug, recovery Info) | [#464](https://github.com/Alexzafra13/HubPlay_demo/pull/464) |
+| 4. sub-loggers handlers grandes | **No vale la pena**: auditoría mostró que `federation_admin` / `me_peers` / `collections` tienen 1-2 logs por handler. `iptv/proxy.go::ProxyURL` tiene 2 logs que comparten `channel` pero los logs del breaker (item 3) ya cubren ese contexto — doble log redundante. Cerrado a la práctica. | — |
+
+### Métricas globales acumuladas
+
+- **VideoPlayer.tsx**: 787 → 652 LoC (-17.2%, -135 LoC).
+- **Tests frontend**: 622 → **717** (+95 acumulados; +69 en hooks del player, +26 en `usePlayerActions`).
+- **6 hooks nuevos** del player en `web/src/hooks/`.
+- **Backend tests añadidos**: +5 en circuit_breaker, +3 en handleServiceError = +8 (total no medido).
+
+### Aprendizajes registrados
+
+- **Cuidado al mergear PRs sin esperar CI**: PR #454 se mergeó manualmente sin esperar al commit del fix de lint (576a843) que ya estaba en la rama. Resultado: main rojo durante ~15 min hasta el fix urgente #459. Tomar nota: **si la rama tiene > 1 commit y el último es un fix de CI, esperar a que el CI lo refleje verde antes de mergear**.
+- **Cherry-pick chain con conflictos triviales**: 4 PRs ramificadas de main pre-`useVideoElementSync` tenían el mismo conflicto trivial (4 líneas de import). En vez de rebasar 4 veces, **consolidé en una sola PR** (#460) y cerré las 4 originales como superseded. Más limpio para el revisor.
+- **Fix centralizado vs audit por paquete**: el follow-up #4 sugirió auditar servicio por servicio. En vez de eso, [#463](https://github.com/Alexzafra13/HubPlay_demo/pull/463) lo arregló de raíz en `handleServiceError` (1 if + 8 LoC vs horas de audit + posibles regresiones).
+- **react-compiler quirk**: mutar `video.volume = X` dentro de un `useEffect` con `videoRef` como prop dispara `react-compiler/react-compiler`. Patrón del codebase: `// eslint-disable-next-line react-compiler/react-compiler` con comentario explicativo (mutar atributos del HTMLMediaElement es la API estándar). El compiler sólo reporta la primera mutación por archivo — un disable basta.
+
+### Pendientes priorizadas (próximas sesiones)
+
+- **F15-2 db repos** — `time.Now()` en INSERT/UPDATE de los repos
+  (voluminoso pero homogéneo, ~2-3h).
+- **Dependabot #424** — bump web-deps group (18 paquetes npm,
+  posible breaking changes).
+- **LL Transcoder stateless** — sesión grande propia.
+- **Distribución** — installer Windows firmado (SignPath),
+  auto-update, TLS LAN.
+
+---
+
 ## 🪵 Sesión 2026-05-27 — F15-7 + F15-2 + auditoría completa de logs (7 PRs)
 
 Sesión larga centrada en cerrar el F15-7 (t.Parallel restante) y el
