@@ -29,29 +29,30 @@ import (
 	"net/http"
 
 	"hubplay/internal/domain"
-	"hubplay/internal/event"
 	"hubplay/internal/iptv"
 )
 
-// IPTVHandler handles IPTV channel and EPG endpoints. Methods live in
-// the per-sub-domain files listed in the package doc.
+// IPTVHandler es el facade que ensambla los sub-handlers del surface
+// IPTV. Los sub-handlers con micro-interfaces propias se embeben por
+// puntero (misma técnica que ItemHandler). Los métodos que aún no han
+// migrado a sub-handler viven como receivers directos del facade.
 type IPTVHandler struct {
+	// Sub-handlers con micro-interfaces (cierre progresivo de NN).
+	*iptvPlaybackFailureHandler
+	*iptvEPGHandler
+	*iptvPersonalisationHandler
+	*iptvAdminOrderHandler
+
+	// Campos del facade — usados por los métodos que aún no han
+	// migrado a sub-handler propio.
 	svc       IPTVService
 	proxy     IPTVStreamProxyService
-	transmux  IPTVTransmuxer  // optional; nil disables MPEG-TS → HLS transmux
-	logoCache *iptv.LogoCache // optional; nil falls back to upstream URLs in DTO
-	// imageDir es la raíz donde se sirven imágenes (pósters, fanart,
-	// logos de canal subidos). El subdir "channel-logos/" se crea bajo
-	// este path para las subidas de logos del admin. Vacío deshabilita
-	// el flujo de subida (los endpoints devuelven 503).
+	transmux  IPTVTransmuxer
+	logoCache *iptv.LogoCache
 	imageDir  string
 	libraries LibraryRepository
 	access    LibraryAccessService
 	audit     AuditEmitter
-	// bus es opcional. Cuando está presente, los handlers de
-	// personalización per-user publican eventos `channel.order.updated`
-	// para que /me/events los entregue a los otros dispositivos del
-	// mismo usuario. Nil = no-op (test rigs).
 	bus       EventBusPublisher
 	logger    *slog.Logger
 }
@@ -69,7 +70,20 @@ type IPTVHandler struct {
 //     constructed best-effort in main.go and only ends up nil if the
 //     cache directory can't be created.
 func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, bus EventBusPublisher, logger *slog.Logger) *IPTVHandler {
+	lg := logger.With("module", "iptv-handler")
 	return &IPTVHandler{
+		iptvPlaybackFailureHandler: &iptvPlaybackFailureHandler{
+			svc: svc, access: access, logger: lg,
+		},
+		iptvEPGHandler: &iptvEPGHandler{
+			svc: svc, access: access, logger: lg,
+		},
+		iptvPersonalisationHandler: &iptvPersonalisationHandler{
+			svc: svc, access: access, bus: bus, logger: lg,
+		},
+		iptvAdminOrderHandler: &iptvAdminOrderHandler{
+			svc: svc, logger: lg,
+		},
 		svc:       svc,
 		proxy:     proxy,
 		transmux:  transmux,
@@ -79,22 +93,10 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTV
 		access:    access,
 		audit:     audit,
 		bus:       bus,
-		logger:    logger.With("module", "iptv-handler"),
+		logger:    lg,
 	}
 }
 
-// publishOrderUpdated fans out a per-user `channel.order.updated`
-// event so other devices of the same user can refetch their Live TV
-// list. nil-bus is a no-op so test rigs without a bus stay simple.
-func (h *IPTVHandler) publishOrderUpdated(userID string) {
-	if h.bus == nil {
-		return
-	}
-	h.bus.Publish(event.Event{
-		Type: event.ChannelOrderUpdated,
-		Data: map[string]any{"user_id": userID},
-	})
-}
 
 func (h *IPTVHandler) auditEmit() AuditEmitter {
 	if h.audit != nil {
@@ -110,9 +112,15 @@ func (h *IPTVHandler) canAccessLibrary(r *http.Request, libraryID string) bool {
 	return canAccessLibrary(r, h.access, h.logger, libraryID)
 }
 
-// denyForbidden writes a NOT_FOUND response (not 403) so an unauthorised
-// user can't distinguish "channel exists but you can't see it" from
-// "channel doesn't exist" — same treatment libraries already give.
-func (h *IPTVHandler) denyForbidden(w http.ResponseWriter, r *http.Request) {
+// iptvDenyForbidden writes a NOT_FOUND response (not 403) so an
+// unauthorised user can't distinguish "channel exists but you can't
+// see it" from "channel doesn't exist".
+func iptvDenyForbidden(w http.ResponseWriter, r *http.Request) {
 	respondAppError(w, r.Context(), domain.NewNotFound("channel"))
+}
+
+// denyForbidden thin wrapper para mantener compatibilidad con los
+// ficheros que aún usan receiver. Se eliminará al completar el split.
+func (h *IPTVHandler) denyForbidden(w http.ResponseWriter, r *http.Request) {
+	iptvDenyForbidden(w, r)
 }

@@ -1,24 +1,27 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
-// Admin overlay of the channel list, the counterpart of the
-// per-user personalisation surface. The admin panel at
-// /admin/libraries/{id} uses these endpoints to reorder + hide
-// channels at the library level — hidden HERE is a hard
-// constraint, users cannot un-hide via their own overlay.
-//
-// All routes here are admin-gated by the router (admin role on
-// the parent route group). Library access is implicit (admin sees
-// everything).
-//
-// Routes:
-//   PUT    /libraries/{id}/channels/order            — replace full ordering
-//   PUT    /libraries/{id}/channels/{channelId}/admin-visibility — hide/show
-//   DELETE /libraries/{id}/channels/order            — restore M3U defaults
+// adminChannelOrderManager es el contrato mínimo para la curación
+// admin de orden de canales. 4 de ~50 métodos.
+type adminChannelOrderManager interface {
+	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error)
+	ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error
+	SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error
+	ResetLibraryChannelOrder(ctx context.Context, libraryID string) error
+}
+
+type iptvAdminOrderHandler struct {
+	svc    adminChannelOrderManager
+	logger *slog.Logger
+}
 
 type libraryChannelOrderRequest struct {
 	OrderedChannelIDs []string `json:"ordered_channel_ids"`
@@ -29,7 +32,7 @@ type libraryChannelOrderRequest struct {
 // list and persists it in one transaction. Same shape as the
 // per-user endpoint so the frontend can reuse its serialisation
 // code.
-func (h *IPTVHandler) ReplaceLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminOrderHandler) ReplaceLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
@@ -62,7 +65,7 @@ type libraryChannelVisibilityRequest struct {
 // state at the admin level. Surgical edit for the eye toggle on
 // each row of the curation panel — avoids re-uploading the full
 // reordered list when the admin just wants to hide one channel.
-func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminOrderHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
@@ -85,7 +88,7 @@ func (h *IPTVHandler) SetLibraryChannelVisibility(w http.ResponseWriter, r *http
 
 // ResetLibraryChannelOrder wipes the admin overlay for a library,
 // restoring the order + visibility from the M3U import.
-func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminOrderHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
@@ -103,7 +106,7 @@ func (h *IPTVHandler) ResetLibraryChannelOrder(w http.ResponseWriter, r *http.Re
 // toggle next to them. Distinct from the user-facing ListChannels
 // because admins curating need to see what they hid in order to
 // un-hide it, but downstream users must NOT (hard constraint).
-func (h *IPTVHandler) ListLibraryChannelsAdmin(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminOrderHandler) ListLibraryChannelsAdmin(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
