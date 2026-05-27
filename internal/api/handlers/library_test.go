@@ -452,6 +452,22 @@ func TestLibraryHandler_Get_NotFound_404(t *testing.T) {
 	}
 }
 
+// El handler mapea errores genéricos del service (no AppError) a 500 vía
+// handleServiceError default case. Pin: si en algún momento se filtran
+// errores opacos del repo (driver SQL caído, contexto cancelado),
+// el cliente recibe 500 (no 404, que ocultaría el problema).
+func TestLibraryHandler_Get_ServiceError_500(t *testing.T) {
+	t.Parallel()
+	env := newLibTestEnv(t)
+	env.svc.getByIDFn = func(_ context.Context, _ string) (*librarymodel.Library, error) {
+		return nil, errors.New("db: connection refused")
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1", "", nil)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", rr.Code)
+	}
+}
+
 // ─── Update ─────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Update_HappyPath(t *testing.T) {
@@ -480,6 +496,32 @@ func TestLibraryHandler_Update_InvalidJSON_400(t *testing.T) {
 	}
 }
 
+func TestLibraryHandler_Update_NotFound_404(t *testing.T) {
+	t.Parallel()
+	env := newLibTestEnv(t)
+	env.svc.updateFn = func(_ context.Context, _ string, _ library.UpdateRequest) (*librarymodel.Library, error) {
+		return nil, domain.NewNotFound("library")
+	}
+	body := `{"name":"X","content_type":"movies","paths":["/m"],"scan_mode":"manual"}`
+	rr := env.do(http.MethodPut, "/api/v1/libraries/missing", body, nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", rr.Code)
+	}
+}
+
+func TestLibraryHandler_Update_ServiceError_500(t *testing.T) {
+	t.Parallel()
+	env := newLibTestEnv(t)
+	env.svc.updateFn = func(_ context.Context, _ string, _ library.UpdateRequest) (*librarymodel.Library, error) {
+		return nil, errors.New("db: write timeout")
+	}
+	body := `{"name":"X","content_type":"movies","paths":["/m"],"scan_mode":"manual"}`
+	rr := env.do(http.MethodPut, "/api/v1/libraries/lib-1", body, nil)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", rr.Code)
+	}
+}
+
 // ─── Delete ─────────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_Delete_HappyPath(t *testing.T) {
@@ -503,6 +545,18 @@ func TestLibraryHandler_Delete_NotFound_404(t *testing.T) {
 	rr := env.do(http.MethodDelete, "/api/v1/libraries/missing", "", nil)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status: %d", rr.Code)
+	}
+}
+
+func TestLibraryHandler_Delete_ServiceError_500(t *testing.T) {
+	t.Parallel()
+	env := newLibTestEnv(t)
+	env.svc.deleteFn = func(_ context.Context, _ string) error {
+		return errors.New("db: foreign key violation")
+	}
+	rr := env.do(http.MethodDelete, "/api/v1/libraries/lib-1", "", nil)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", rr.Code)
 	}
 }
 
@@ -754,6 +808,22 @@ func TestLibraryHandler_Items_OmitsUserDataWhenAnonymous(t *testing.T) {
 	}
 }
 
+// Items con service error genérico debe rendir 500 (no 200 con lista
+// vacía). Si el repo subyacente falla, el cliente necesita ver el fallo
+// para que el retry/back-off del frontend (TanStack Query) reaccione,
+// en vez de cachear una página "sin items" que en realidad es un error.
+func TestLibraryHandler_Items_ServiceError_500(t *testing.T) {
+	t.Parallel()
+	env := newLibTestEnv(t)
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+		return nil, 0, errors.New("db: query timeout")
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/items", "", nil)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", rr.Code)
+	}
+}
+
 // ─── LatestItems ────────────────────────────────────────────────────────────
 
 func TestLibraryHandler_LatestItems_RespectsQueryParams(t *testing.T) {
@@ -775,6 +845,18 @@ func TestLibraryHandler_LatestItems_RespectsQueryParams(t *testing.T) {
 	data, _ := libDecodeData(t, rr).(map[string]any)
 	if data["total"] != float64(2) {
 		t.Errorf("total: %v", data["total"])
+	}
+}
+
+func TestLibraryHandler_LatestItems_ServiceError_500(t *testing.T) {
+	t.Parallel()
+	env := newLibTestEnv(t)
+	env.svc.latestFn = func(_ context.Context, _, _ string, _ int) ([]*librarymodel.Item, error) {
+		return nil, errors.New("db: unavailable")
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/latest-items?library_id=lib-1&type=movie", "", nil)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", rr.Code)
 	}
 }
 
