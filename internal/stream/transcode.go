@@ -8,12 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 )
 
-// Session representa una sesión de transcoding activa.
-// Los campos cmd/cancel/done son internos; Manager.sessions es la vista pública.
+// Session representa un proceso ffmpeg activo. Los campos cmd/cancel/done
+// son internos al paquete; el lifecycle se controla vía Stop. El tracking
+// de qué sesiones existen vive en Manager.sessions — el Transcoder es
+// stateless (audit LL 2026-05-14).
 type Session struct {
 	ID        string
 	ItemID    string
@@ -25,17 +26,18 @@ type Session struct {
 	done      chan struct{}
 }
 
-// Transcoder gestiona procesos ffmpeg.
+// Transcoder spawnea procesos ffmpeg. Stateless: ni map ni mutex — cada
+// llamada a Start/RestartAt arranca un nuevo proceso y devuelve la
+// Session resultante. La responsabilidad de tracking (qué sesiones
+// existen, cuándo pararlas) es del Manager.
 type Transcoder struct {
-	mu               sync.Mutex
-	sessions         map[string]*Session
 	baseDir          string
 	ffmpeg           string
 	transcodeTimeout time.Duration
-	hwAccel       HWAccelType
-	encoder       string
-	libx264Preset string
-	logger        *slog.Logger
+	hwAccel          HWAccelType
+	encoder          string
+	libx264Preset    string
+	logger           *slog.Logger
 }
 
 // TranscoderConfig agrupa los parámetros de NewTranscoder.
@@ -71,7 +73,6 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 		libx264Preset = "veryfast"
 	}
 	return &Transcoder{
-		sessions:         make(map[string]*Session),
 		baseDir:          cfg.BaseDir,
 		ffmpeg:           ffmpegPath,
 		transcodeTimeout: transcodeTimeout,
@@ -82,18 +83,14 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 	}
 }
 
-// Start inicia una sesión HLS. El caller llena los campos caller-side
+// Start arranca una sesión HLS. El caller llena los campos caller-side
 // de req; los 4 campos transcoder-side (OutputDir, HWAccel, Encoder,
 // Libx264Preset) se sobrescriben con el estado interno del Transcoder.
+//
+// El Transcoder no controla unicidad por sessionID — el caller (Manager)
+// garantiza vía singleflight que no haya dos spawns concurrentes para la
+// misma key.
 func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if existing, ok := t.sessions[sessionID]; ok {
-		existing.Stop()
-		delete(t.sessions, sessionID)
-	}
-
 	outputDir := filepath.Join(t.baseDir, sessionID)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating output dir: %w", err)
@@ -134,7 +131,6 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 		}
 	}()
 
-	t.sessions[sessionID] = session
 	t.logger.Info("transcoding started",
 		"session", sessionID,
 		"item", itemID,
@@ -145,14 +141,14 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 	return session, nil
 }
 
-// RestartAt reemplaza el proceso ffmpeg de una sesión existente sin
-// borrar los segmentos previos (útil para seeks hacia atrás). A
-// diferencia de Start, NO llama Stop (no borra el outputDir).
-// Contrato de req igual que Start: caller-side / transcoder-side.
+// RestartAt arranca un nuevo proceso ffmpeg en el offset dado SIN borrar
+// los segmentos previos (útil para seeks hacia atrás dentro del rango
+// ya codificado). A diferencia de Start no toca el outputDir.
+//
+// El caller es responsable de detener la sesión anterior (cancel + drain
+// del done) antes de llamar a RestartAt — el Transcoder no lo hace por
+// él.
 func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	outputDir := filepath.Join(t.baseDir, sessionID)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("ensuring output dir: %w", err)
@@ -192,7 +188,6 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 		}
 	}()
 
-	t.sessions[sessionID] = session
 	t.logger.Info("transcoding restarted",
 		"session", sessionID,
 		"item", itemID,
@@ -200,52 +195,6 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 		"start_segment", req.StartSegmentNumber,
 	)
 	return session, nil
-}
-
-// GetSession devuelve una sesión activa por ID.
-func (t *Transcoder) GetSession(sessionID string) (*Session, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	s, ok := t.sessions[sessionID]
-	return s, ok
-}
-
-// Stop termina una sesión y limpia el directorio de salida.
-func (t *Transcoder) Stop(sessionID string) {
-	t.mu.Lock()
-	s, ok := t.sessions[sessionID]
-	if ok {
-		delete(t.sessions, sessionID)
-	}
-	t.mu.Unlock()
-
-	if ok {
-		s.Stop()
-		t.logger.Info("transcoding stopped", "session", sessionID)
-	}
-}
-
-// StopAll detiene todas las sesiones activas.
-func (t *Transcoder) StopAll() {
-	t.mu.Lock()
-	sessions := make([]*Session, 0, len(t.sessions))
-	for _, s := range t.sessions {
-		sessions = append(sessions, s)
-	}
-	t.sessions = make(map[string]*Session)
-	t.mu.Unlock()
-
-	for _, s := range sessions {
-		s.Stop()
-	}
-	t.logger.Info("all transcoding sessions stopped", "count", len(sessions))
-}
-
-// ActiveSessions devuelve el número de sesiones activas.
-func (t *Transcoder) ActiveSessions() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return len(t.sessions)
 }
 
 // Stop cancela el proceso ffmpeg y borra los ficheros de salida.

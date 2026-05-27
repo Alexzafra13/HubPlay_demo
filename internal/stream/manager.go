@@ -40,9 +40,10 @@ func (noopSink) SetActiveSessions(n int) {}
 
 // Manager orquesta sesiones de streaming (direct play, remux, transcode).
 //
-// Manager.sessions usa clave compuesta (sessionKey) — vista lógica por
-// usuario. Transcoder.sessions usa sessionID bare — control del proceso
-// ffmpeg. Ambos mapas apuntan al mismo *Session subyacente.
+// Manager.sessions usa clave compuesta (sessionKey) y es la única fuente
+// de verdad sobre qué sesiones existen — el Transcoder es stateless
+// (audit LL 2026-05-14). Stop de una sesión = ms.Stop() (cancela el
+// cmd ffmpeg + borra OutputDir vía Session.Stop).
 type Manager struct {
 	mu         sync.Mutex
 	sessions   map[string]*ManagedSession
@@ -813,7 +814,6 @@ func (m *Manager) cleanupIdle(maxIdle time.Duration) {
 
 	for i, ms := range toStop {
 		ms.Stop()
-		m.transcoder.Stop(toRemove[i])
 		m.logger.Info("cleaned up idle session", "key", toRemove[i])
 	}
 
