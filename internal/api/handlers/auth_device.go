@@ -100,7 +100,7 @@ func (h *DeviceAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	pair, err := h.svc.StartDevice(r.Context(), req.DeviceName, verURL)
 	if err != nil {
-		h.logger.Error("device start failed", "err", err)
+		h.logger.Error("device start failed", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start device flow")
 		return
 	}
@@ -203,7 +203,7 @@ func (h *DeviceAuthHandler) writePollError(w http.ResponseWriter, r *http.Reques
 		respondError(w, r, http.StatusBadRequest, "access_denied",
 			"the approving user account is disabled")
 	default:
-		h.logger.Error("device poll failed unexpectedly", "err", err)
+		h.logger.Error("device poll failed unexpectedly", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "poll failed")
 	}
 }
@@ -252,7 +252,7 @@ func (h *DeviceAuthHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			respondError(w, r, http.StatusForbidden, "ACCOUNT_DISABLED",
 				"your account is disabled")
 		default:
-			h.logger.Error("device approve failed", "err", err)
+			h.logger.Error("device approve failed", "error", err)
 			respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "approve failed")
 		}
 		return
@@ -316,7 +316,7 @@ func (h *DeviceAuthHandler) Events(w http.ResponseWriter, r *http.Request) {
 				"unknown device_code")
 			return
 		}
-		h.logger.Error("device events inspect failed", "err", err)
+		h.logger.Error("device events inspect failed", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
 			"failed to start event stream")
 		return

@@ -47,7 +47,7 @@ func (h *MePeersHandler) GetPeerItemProgress(w http.ResponseWriter, r *http.Requ
 	p, err := h.mgr.GetProgress(r.Context(), claims.UserID, peerID, itemID)
 	if err != nil {
 		h.logger.Error("federation: get peer item progress",
-			"peer_id", peerID, "item_id", itemID, "err", err)
+			"peer_id", peerID, "item_id", itemID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read progress")
 		return
 	}
@@ -117,7 +117,7 @@ func (h *MePeersHandler) UpdatePeerItemProgress(w http.ResponseWriter, r *http.R
 		Completed:     completed,
 	}); err != nil {
 		h.logger.Error("federation: update peer item progress",
-			"peer_id", peerID, "item_id", itemID, "err", err)
+			"peer_id", peerID, "item_id", itemID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update progress")
 		return
 	}
@@ -161,7 +161,7 @@ func (h *MePeersHandler) PeerContinueWatching(w http.ResponseWriter, r *http.Req
 	}
 	rows, err := h.mgr.ListContinueWatching(r.Context(), claims.UserID, limit)
 	if err != nil {
-		h.logger.Error("federation: continue watching", "err", err)
+		h.logger.Error("federation: continue watching", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list continue watching")
 		return
 	}

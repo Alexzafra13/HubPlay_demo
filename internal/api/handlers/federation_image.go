@@ -106,7 +106,7 @@ func (h *FederationImageHandler) ItemPoster(w http.ResponseWriter, r *http.Reque
 	//    (a "play but no card art" UX would be surprising).
 	share, err := h.mgr.GetLibraryShare(r.Context(), peer.ID, item.LibraryID)
 	if err != nil {
-		h.logger.Error("federation: get share for poster", "err", err, "peer_id", peer.ID, "library_id", item.LibraryID)
+		h.logger.Error("federation: get share for poster", "error", err, "peer_id", peer.ID, "library_id", item.LibraryID)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "share lookup failed")
 		return
 	}
@@ -121,7 +121,7 @@ func (h *FederationImageHandler) ItemPoster(w http.ResponseWriter, r *http.Reque
 	//    we extract the id to feed ServeImageByID.
 	urls, err := h.images.GetPrimaryURLs(r.Context(), []string{itemID})
 	if err != nil {
-		h.logger.Error("federation: get primary url", "err", err, "item_id", itemID)
+		h.logger.Error("federation: get primary url", "error", err, "item_id", itemID)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "image lookup failed")
 		return
 	}

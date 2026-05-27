@@ -49,7 +49,7 @@ type listPeerWire struct {
 func (h *MePeersHandler) ListMyPeers(w http.ResponseWriter, r *http.Request) {
 	peers, err := h.mgr.ListPeers(r.Context())
 	if err != nil {
-		h.logger.Error("federation: list peers for me", "err", err)
+		h.logger.Error("federation: list peers for me", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list peers")
 		return
 	}
@@ -92,7 +92,7 @@ type unifiedLibraryWire struct {
 func (h *MePeersHandler) BrowseAllPeerLibraries(w http.ResponseWriter, r *http.Request) {
 	results, err := h.mgr.BrowseAllPeerLibraries(r.Context())
 	if err != nil {
-		h.logger.Error("federation: browse all peer libraries", "err", err)
+		h.logger.Error("federation: browse all peer libraries", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list libraries")
 		return
 	}
@@ -127,7 +127,7 @@ func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Requ
 			respondError(w, r, http.StatusNotFound, "PEER_NOT_FOUND", "peer not found")
 			return
 		}
-		h.logger.Warn("federation: browse peer libraries", "peer_id", peerID, "err", err)
+		h.logger.Warn("federation: browse peer libraries", "peer_id", peerID, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}
@@ -203,7 +203,7 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 	result, err := h.mgr.BrowsePeerItems(r.Context(), peerID, libraryID, offset, limit)
 	if err != nil {
 		h.logger.Warn("federation: browse peer items",
-			"peer_id", peerID, "library_id", libraryID, "err", err)
+			"peer_id", peerID, "library_id", libraryID, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}
@@ -276,7 +276,7 @@ func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
 
 	hits, err := h.mgr.SearchAllPeers(r.Context(), query, perPeerLimit, 2*time.Second)
 	if err != nil {
-		h.logger.Warn("federation: search all peers", "err", err)
+		h.logger.Warn("federation: search all peers", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
@@ -321,7 +321,7 @@ func (h *MePeersHandler) RecentPeers(w http.ResponseWriter, r *http.Request) {
 
 	hits, err := h.mgr.RecentFromAllPeers(r.Context(), perPeerLimit, 2*time.Second)
 	if err != nil {
-		h.logger.Warn("federation: recent all peers", "err", err)
+		h.logger.Warn("federation: recent all peers", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
@@ -364,7 +364,7 @@ func (h *MePeersHandler) RefreshPeerLibrary(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := h.mgr.PurgeCache(r.Context(), peerID, libraryID); err != nil {
-		h.logger.Error("federation: purge cache", "err", err)
+		h.logger.Error("federation: purge cache", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to purge cache")
 		return
 	}

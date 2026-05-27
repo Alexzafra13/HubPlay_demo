@@ -96,7 +96,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 	// Get external IDs for this item
 	extIDs, err := h.externalIDs.ListByItem(r.Context(), itemID)
 	if err != nil {
-		h.logger.Error("failed to get external IDs", "item", itemID, "error", err)
+		h.logger.Error("failed to get external IDs", "item_id", itemID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get external IDs")
 		return
 	}
@@ -132,7 +132,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 	// Fetch available images from providers
 	results, err := h.providers.FetchImages(r.Context(), idMap, itemType)
 	if err != nil {
-		h.logger.Error("failed to fetch images from providers", "item", itemID, "error", err)
+		h.logger.Error("failed to fetch images from providers", "item_id", itemID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch images from providers")
 		return
 	}
@@ -212,7 +212,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
-	h.auditEmit().LogArtworkChanged(r.Context(), r, "item", itemID, imgType)
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "item_id", itemID, imgType)
 
 	respondData(w, http.StatusOK, imageResponse(img))
 }
@@ -290,7 +290,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
-	h.auditEmit().LogArtworkChanged(r.Context(), r, "item", itemID, imgType)
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "item_id", itemID, imgType)
 
 	respondData(w, http.StatusOK, imageResponse(img))
 }
@@ -430,7 +430,7 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 
 	updated, err := h.refresher.RefreshForLibrary(r.Context(), libraryID)
 	if err != nil {
-		h.logger.Error("image refresh failed", "library", libraryID, "error", err)
+		h.logger.Error("image refresh failed", "library_id", libraryID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to refresh images")
 		return
 	}
@@ -475,7 +475,7 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 		// Debug y no Warn: ServeImage es hot-path (cada miniatura del grid es
 		// un GET); si una entrada del pathmap está corrupta, generaría Warn
 		// en cada request al mismo id.
-		h.logger.Debug("pathmap points outside imageDir — ignoring", "id", imageID, "path", localPath)
+		h.logger.Debug("pathmap points outside imageDir — ignoring", "image_id", imageID, "path", localPath)
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image file not found")
 		return
 	}
@@ -509,7 +509,7 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 			if !h.isUnderImageDir(thumbPath) {
 				// imageID was UUID-valid so this should not happen, but be safe.
 				// Debug por la misma razón que el pathmap check de arriba (hot-path).
-				h.logger.Debug("thumbnail path escaped imageDir", "id", imageID)
+				h.logger.Debug("thumbnail path escaped imageDir", "image_id", imageID)
 				http.ServeFile(w, r, localPath)
 				return
 			}
@@ -520,7 +520,7 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 					// Debug: si el resizer falla persistente generaría un Warn por
 					// GET de miniatura → saturación. El fallback a original cubre.
 					h.logger.Debug("failed to generate thumbnail, serving original",
-						"id", imageID, "width", maxWidth, "error", genErr)
+						"image_id", imageID, "width", maxWidth, "error", genErr)
 					http.ServeFile(w, r, localPath)
 					return
 				}
@@ -674,7 +674,7 @@ func (h *ImageHandler) persistManualImage(
 // so a missing mapping only costs a fallback DB lookup on serve.
 func (h *ImageHandler) writePathMapping(imageID, localPath string) {
 	if err := h.pathmap.Write(imageID, localPath); err != nil {
-		h.logger.Warn("pathmap write failed", "id", imageID, "error", err)
+		h.logger.Warn("pathmap write failed", "image_id", imageID, "error", err)
 	}
 }
 
@@ -690,6 +690,6 @@ func (h *ImageHandler) readPathMapping(imageID string) string {
 
 func (h *ImageHandler) removePathMapping(imageID string) {
 	if err := h.pathmap.Remove(imageID); err != nil {
-		h.logger.Warn("pathmap remove failed", "id", imageID, "error", err)
+		h.logger.Warn("pathmap remove failed", "image_id", imageID, "error", err)
 	}
 }

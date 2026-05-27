@@ -75,7 +75,7 @@ func (h *MePeersHandler) StartPeerStreamSession(w http.ResponseWriter, r *http.R
 			return
 		}
 		h.logger.Warn("federation: start peer stream session",
-			"peer_id", peerID, "item_id", itemID, "err", err)
+			"peer_id", peerID, "item_id", itemID, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}
@@ -196,7 +196,7 @@ func (h *MePeersHandler) proxyPeerStreamPath(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		h.logger.Warn("federation: proxy stream request",
-			"peer_id", peerID, "session_id", sessionID, "err", err)
+			"peer_id", peerID, "session_id", sessionID, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}

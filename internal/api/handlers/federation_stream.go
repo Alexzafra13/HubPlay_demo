@@ -121,7 +121,7 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 	}
 	share, err := h.mgr.GetLibraryShare(r.Context(), peer.ID, item.LibraryID)
 	if err != nil {
-		h.logger.Error("federation: get share for stream", "err", err, "peer_id", peer.ID, "library_id", item.LibraryID)
+		h.logger.Error("federation: get share for stream", "error", err, "peer_id", peer.ID, "library_id", item.LibraryID)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "share lookup failed")
 		return
 	}
@@ -151,7 +151,7 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 		BurnSubIndex:     -1,
 	})
 	if err != nil {
-		h.logger.Warn("federation: start stream session failed", "err", err, "peer_id", peer.ID, "item_id", itemID)
+		h.logger.Warn("federation: start stream session failed", "error", err, "peer_id", peer.ID, "item_id", itemID)
 		handleServiceError(w, r, err)
 		return
 	}
@@ -243,7 +243,7 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 		BurnSubIndex:     -1,
 	})
 	if err != nil {
-		h.logger.Warn("federation: quality playlist start session", "err", err, "peer", peer.ID, "session", sess.ID)
+		h.logger.Warn("federation: quality playlist start session", "error", err, "peer", peer.ID, "session", sess.ID)
 		handleServiceError(w, r, err)
 		return
 	}

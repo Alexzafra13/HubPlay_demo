@@ -95,13 +95,13 @@ type libraryDiskWire struct {
 func (h *AdminStorageHandler) Disks(w http.ResponseWriter, r *http.Request) {
 	libs, err := h.libraries.List(r.Context())
 	if err != nil {
-		h.logger.Error("list libraries", "err", err)
+		h.logger.Error("list libraries", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to list libraries")
 		return
 	}
 	sizes, err := h.items.SumItemSizesByLibrary(r.Context())
 	if err != nil {
-		h.logger.Error("sum item sizes", "err", err)
+		h.logger.Error("sum item sizes", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to compute library sizes")
 		return
 	}
@@ -113,7 +113,7 @@ func (h *AdminStorageHandler) Disks(w http.ResponseWriter, r *http.Request) {
 	// y el resto del panel sigue funcionando.
 	parts, err := disk.Partitions(false)
 	if err != nil {
-		h.logger.Warn("disk.Partitions failed; falling back to empty mount list", "err", err)
+		h.logger.Warn("disk.Partitions failed; falling back to empty mount list", "error", err)
 		parts = nil
 	}
 	// Sort por mountpoint length desc para que longest-prefix-match
@@ -166,7 +166,7 @@ func (h *AdminStorageHandler) Disks(w http.ResponseWriter, r *http.Request) {
 		usage, err := disk.Usage(mount)
 		if err != nil {
 			h.logger.Warn("disk.Usage failed; skipping mount",
-				"mount", mount, "err", err)
+				"mount", mount, "error", err)
 			continue
 		}
 		// Ordenamos las libraries del bucket por size desc para que
