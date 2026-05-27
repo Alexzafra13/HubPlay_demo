@@ -108,8 +108,13 @@ func TestValidatePeerURL_RejectsMissingHost(t *testing.T) {
 // can swap the IP-block predicate. If this contract changes (e.g. the
 // var becomes a constant), the integration test rig stops being able
 // to wire httptest.Server URLs.
+//
+// NO t.Parallel: muta `blockedPeerIP` (var package-level) y los demás
+// tests del fichero la leen vía `validatePeerURL`. Si corriera en
+// paralelo, el race detector dispara — los seriales corren antes que
+// los paralelos pausados, así la restauración del defer ocurre antes
+// de que cualquier paralelo arranque.
 func TestValidatePeerURL_TestSeamRespected(t *testing.T) {
-	t.Parallel()
 	saved := blockedPeerIP
 	blockedPeerIP = func(_ net.IP) bool { return false }
 	defer func() { blockedPeerIP = saved }()

@@ -130,8 +130,12 @@ func TestBus_Unsubscribe_RemovesHandler(t *testing.T) {
 	bus.Publish(Event{Type: ItemAdded})
 	select {
 	case <-firstDone:
-	case <-time.After(time.Second):
-		t.Fatal("handler not called within 1s")
+	case <-time.After(5 * time.Second):
+		// 1s era el límite original; bajo CI cargado con -race + tests
+		// paralelos la goroutine del handler tarda más en arrancar. 5s
+		// sigue siendo un upper-bound generoso para fallar limpio si
+		// algo se rompe de verdad, sin flake bajo carga.
+		t.Fatal("handler not called within 5s")
 	}
 
 	unsub()

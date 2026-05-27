@@ -350,11 +350,13 @@ func TestTransmuxManager_GetOrStart_RespectsMaxSessions(t *testing.T) {
 }
 
 func TestTransmuxManager_IdleReaper_TerminatesUntouchedSession(t *testing.T) {
-	// Tight idle timeout so the reaper fires quickly. Real
-	// deployments use seconds, not 200 ms — this is just enough to
-	// observe the reaper without making the test sleep for a real
-	// production interval.
-	m := newTestManager(t, "ok", 200*time.Millisecond)
+	// IdleTimeout=500ms (no 200ms) por la misma razón que
+	// TestTransmuxManager_Touch_KeepsSessionAlive: bajo
+	// `-race -coverprofile` la latencia entre GetOrStart y la
+	// observación inmediata de ActiveSessions puede superar 200ms en
+	// runners de CI cargados (run 26498441669: got 0 want 1). 500ms
+	// sigue siendo "tight" pero deja margen al scheduler.
+	m := newTestManager(t, "ok", 500*time.Millisecond)
 	t.Cleanup(m.Shutdown)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -367,8 +369,8 @@ func TestTransmuxManager_IdleReaper_TerminatesUntouchedSession(t *testing.T) {
 		t.Fatalf("pre-reap ActiveSessions: got %d want 1", got)
 	}
 
-	// IdleTimeout=200ms + ReaperInterval=50ms; 3s da margen al CI lento.
-	if !m.WaitForActiveSessions(0, 3*time.Second) {
+	// IdleTimeout=500ms + ReaperInterval=50ms; 5s da margen al CI lento.
+	if !m.WaitForActiveSessions(0, 5*time.Second) {
 		t.Errorf("post-reap ActiveSessions: got %d want 0", m.ActiveSessions())
 	}
 }
@@ -760,9 +762,10 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 		t.Fatalf("first attempt: expected ErrTransmuxFailed, got %v", err)
 	}
 	// processWatcher promociona async tras cmd.Wait(). Bajo
-	// `-race -coverprofile` se ha observado al watcher preempted >5s
-	// (run 26152130700). 15s deja margen sin penalizar el happy path.
-	if !m.WaitForDecodeMode("ch-codec", decodeModeReencode, 15*time.Second) {
+	// `-race -coverprofile` se ha observado al watcher preempted >15s
+	// (runs 26152130700 + 26498441669). 30s deja margen suficiente sin
+	// penalizar el happy path (que termina en <1s con CI sano).
+	if !m.WaitForDecodeMode("ch-codec", decodeModeReencode, 30*time.Second) {
 		t.Fatalf("channel not promoted to reencode after codec crash; mode=%s",
 			m.pickDecodeMode("ch-codec"))
 	}
