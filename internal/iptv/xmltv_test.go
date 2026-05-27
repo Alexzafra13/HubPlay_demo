@@ -9,6 +9,7 @@ import (
 )
 
 func TestParseXMLTV_Basic(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0" encoding="UTF-8"?>
 <tv>
   <channel id="bbc1.uk">
@@ -79,6 +80,7 @@ func TestParseXMLTV_Basic(t *testing.T) {
 }
 
 func TestParseXMLTV_Empty(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0"?><tv></tv>`
 	data, err := ParseXMLTV(strings.NewReader(input))
 	if err != nil {
@@ -90,6 +92,7 @@ func TestParseXMLTV_Empty(t *testing.T) {
 }
 
 func TestParseXMLTV_SkipsInvalidTimes(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0"?>
 <tv>
   <programme start="invalid" stop="20260314190000" channel="ch1">
@@ -134,6 +137,7 @@ func (h *recordingHandler) OnProgramme(p EPGProgram) error {
 }
 
 func TestParseXMLTVStream_DispatchesElementsInOrder(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0"?>
 <tv>
   <channel id="bbc1.uk"><display-name>BBC One</display-name></channel>
@@ -169,6 +173,7 @@ func TestParseXMLTVStream_DispatchesElementsInOrder(t *testing.T) {
 }
 
 func TestParseXMLTVStream_SkipsBadTimesAndCounts(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0"?>
 <tv>
   <programme start="bogus" stop="20260314190000" channel="ch1"><title>Bad</title></programme>
@@ -190,6 +195,7 @@ func TestParseXMLTVStream_SkipsBadTimesAndCounts(t *testing.T) {
 }
 
 func TestParseXMLTVStream_HandlerErrorAborts(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0"?>
 <tv>
   <channel id="ch1"><display-name>One</display-name></channel>
@@ -212,6 +218,7 @@ func TestParseXMLTVStream_HandlerErrorAborts(t *testing.T) {
 }
 
 func TestParseXMLTVStream_RejectsMalformedXML(t *testing.T) {
+	t.Parallel()
 	// Unclosed <tv> root → the decoder's Token() will return an
 	// "unexpected EOF" or similar. We surface it as a parse error.
 	input := `<?xml version="1.0"?><tv><channel id="x">`
@@ -238,6 +245,7 @@ func (b *boundedAllocReader) Read(p []byte) (int, error) {
 }
 
 func TestParseXMLTVStream_StreamsLargeFeedWithoutBuffering(t *testing.T) {
+	t.Parallel()
 	// Synthesise a feed with 50k programmes. The eager parser would
 	// allocate 50k xmlTVProgramme structs in a slice up front. The
 	// streaming path must dispatch each one and let it go before
@@ -302,6 +310,7 @@ func (c *countingHandler) OnProgramme(p EPGProgram) error {
 }
 
 func TestParseXMLTVStream_AcceptsAnyCharsetDeclaration(t *testing.T) {
+	t.Parallel()
 	// Real XMLTV feeds occasionally claim charsets the Go stdlib
 	// doesn't know (e.g. "ISO-8859-1") while shipping UTF-8 bytes.
 	// The CharsetReader wired into the decoder must pass them through
@@ -318,6 +327,7 @@ func TestParseXMLTVStream_AcceptsAnyCharsetDeclaration(t *testing.T) {
 }
 
 func TestParseXMLTVStream_DropsEmptyDisplayNames(t *testing.T) {
+	t.Parallel()
 	// Some feeds emit empty <display-name/> elements to pad. The
 	// matcher copes with extras but a clean drop here keeps the
 	// candidate list tight, which makes fuzzy matching cheaper.
@@ -344,6 +354,7 @@ func TestParseXMLTVStream_DropsEmptyDisplayNames(t *testing.T) {
 // parser produces when fed through a collector. Pin this so the two
 // surfaces can't drift.
 func TestParseXMLTV_MatchesStreamingThroughCollector(t *testing.T) {
+	t.Parallel()
 	input := `<?xml version="1.0"?>
 <tv>
   <channel id="ch1"><display-name>One</display-name></channel>
@@ -385,6 +396,7 @@ func TestParseXMLTV_MatchesStreamingThroughCollector(t *testing.T) {
 var _ = time.Time{}
 
 func TestParseXMLTVTime(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input   string
 		wantErr bool

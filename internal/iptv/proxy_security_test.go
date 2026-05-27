@@ -29,6 +29,7 @@ func unblockLoopback(t *testing.T) {
 // ─── isSafeUpstream ─────────────────────────────────────────────────────────
 
 func TestIsSafeUpstream_RejectsNonHTTP(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"file:///etc/passwd",
 		"ftp://example.com/x",
@@ -45,6 +46,7 @@ func TestIsSafeUpstream_RejectsNonHTTP(t *testing.T) {
 }
 
 func TestIsSafeUpstream_RejectsLiteralPrivateIPs(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"http://127.0.0.1/",
 		"http://127.0.0.1:8080/x",
@@ -63,6 +65,9 @@ func TestIsSafeUpstream_RejectsLiteralPrivateIPs(t *testing.T) {
 	}
 }
 
+// Los tests siguientes mutan `blockedIP` (var package-level) vía
+// `unblockLoopback` o asignación directa. No pueden usar t.Parallel
+// hasta que el seam pase a inyección por struct (F15-2 ext).
 func TestIsSafeUpstream_AcceptsPublicIPs(t *testing.T) {
 	// Override blockedIP so only the scheme + parse checks apply.
 	unblockLoopback(t)
@@ -77,6 +82,7 @@ func TestIsSafeUpstream_AcceptsPublicIPs(t *testing.T) {
 // ─── fetchUpstream ──────────────────────────────────────────────────────────
 
 func TestStreamProxy_FetchUpstream_LoopbackRejectedWhenGuardActive(t *testing.T) {
+	t.Parallel()
 	// Don't override blockedIP — the production guard should reject this.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("pwned"))
@@ -147,6 +153,7 @@ func TestStreamProxy_FetchUpstream_SuccessOnAllowedUpstream(t *testing.T) {
 // ─── ProxyURL (the endpoint an authenticated client can hit) ────────────────
 
 func TestStreamProxy_ProxyURL_RejectsSchemeChange(t *testing.T) {
+	t.Parallel()
 	p := NewStreamProxy(silentLogger())
 	rr := httptest.NewRecorder()
 	err := p.ProxyURL(context.Background(), rr, "c-1", "file:///etc/passwd")
@@ -158,6 +165,7 @@ func TestStreamProxy_ProxyURL_RejectsSchemeChange(t *testing.T) {
 }
 
 func TestStreamProxy_ProxyURL_RejectsLoopbackWithoutOverride(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("leak"))
 	}))
@@ -178,6 +186,7 @@ func TestStreamProxy_ProxyURL_RejectsLoopbackWithoutOverride(t *testing.T) {
 // ─── Listener counter (relay cleanup regression) ────────────────────────────
 
 func TestStreamProxy_ActiveRelays_IncrementsAndDecrements(t *testing.T) {
+	t.Parallel()
 	p := NewStreamProxy(silentLogger())
 	// Manually manipulate the relay map (ProxyStream opens a real upstream
 	// which is out of scope for this unit test).
@@ -201,6 +210,7 @@ func TestStreamProxy_ActiveRelays_IncrementsAndDecrements(t *testing.T) {
 }
 
 func TestStreamProxy_Shutdown_ClearsRelays(t *testing.T) {
+	t.Parallel()
 	p := NewStreamProxy(silentLogger())
 	p.mu.Lock()
 	p.relays["a"] = &relay{listeners: 1}

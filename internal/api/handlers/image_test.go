@@ -342,6 +342,7 @@ func multipartUpload(t *testing.T, fieldName, filename, contentType string, data
 // ─── Tests: List ────────────────────────────────────────────────────────────
 
 func TestImageHandler_List_Empty(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 
 	resp := env.do(http.MethodGet, "/api/v1/items/item-1/images/", nil, "")
@@ -356,6 +357,7 @@ func TestImageHandler_List_Empty(t *testing.T) {
 }
 
 func TestImageHandler_List_PopulatedReturnsImages(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	env.images.images["img-1"] = &librarymodel.Image{ID: "img-1", ItemID: "item-1", Type: "primary", Path: "/api/v1/images/file/img-1"}
 	env.images.images["img-2"] = &librarymodel.Image{ID: "img-2", ItemID: "item-1", Type: "backdrop", Path: "/api/v1/images/file/img-2"}
@@ -375,6 +377,7 @@ func TestImageHandler_List_PopulatedReturnsImages(t *testing.T) {
 // ─── Tests: Available ───────────────────────────────────────────────────────
 
 func TestImageHandler_Available_NoExternalIDs_EmptyData(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	resp := env.do(http.MethodGet, "/api/v1/items/item-1/images/available", nil, "")
 	if resp.StatusCode != http.StatusOK {
@@ -388,6 +391,7 @@ func TestImageHandler_Available_NoExternalIDs_EmptyData(t *testing.T) {
 }
 
 func TestImageHandler_Available_ReturnsProviderImages(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	env.externals.byItem["item-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Type: "movie"}
@@ -413,6 +417,7 @@ func TestImageHandler_Available_ReturnsProviderImages(t *testing.T) {
 }
 
 func TestImageHandler_Available_FilterByType(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	env.externals.byItem["item-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Type: "movie"}
@@ -433,6 +438,7 @@ func TestImageHandler_Available_FilterByType(t *testing.T) {
 // ─── Tests: Upload ──────────────────────────────────────────────────────────
 
 func TestImageHandler_Upload_JPEGHappyPath(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	data := makeJPEG(t, 50, 50)
 	body, ct := multipartUpload(t, "file", "poster.jpg", "image/jpeg", data)
@@ -461,6 +467,7 @@ func TestImageHandler_Upload_JPEGHappyPath(t *testing.T) {
 }
 
 func TestImageHandler_Upload_PNGHappyPath(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	data := makePNG(t, 40, 40)
 	body, ct := multipartUpload(t, "file", "poster.png", "image/png", data)
@@ -471,6 +478,7 @@ func TestImageHandler_Upload_PNGHappyPath(t *testing.T) {
 }
 
 func TestImageHandler_Upload_InvalidType_Rejected(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	data := makeJPEG(t, 10, 10)
 	body, ct := multipartUpload(t, "file", "x.jpg", "image/jpeg", data)
@@ -481,6 +489,7 @@ func TestImageHandler_Upload_InvalidType_Rejected(t *testing.T) {
 }
 
 func TestImageHandler_Upload_WrongContentType_Rejected(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	body, ct := multipartUpload(t, "file", "x.gif", "image/gif", []byte("GIF89a"))
 	resp := env.do(http.MethodPost, "/api/v1/items/item-1/images/primary/upload", body, ct)
@@ -490,6 +499,7 @@ func TestImageHandler_Upload_WrongContentType_Rejected(t *testing.T) {
 }
 
 func TestImageHandler_Upload_MissingFileField_Rejected(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -504,6 +514,7 @@ func TestImageHandler_Upload_MissingFileField_Rejected(t *testing.T) {
 // ─── Tests: SetPrimary ──────────────────────────────────────────────────────
 
 func TestImageHandler_SetPrimary_ExistingImage(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	env.images.images["img-1"] = &librarymodel.Image{ID: "img-1", ItemID: "item-1", Type: "primary"}
 	resp := env.do(http.MethodPut, "/api/v1/items/item-1/images/img-1/primary", nil, "")
@@ -516,6 +527,7 @@ func TestImageHandler_SetPrimary_ExistingImage(t *testing.T) {
 }
 
 func TestImageHandler_SetPrimary_UnknownImage_404(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	resp := env.do(http.MethodPut, "/api/v1/items/item-1/images/missing/primary", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
@@ -524,6 +536,7 @@ func TestImageHandler_SetPrimary_UnknownImage_404(t *testing.T) {
 }
 
 func TestImageHandler_SetPrimary_WrongItem_404(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	env.images.images["img-1"] = &librarymodel.Image{ID: "img-1", ItemID: "item-A", Type: "primary"}
 	resp := env.do(http.MethodPut, "/api/v1/items/item-B/images/img-1/primary", nil, "")
@@ -535,6 +548,7 @@ func TestImageHandler_SetPrimary_WrongItem_404(t *testing.T) {
 // ─── Tests: Delete ──────────────────────────────────────────────────────────
 
 func TestImageHandler_Delete_RemovesRecordAndMapping(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	// First upload to create mapping + on-disk file.
 	data := makeJPEG(t, 20, 20)
@@ -561,6 +575,7 @@ func TestImageHandler_Delete_RemovesRecordAndMapping(t *testing.T) {
 }
 
 func TestImageHandler_Delete_RemovesCachedThumbnails(t *testing.T) {
+	t.Parallel()
 	// The serve handler generates `<imageDir>/.thumbnails/<id>_wN.<ext>`
 	// on demand when the client requests a sized variant. Delete must
 	// reap those siblings too, otherwise long-lived servers leak
@@ -612,6 +627,7 @@ func TestImageHandler_Delete_RemovesCachedThumbnails(t *testing.T) {
 }
 
 func TestImageHandler_Delete_Missing_404(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	resp := env.do(http.MethodDelete, "/api/v1/items/item-1/images/missing", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
@@ -622,6 +638,7 @@ func TestImageHandler_Delete_Missing_404(t *testing.T) {
 // ─── Tests: ServeFile ───────────────────────────────────────────────────────
 
 func TestImageHandler_ServeFile_LocalFile(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	data := makeJPEG(t, 30, 30)
 	body, ct := multipartUpload(t, "file", "x.jpg", "image/jpeg", data)
@@ -646,6 +663,7 @@ func TestImageHandler_ServeFile_LocalFile(t *testing.T) {
 }
 
 func TestImageHandler_ServeFile_Thumbnail(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	// Upload PNG so thumbnail.go (std-lib decode) can resize it.
 	data := makePNG(t, 400, 400)
@@ -671,6 +689,7 @@ func TestImageHandler_ServeFile_Thumbnail(t *testing.T) {
 }
 
 func TestImageHandler_ServeFile_UnknownID_404(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	resp := env.do(http.MethodGet, "/api/v1/images/file/unknown-id", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
@@ -680,6 +699,9 @@ func TestImageHandler_ServeFile_UnknownID_404(t *testing.T) {
 
 // ─── Tests: RefreshLibraryImages ────────────────────────────────────────────
 
+// TestImageHandler_RefreshLibraryImages_AddsMissingTypes se mantiene
+// serial: muta `imaging.BlockedIP` (var package-level). Inyectar la
+// guard como dependencia es F15-2 extendido.
 func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
 	// Allow httptest.Server's 127.0.0.1 target through the SSRF guard for the
 	// duration of this test — restored in cleanup.
@@ -729,6 +751,7 @@ func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
 // Upload must reject a multipart payload that claims image/jpeg in the part
 // header but has an HTML body — content-type sniffing, not client trust.
 func TestImageHandler_Upload_MIMESpoofRejected(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	htmlPayload := []byte(`<!doctype html><html><body><script>pwn()</script></body></html>`)
 	body, ct := multipartUpload(t, "file", "evil.jpg", "image/jpeg", htmlPayload)
@@ -741,6 +764,7 @@ func TestImageHandler_Upload_MIMESpoofRejected(t *testing.T) {
 
 // Upload must reject a PNG whose IHDR advertises impossible dimensions.
 func TestImageHandler_Upload_DecompressionBombRejected(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	// Reuse the forged-PNG helper idea inline: 50000x50000 IHDR claim.
 	bomb := forgedPNGIHDR(50000, 50000)
@@ -758,6 +782,7 @@ func TestImageHandler_Upload_DecompressionBombRejected(t *testing.T) {
 // is only reachable via a programmatic call. Both layers (chi + handler)
 // combine as defense in depth.
 func TestImageHandler_Upload_TraversalItemIDRejected(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	data := makeJPEG(t, 20, 20)
 	body, ct := multipartUpload(t, "file", "x.jpg", "image/jpeg", data)
@@ -784,6 +809,7 @@ func TestImageHandler_Upload_TraversalItemIDRejected(t *testing.T) {
 // ServeFile must refuse non-UUID ids via pathmap's internal validation,
 // falling through to the DB lookup which returns NOT_FOUND.
 func TestImageHandler_ServeFile_TraversalIDReturns404(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	resp := env.do(http.MethodGet, "/api/v1/images/file/..%2F..%2Fetc%2Fpasswd", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
@@ -792,6 +818,8 @@ func TestImageHandler_ServeFile_TraversalIDReturns404(t *testing.T) {
 }
 
 // Select must refuse URLs that resolve to loopback (SSRF defense).
+// TestImageHandler_Select_LoopbackURL_Blocked se mantiene serial: lee
+// `imaging.BlockedIP` (default) y el test del Refresh la muta.
 func TestImageHandler_Select_LoopbackURL_Blocked(t *testing.T) {
 	env := newImageTestEnv(t)
 	// A localhost target — default BlockedIP rejects this.
@@ -851,6 +879,7 @@ func readAll(resp *http.Response) string {
 // each step's effect (file on disk, DB row, IsLocked, IsPrimary,
 // pathmap entry, response Path) is asserted independently.
 func TestImageHandler_persistManualImage_HappyPath(t *testing.T) {
+	t.Parallel()
 	env := newImageTestEnv(t)
 	data := makeJPEG(t, 32, 32)
 
