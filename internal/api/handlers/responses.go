@@ -125,6 +125,19 @@ func handleServiceError(w http.ResponseWriter, r *http.Request, err error) {
 
 	var appErr *domain.AppError
 	if errors.As(err, &appErr) {
+		// Un 5xx que viene como AppError pre-construido (típico:
+		// `domain.NewInternal(err)`) no pasa por el default case
+		// de abajo, así que sin este log el operador veía un 500
+		// en el frontend sin causa en los logs.
+		if appErr.HTTPStatus >= 500 {
+			slog.Error("service error",
+				"error", err,
+				"code", appErr.Code,
+				"status", appErr.HTTPStatus,
+				"request_id", middleware.GetReqID(ctx),
+				"path", r.URL.Path,
+			)
+		}
 		respondAppError(w, ctx, appErr)
 		return
 	}

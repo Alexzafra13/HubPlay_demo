@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,18 @@ import (
 
 	"hubplay/internal/domain"
 )
+
+// captureSlog redirige slog.Default a un buffer para que los tests
+// puedan verificar qué se logueó. Restaura el logger original al
+// finalizar el test.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
 
 // decodeErrorResponse extracts the standard error envelope written by
 // handleServiceError / respondAppError, so each assertion stays focused on
@@ -225,6 +239,75 @@ func TestSetErrorRecorder_NilRestoresNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := newRequestWithID("req-nil")
 	handleServiceError(rr, r, domain.NewNotFound("thing"))
+}
+
+func TestHandleServiceError_Logs5xxAppError(t *testing.T) {
+	// Un AppError 5xx (típico: domain.NewInternal(err)) debe loguearse
+	// por handleServiceError antes de responder al cliente. Sin esto,
+	// los 500 quedaban ciegos para el operador self-hosted.
+	buf := captureSlog(t)
+	rr := httptest.NewRecorder()
+	r := newRequestWithID("req-500")
+
+	cause := errors.New("db connection refused")
+	handleServiceError(rr, r, domain.NewInternal(cause))
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status: got %d, want 500", rr.Code)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "service error") {
+		t.Errorf("expected 'service error' log entry, got: %s", logged)
+	}
+	if !strings.Contains(logged, "db connection refused") {
+		t.Errorf("expected cause in log, got: %s", logged)
+	}
+	if !strings.Contains(logged, "INTERNAL_ERROR") {
+		t.Errorf("expected code in log, got: %s", logged)
+	}
+	if !strings.Contains(logged, "req-500") {
+		t.Errorf("expected request_id in log, got: %s", logged)
+	}
+}
+
+func TestHandleServiceError_DoesNotLog4xxAppError(t *testing.T) {
+	// 4xx son errores del cliente — no son interesantes para el
+	// operador y loguearlos saturaría con ruido (login fallido,
+	// not found, etc. son repetitivos).
+	buf := captureSlog(t)
+	rr := httptest.NewRecorder()
+	r := newRequestWithID("req-404")
+
+	handleServiceError(rr, r, domain.NewNotFound("thing"))
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status: got %d, want 404", rr.Code)
+	}
+	if buf.Len() > 0 {
+		t.Errorf("4xx should not log, but got: %s", buf.String())
+	}
+}
+
+func TestHandleServiceError_Logs5xxWhenAppErrorIsWrapped(t *testing.T) {
+	// Si el servicio devuelve fmt.Errorf("ctx: %w", NewInternal(err)),
+	// errors.As debe unwrappear y el log debe seguir disparándose.
+	buf := captureSlog(t)
+	rr := httptest.NewRecorder()
+	r := newRequestWithID("req-wrap-500")
+
+	wrapped := fmt.Errorf("save item: %w", domain.NewInternal(errors.New("disk full")))
+	handleServiceError(rr, r, wrapped)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status: got %d", rr.Code)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "service error") {
+		t.Errorf("expected log for wrapped 5xx, got: %s", logged)
+	}
+	if !strings.Contains(logged, "disk full") {
+		t.Errorf("expected unwrapped cause in log, got: %s", logged)
+	}
 }
 
 func TestRespondError_WritesAppErrorEnvelope(t *testing.T) {
