@@ -6,6 +6,116 @@
 
 ---
 
+## 🪵 Sesión 2026-05-27 — F15-7 + F15-2 + auditoría completa de logs (7 PRs)
+
+Sesión larga centrada en cerrar el F15-7 (t.Parallel restante) y el
+F15-2 (clock injection en lo que quedaba), terminando con una
+**auditoría sistemática de los 568 logs del backend** que produjo el
+ADR-026 (convención de logs) + cleanup de naming.
+
+### PRs
+
+| PR | Tema | Estado |
+|---|---|---|
+| [#444](https://github.com/Alexzafra13/HubPlay_demo/pull/444) | F15-7: t.Parallel en 5 ficheros restantes + mutex en `testutil.Migrate` | ✅ merged |
+| [#445](https://github.com/Alexzafra13/HubPlay_demo/pull/445) | F15-2 scanner: refactor `New(17 params)` → `New(Config)` + clock | ✅ merged |
+| [#446](https://github.com/Alexzafra13/HubPlay_demo/pull/446) | F15-2 rest: clock injection en notification + upload | ✅ merged |
+| [#447](https://github.com/Alexzafra13/HubPlay_demo/pull/447) | Fix races + flakes heredados (federation/url, event/bus, transmux) | ✅ merged |
+| [#448](https://github.com/Alexzafra13/HubPlay_demo/pull/448) | docs(memory): F16 cerrado al 100% (verificación) | ✅ merged |
+| [#449](https://github.com/Alexzafra13/HubPlay_demo/pull/449) | Auditoría completa de logs + ADR-026 convención | ✅ merged |
+| [#450](https://github.com/Alexzafra13/HubPlay_demo/pull/450) | Sub-loggers en me_home + naming canónico `err`→`error` en handlers | 🟡 abierta (CI verde, lista para merge) |
+
+### Hallazgos importantes descubiertos en el camino
+
+- **Race en `testutil.NewTestDB`** (PR #444): `goose.SetBaseFS` muta globals
+  sin proteger. Con tests `t.Parallel` se solapaban → DATA RACE. Fix:
+  `var migrateMu sync.Mutex` en testutil.
+- **Race en `federation/url_test`** (PR #447): la sesión anterior (#443) añadió
+  `t.Parallel()` a `TestValidatePeerURL_TestSeamRespected` sin reconocer que
+  muta `blockedPeerIP` global. Quitar `t.Parallel()` cierra.
+- **`unblockLoopback(t)` cargo-cult** (PR #444): 9 tests de `preflight_test` lo
+  llamaban "defensivamente"; `PreflightCheck` no consulta `blockedIP` →
+  llamadas redundantes. Eliminadas para habilitar paralelismo.
+- **`finishInputFromHook`** (PR #446): único `time.Now()` en producción de
+  upload que queda — fallback en función libre sin acceso al Service.
+  Documentado como cero impacto (caller siempre rellena `started_at`).
+
+### ADR nuevo
+
+- **ADR-026** — Convención de logs (nivel, sub-logger, hot paths, secretos).
+  4 reglas en orden de importancia + naming canónico definido.
+  Regla operacional: *"si un log dispara > 1/min en uso normal, está mal
+  de nivel"*.
+
+### Métricas globales acumuladas hoy
+
+- **Clock-injected en codebase**: 16 → 23 ficheros de producción.
+- **t.Parallel()**: 314 → 375 (**+61**, sin contar handlers ya paralelizados).
+- **`time.Now()` en producción** de los paquetes audited: −20 sitios.
+- **Logs con naming inconsistente** en handlers: 31 sitios `"err"` → 0.
+- **Sub-loggers `.With()`** nuevos: 13 funciones (library, scanner, iptv, me_home).
+- **Niveles corregidos**: 17 hot path noise (Info/Warn → Debug), 3 importancia
+  (transmux Info → Warn, setup Warn → Debug, providers 404+Error → 502+Warn).
+- **Errores tragados ahora logueados**: 8 sitios (scanner cleanup, imagerefresh,
+  identify, prober panic con stack).
+- **Sin leaks PII/secretos** detectados en todo `handlers/` (verificado a fondo).
+
+### F15 y F16 status
+
+| Item | Estado |
+|---|---|
+| F15-1 (time.Sleep en tests) | ✅ 100% (sesión 2026-05-26) |
+| F15-2 (clock injection) | ✅ Núcleo cerrado. Quedan db repos (sesión propia). |
+| F15-7 (t.Parallel) | ✅ Lo paralelizable. Lo que queda requiere refactor del seam global. |
+| F15-8 (t.TempDir) | ✅ adoptado |
+| F15-3..6, F15-9..12 | sin desglosar |
+| F16 | ✅ 100% (verificado #448) |
+
+### Follow-ups concretos de la auditoría de logs (sesión propia, ~1-2h)
+
+Documentados en el ADR-026, pendientes de ejecutar:
+
+1. **`iptv/circuit_breaker.go`** — Inyectar `*slog.Logger` y loguear
+   transiciones closed→open / half-open→open. Cambio de API del constructor
+   (`newChannelBreaker`). Hoy el operador no ve cuándo un canal entra en
+   cooldown por fallos repetidos — sólo lo expone `BreakerState()` polleado
+   por el panel admin.
+2. **`iptv/transmux.go::startLocked`** — Log de spawn-error antes de los 3
+   `return err` (L550, L596, L617). Hoy `IncStarts("spawn_error")` cuenta
+   métrica pero no hay log de la causa.
+3. **Verificar `handleServiceError` cadena de logs** — Handlers usan
+   `handleServiceError(w, r, err)` sin loguear antes, asumiendo que el
+   servicio loguea. Hay que confirmar paquete por paquete (`auth`, `library`,
+   etc) que efectivamente loguean los 5xx. Si no, los 500 quedan ciegos para
+   el operador.
+4. **Sub-loggers handlers grandes (revisión)** — La auditoría inicial sugirió
+   `federation_admin × 5`, `me_peers × 4`, `collections × 3`. Al revisar caso
+   por caso, sólo `me_home::Trending` y `Recommended` cumplieron el umbral de
+   ≥ 3 logs con campo repetido. El resto son 1-2 logs por handler. **Esto
+   ya está cerrado a la práctica** — solo dejar nota explicativa si se reabre.
+
+### Pendientes priorizadas (próximas sesiones)
+
+- **Follow-ups logs** (~1-2h) — los 4 items de arriba.
+- **F15-2 db repos** — `time.Now()` en queries INSERT/UPDATE de los repos
+  (voluminoso pero homogéneo, ~2-3h).
+- **VideoPlayer 3ª ola** — 787 LoC, frontend.
+- **LL Transcoder stateless** — sesión grande propia.
+- **Distribución** — installer Windows firmado (SignPath), auto-update, TLS LAN.
+
+### Aprendizajes registrados
+
+- **Lanzar 4 sub-agentes en paralelo para auditorías**: cada uno auditó un
+  paquete (handlers / iptv / scanner / library) con prompt estructurado y
+  formato de reporte fijo. Tardó ~2 min en total vs días de revisión manual.
+  Modelo replicable para futuros audits cross-package.
+- **Win desactivar Smart App Control para tests `-race` locales**: ya hecho
+  esta sesión. SAC bloquea binarios temporales de `go test`. La desactivación
+  es **irreversible** sin reinstalar Windows — anotado en
+  `~/.claude/projects/.../memory/race-tests-windows.md`.
+
+---
+
 ## 🧪 Sesión 2026-05-26 (parte 2) — F15-2 clock injection + F15-7 t.Parallel() ×4.8
 
 Continuación de la sesión 2026-05-26. Tres commits en `claude/project-review-status-PHIHv`.
@@ -42,15 +152,12 @@ deliberadas. El commit message de #440 ya cerraba F16-10 (VacuumInto
 helper), F16-14 (código cambiado, audit outdated), F16-17 (cosmético).
 **F16 completamente cerrado**: alta 1/1, medium 8/8, bajas 10/10.
 
-### Pendientes priorizadas (próximas sesiones)
+### ~~Pendientes priorizadas~~ (obsoleto — ver sesión 2026-05-27 arriba)
 
-- **F15-2 restante** — clock injection en scanner (13 calls, 17-param constructor → necesita refactor), notification/sweeper (2), upload (4), db repos (muchos)
-- **F15-7 restante** — t.Parallel() en ficheros con races (requiere mutex en fakes): image_test, imaging/safety_test, iptv/{preflight,proxy_security,xmltv}_test
-- **F15-3..6, F15-9..12** — media/baja
-- **F14-7-a** — sub-loggers `.With()` × 145 sites (~2h)
-- **VideoPlayer 3ª ola** — 787 LoC
-- **LL Transcoder stateless** — sesión grande propia
-- **Distribución** — installer Windows firmado, auto-update, TLS LAN
+> **Superseded por sesión 2026-05-27**: F15-2 scanner + notification/sweeper
+> + upload cerrados (#445, #446). F15-7 restante cerrado (#444). F14-7-a
+> sub-loggers aplicados donde valían (#449, #450). Backlog vivo está en
+> la sesión 2026-05-27.
 
 ---
 
@@ -78,14 +185,10 @@ medium restantes del F16. Resumen:
 
 **F16 cerrado al 100%** — verificado sesión 2026-05-27. Las "7 bajas pendientes" listadas en sesiones previas ya estaban cubiertas: #440 cerró F16-10 (VacuumInto helper), F16-14 (código cambió, audit outdated) y F16-17 (cosmético); el código tiene comentarios `// F16-11/13/18/19 (audit): …` que documentan las decisiones deliberadas.
 
-### Pendientes priorizadas (próximas sesiones)
+### ~~Pendientes priorizadas~~ (obsoleto — ver sesión 2026-05-27 arriba)
 
-- **F15-2 db repos** — `time.Now()` en queries INSERT/UPDATE de los repos (voluminoso pero homogéneo, ~2-3h).
-- **F15-3..6, F15-9..12** — sin desglosar todavía.
-- **F14-7-a sub-loggers `.With()`** — 145 sites mecánicos (~2h).
-- **VideoPlayer 3ª ola** — 787 LoC, frontend.
-- **LL Transcoder stateless** — sesión grande propia.
-- **Distribución** — installer Windows firmado, auto-update, TLS LAN.
+> **Superseded por sesión 2026-05-27**: F14-7-a sub-loggers parcialmente
+> cerrados (#449 library/scanner/iptv + #450 me_home). Backlog vivo arriba.
 
 ---
 
