@@ -17,7 +17,6 @@ import (
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/imaging"
 	"hubplay/internal/testutil"
@@ -270,7 +269,7 @@ func TestItemHandler_Get_IncludesUserDataWhenAuthenticated(t *testing.T) {
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 1_000}, nil
 	}
-	env.userData.data["u-2:it-1"] = &db.UserData{
+	env.userData.data["u-2:it-1"] = &librarymodel.UserData{
 		UserID: "u-2", ItemID: "it-1", PositionTicks: 500, IsFavorite: true,
 	}
 
@@ -298,7 +297,7 @@ func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
 		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
 	}
-	env.userData.data["u-2:it-1"] = &db.UserData{UserID: "u-2", ItemID: "it-1", IsFavorite: true}
+	env.userData.data["u-2:it-1"] = &librarymodel.UserData{UserID: "u-2", ItemID: "it-1", IsFavorite: true}
 
 	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
 	data, _ := itemDecodeData(t, rr).(map[string]any)

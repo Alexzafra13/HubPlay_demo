@@ -183,7 +183,7 @@ func TestUserData_ContinueWatching_DropsNearComplete(t *testing.T) {
 	// classified as "effectively done" and excluded from the rail
 	// even though `completed = 0`.
 	now := time.Now()
-	if err := repo.Upsert(ctx, &db.UserData{
+	if err := repo.Upsert(ctx, &librarymodel.UserData{
 		UserID: "user-1", ItemID: "movie-1",
 		PositionTicks: 65_000_000_000, Completed: false,
 		LastPlayedAt: &now, UpdatedAt: now,
@@ -193,7 +193,7 @@ func TestUserData_ContinueWatching_DropsNearComplete(t *testing.T) {
 
 	// movie-2 duration = 54e9. Position 27e9 = 50 %, recent play —
 	// the canonical "in progress, came back yesterday" case.
-	if err := repo.Upsert(ctx, &db.UserData{
+	if err := repo.Upsert(ctx, &librarymodel.UserData{
 		UserID: "user-1", ItemID: "movie-2",
 		PositionTicks: 27_000_000_000, Completed: false,
 		LastPlayedAt: &now, UpdatedAt: now,
@@ -222,7 +222,7 @@ func TestUserData_ContinueWatching_DropsAbandoned(t *testing.T) {
 
 	// Old play, <50 % progress: abandoned. movie-1 duration 72e9,
 	// position 10e9 ≈ 13 %, last played 45 days ago. Drop.
-	if err := repo.Upsert(ctx, &db.UserData{
+	if err := repo.Upsert(ctx, &librarymodel.UserData{
 		UserID: "user-1", ItemID: "movie-1",
 		PositionTicks: 10_000_000_000, Completed: false,
 		LastPlayedAt: &old, UpdatedAt: old,
@@ -232,7 +232,7 @@ func TestUserData_ContinueWatching_DropsAbandoned(t *testing.T) {
 	// Old play, >50 % progress: NOT abandoned — the user invested
 	// real time, the rail keeps it. movie-2 duration 54e9, position
 	// 35e9 ≈ 65 %, also 45 days old.
-	if err := repo.Upsert(ctx, &db.UserData{
+	if err := repo.Upsert(ctx, &librarymodel.UserData{
 		UserID: "user-1", ItemID: "movie-2",
 		PositionTicks: 35_000_000_000, Completed: false,
 		LastPlayedAt: &old, UpdatedAt: old,
@@ -276,7 +276,7 @@ func TestUserData_ContinueWatching_KeepsItemsWithUnknownDuration(t *testing.T) {
 
 	// Even with old timestamp + tiny position, the item must remain
 	// because the filters bail out when duration is unknown.
-	if err := repo.Upsert(ctx, &db.UserData{
+	if err := repo.Upsert(ctx, &librarymodel.UserData{
 		UserID: "user-1", ItemID: "movie-2",
 		PositionTicks: 1_000_000, Completed: false,
 		LastPlayedAt: &old, UpdatedAt: old,

@@ -5,27 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-)
 
-// HomeRecommendation is one item the genre-affinity recommender
-// surfaced for the caller, plus the genres that triggered the match.
-// `Because` is the slice of genres (already humanly-cased) the user
-// most actively watches that this item shares — copy the homepage
-// renders as "Porque te gusta Drama, Thriller". Movies and series
-// only; episodes are filtered at the SQL level.
-type HomeRecommendation struct {
-	ID              string
-	Type            string
-	Title           string
-	Year            sql.NullInt64
-	CommunityRating sql.NullFloat64
-	LibraryID       string
-	Because         []string
-	// ContentRating exposed so the handler can apply per-profile
-	// rating caps post-fetch — same rationale as on
-	// HomeTrendingItem.
-	ContentRating string
-}
+	librarymodel "hubplay/internal/library/model"
+)
 
 // Recommended returns up to `limit` items the caller hasn't watched
 // (no user_data row, or watched < 5% with no completion mark) drawn
@@ -48,7 +30,7 @@ type HomeRecommendation struct {
 // generic "newest in catalogue" rail or hide the slot.
 //
 // librarymodel.Library access enforced via the same EXISTS pattern as Trending.
-func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit int) ([]HomeRecommendation, error) {
+func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit int) ([]librarymodel.HomeRecommendation, error) {
 	if limit <= 0 || limit > 30 {
 		limit = 5
 	}
@@ -108,9 +90,9 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 	}
 	defer itemsRows.Close() //nolint:errcheck
 
-	out := make([]HomeRecommendation, 0, limit)
+	out := make([]librarymodel.HomeRecommendation, 0, limit)
 	for itemsRows.Next() {
-		var rec HomeRecommendation
+		var rec librarymodel.HomeRecommendation
 		var matched sql.NullString
 		var genreHits int64
 		if err := itemsRows.Scan(&rec.ID, &rec.Type, &rec.Title, &rec.Year, &rec.CommunityRating,
@@ -123,30 +105,6 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 		out = append(out, rec)
 	}
 	return out, itemsRows.Err()
-}
-
-// HomeBecauseSeed is the "this is the item that triggered the rail"
-// row that pairs with a list of recommendations. The wire format
-// renders "Porque viste {{seed.title}}" as the rail title, so we
-// surface enough metadata for that header without making the
-// frontend do a second round-trip on the seed item.
-type HomeBecauseSeed struct {
-	ID        string
-	Type      string
-	Title     string
-	Year      sql.NullInt64
-	LibraryID string
-}
-
-// HomeBecauseResult is the one-call payload for the
-// "Because-you-watched" rail: the seed (the item that lit up the
-// rail) plus a list of recommendations that share genres with it.
-// items.Because already exists in HomeRecommendation; we re-use
-// that shape so the frontend has one card vocabulary across both
-// rails ("Recomendado para ti" and "Porque viste X").
-type HomeBecauseResult struct {
-	Seed  *HomeBecauseSeed
-	Items []HomeRecommendation
 }
 
 // BecauseYouWatched picks the user's most recent COMPLETED watch
@@ -169,11 +127,7 @@ type HomeBecauseResult struct {
 //      (recommendations would be unfocused).
 //   3. Score every unwatched movie / series by how many of the
 //      seed's genres it carries, surface the top `limit`.
-func (r *HomeBecauseResult) IsEmpty() bool {
-	return r == nil || r.Seed == nil
-}
-
-func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, limit int) (*HomeBecauseResult, error) {
+func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, limit int) (*librarymodel.HomeBecauseResult, error) {
 	if limit <= 0 || limit > 30 {
 		limit = 12
 	}
@@ -198,24 +152,29 @@ func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, l
 	// genre list we'll use to score candidates. We do this in a
 	// single query rather than two so we don't have to ferry the
 	// seed id between calls.
-	var seed HomeBecauseSeed
+	var seed librarymodel.HomeBecauseSeed
+	var seedYear sql.NullInt64
 	var genresRaw sql.NullString
 	if err := r.db.QueryRowContext(ctx, r.becauseSeedMetaSQL, seedID).
-		Scan(&seed.ID, &seed.Type, &seed.Title, &seed.Year, &seed.LibraryID, &genresRaw); err != nil {
+		Scan(&seed.ID, &seed.Type, &seed.Title, &seedYear, &seed.LibraryID, &genresRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("because seed meta: %w", err)
 	}
+	if seedYear.Valid {
+		v := int(seedYear.Int64)
+		seed.Year = &v
+	}
 	if !genresRaw.Valid || genresRaw.String == "" {
 		// No genres tagged → recommendations would be too noisy
 		// to be useful. Hide the rail rather than show
 		// "everything in the catalogue".
-		return &HomeBecauseResult{Seed: &seed, Items: nil}, nil
+		return &librarymodel.HomeBecauseResult{Seed: &seed, Items: nil}, nil
 	}
 	genres := splitGroupConcat(genresRaw.String)
 	if len(genres) == 0 {
-		return &HomeBecauseResult{Seed: &seed, Items: nil}, nil
+		return &librarymodel.HomeBecauseResult{Seed: &seed, Items: nil}, nil
 	}
 
 	// Step 3: score candidates. Same shape as Recommended, but
@@ -237,9 +196,9 @@ func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, l
 	}
 	defer itemsRows.Close() //nolint:errcheck
 
-	out := make([]HomeRecommendation, 0, limit)
+	out := make([]librarymodel.HomeRecommendation, 0, limit)
 	for itemsRows.Next() {
-		var rec HomeRecommendation
+		var rec librarymodel.HomeRecommendation
 		var matched sql.NullString
 		var genreHits int64
 		if err := itemsRows.Scan(&rec.ID, &rec.Type, &rec.Title, &rec.Year, &rec.CommunityRating,
@@ -260,5 +219,5 @@ func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, l
 	// staticcheck doesn't flag the var as unused.
 	_ = lastPlayedRaw
 
-	return &HomeBecauseResult{Seed: &seed, Items: out}, nil
+	return &librarymodel.HomeBecauseResult{Seed: &seed, Items: out}, nil
 }

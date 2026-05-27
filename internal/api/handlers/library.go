@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/library"
 	librarymodel "hubplay/internal/library/model"
 )
@@ -36,17 +37,25 @@ type libraryOps interface {
 	ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error)
 }
 
+// userProfileLookup es el contrato mínimo para los handlers que sólo
+// necesitan resolver el content-rating cap del caller (GetByID).
+// Compartido por LibraryHandler, ItemDetailHandler, SearchHandler,
+// HomeHandler. 1 de 14 métodos de UserService.
+type userProfileLookup interface {
+	GetByID(ctx context.Context, id string) (*authmodel.User, error)
+}
+
 type LibraryHandler struct {
 	lib      libraryOps
 	images   ImageRepository
 	metadata MetadataRepository
 	userData UserDataRepository
-	users    UserService
+	users    userProfileLookup
 	audit    AuditEmitter
 	logger   *slog.Logger
 }
 
-func NewLibraryHandler(lib libraryOps, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, audit AuditEmitter, logger *slog.Logger) *LibraryHandler {
+func NewLibraryHandler(lib libraryOps, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users userProfileLookup, audit AuditEmitter, logger *slog.Logger) *LibraryHandler {
 	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, users: users, audit: audit, logger: logger}
 }
 

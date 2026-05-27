@@ -161,7 +161,7 @@ func newBenchActivityRepo(b *testing.B, n int) (*db.ActivityRepository, *db.Repo
 		if i%2 == 0 {
 			pos = ticks90min / 2
 		}
-		if err := repos.UserData.Upsert(ctx, &db.UserData{
+		if err := repos.UserData.Upsert(ctx, &librarymodel.UserData{
 			UserID:        userID,
 			ItemID:        fmt.Sprintf("i-%05d", i),
 			PositionTicks: pos,

@@ -11,8 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -21,16 +19,15 @@ import (
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/audit"
 	"hubplay/internal/auth"
-	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/federation"
 	federationstorage "hubplay/internal/federation/storage"
 	"hubplay/internal/imaging/pathmap"
-	"hubplay/internal/library"
-	"hubplay/internal/logging"
 	"hubplay/internal/iptv"
+	"hubplay/internal/library"
+	"hubplay/internal/mdns"
 	"hubplay/internal/notification"
 	"hubplay/internal/observability"
 	"hubplay/internal/probe"
@@ -38,10 +35,8 @@ import (
 	"hubplay/internal/retention"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
-	"hubplay/internal/mdns"
 	"hubplay/internal/sysmetrics"
 	"hubplay/internal/updates"
-	"hubplay/internal/upload"
 	"hubplay/internal/user"
 )
 
@@ -83,81 +78,25 @@ func run(configPath string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// lifecycle dirige el shutdown ordenado por dominio (workers
-	// independientes → HTTP drain → services HTTP-coupled). Reemplaza
-	// el `runtime` god-struct del flujo pre-refactor (olor G del audit
-	// 2026-05-14). Cada componente long-lived se registra con
-	// `lc.AddWorker(name, stopFn)` o `lc.AddService(name, stopFn)`
-	// junto al wiring — sin god-struct intermedio, sin desempaquetado
-	// posicional en waitForShutdown.
 	lc := &lifecycle{}
 
 	// ═══ Phase 1: Foundation ═══
-	cfg, err := config.Load(configPath)
+	f, err := buildFoundation(configPath)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
-
-	logger, logBuffer := logging.NewWithBuffer(cfg.Logging)
-	slog.SetDefault(logger)
-	clk := clock.New()
-
-	logger.Info("starting HubPlay", "version", version, "commit", commit, "addr", cfg.Server.Addr())
-
-	// Bundled binaries lookup. Cuando el release ship ffmpeg+ffprobe
-	// junto a hubplay.exe, prepender el directorio del ejecutable al
-	// PATH hace que cualquier exec.LookPath/exec.Command los encuentre
-	// sin tocar call-sites individuales. En instalaciones donde el
-	// operador ya tiene ffmpeg en PATH del sistema, prevalece el
-	// bundled (intencional — distribuimos una build conocida estable).
-	// Errores aquí son fatales sólo si interrumpen el boot — failure
-	// silencioso del prepend cae al preflight habitual.
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		curPath := os.Getenv("PATH")
-		if curPath == "" {
-			_ = os.Setenv("PATH", exeDir)
-		} else if !strings.Contains(string(os.PathListSeparator)+curPath+string(os.PathListSeparator),
-			string(os.PathListSeparator)+exeDir+string(os.PathListSeparator)) {
-			_ = os.Setenv("PATH", exeDir+string(os.PathListSeparator)+curPath)
-		}
-	}
-
-	// Preflight: validate external binaries and filesystem permissions
-	// before any service is built. Catching these here means "ffmpeg not
-	// installed" shows up as a clear boot error instead of an opaque 500
-	// during the first user's stream attempt.
-	if err := cfg.Preflight(logger); err != nil {
-		return fmt.Errorf("preflight checks failed:\n%w", err)
-	}
+	cfg, logger, logBuffer, clk := f.Config, f.Logger, f.LogBuffer, f.Clock
 
 	// ═══ Phase 2: Database ═══
-	// Swap in any pending admin-uploaded restore file before opening
-	// the live connection. SQLite-only — restore is a file swap on the
-	// live DB path; Postgres has its own server-side restore tooling
-	// (pg_restore + base backups) that operates out-of-process.
-	if cfg.Database.Driver == db.DriverSQLite {
-		if err := db.ApplyPendingRestoreIfAny(cfg.Database.Path, logger); err != nil {
-			return fmt.Errorf("applying pending DB restore: %w", err)
-		}
-	}
-	dbDsnOrPath := cfg.Database.Path
-	if cfg.Database.Driver == db.DriverPostgres {
-		dbDsnOrPath = cfg.Database.DSN
-	}
-	database, err := db.Open(cfg.Database.Driver, dbDsnOrPath, logger)
+	database, repos, err := openDatabase(databaseConfig{
+		Driver: cfg.Database.Driver,
+		Path:   cfg.Database.Path,
+		DSN:    cfg.Database.DSN,
+	}, logger)
 	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
+		return err
 	}
 	defer database.Close() //nolint:errcheck
-
-	if err := db.Migrate(cfg.Database.Driver, database, hubplay.Migrations(cfg.Database.Driver), logger); err != nil {
-		return fmt.Errorf("running migrations: %w", err)
-	}
-
-	// Driver string drives dual-dialect repos (Sesión E in progress).
-	// Repos not yet migrated ignore the param and stay on SQLite.
-	repos := db.NewRepositories(cfg.Database.Driver, database)
 
 	// ═══ Phase 3: Infrastructure ═══
 	eventBus := event.NewBus(logger)
@@ -284,42 +223,7 @@ func run(configPath string) error {
 	})
 
 	// ═══ Phase 4b: Streaming ═══
-	//
-	// Apply runtime overrides from app_settings BEFORE constructing the
-	// stream manager. The detector runs once at NewManager() time and
-	// the choice is captured for the lifetime of the process — that's
-	// why hardware_acceleration toggles in the admin UI carry a
-	// "restart to apply" hint. Reading the DB here keeps a single
-	// authority chain: YAML default → DB override → effective config
-	// the rest of the code sees, with no second source of truth.
-	streamingCfg := cfg.Streaming
-	if v, err := repos.Settings.Get(ctx, "hardware_acceleration.enabled"); err == nil {
-		streamingCfg.HWAccel.Enabled = v == "true"
-	}
-	if v, err := repos.Settings.Get(ctx, "hardware_acceleration.preferred"); err == nil && v != "" {
-		streamingCfg.HWAccel.Preferred = v
-	}
-	// Runtime overrides for the auto-tuned knobs. Empty / zero values
-	// in streamingCfg trigger stream.AutoTuneStreaming inside
-	// NewManager; values populated here (whether from YAML defaults
-	// the operator set, or from admin app_settings rows) bypass the
-	// auto-tuner. Parse failures fall through silently — a bad row in
-	// app_settings is a UI bug, not a reason to refuse to boot.
-	if v, err := repos.Settings.Get(ctx, "streaming.max_transcode_sessions"); err == nil {
-		if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
-			streamingCfg.MaxTranscodeSessions = n
-		}
-	}
-	if v, err := repos.Settings.Get(ctx, "streaming.max_transcode_sessions_per_user"); err == nil {
-		if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
-			streamingCfg.MaxTranscodeSessionsPerUser = n
-		}
-	}
-	if v, err := repos.Settings.Get(ctx, "streaming.transcode_preset"); err == nil && v != "" {
-		streamingCfg.TranscodePreset = v
-	}
-	// Wiring atómico (Deps) sustituye a los 3 setters post-construcción
-	// del flujo pre-refactor (olor JJ del audit 2026-05-14).
+	streamingCfg := applyStreamingOverrides(ctx, cfg.Streaming, repos.Settings)
 	streamManager := stream.NewManager(stream.Deps{
 		Items:    repos.Items,
 		Streams:  repos.MediaStreams,
@@ -412,9 +316,6 @@ func run(configPath string) error {
 	// docker swarm / k8s) is expected to do the same.
 	restartRequester := config.NewRestartRequester(cancel, logger)
 
-	// ═══ Phase 5: HTTP Server ═══
-	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
-
 	// Federation: load-or-create this server's Ed25519 identity and wire
 	// the manager. Failures here are non-fatal — federation is opt-in;
 	// if init fails we run with Federation=nil and the routes are skipped
@@ -497,66 +398,12 @@ func run(configPath string) error {
 	hostMetrics := sysmetrics.New(5*time.Second, logger)
 	hostMetrics.Start(ctx)
 
-	// Uploads (PR2 feature). El handler se cablea sólo si está
-	// activado en config — si no, deps.Uploads queda nil y el router
-	// no monta /api/v1/uploads*.
-	var uploadsHandler http.Handler
-	if cfg.Upload.Enabled {
-		stagingDir, err := upload.NewStagingDir(cfg.Upload.StagingDir)
-		if err != nil {
-			return fmt.Errorf("upload staging dir: %w", err)
-		}
-		upSvc := upload.NewService(
-			upload.Config{
-				MaxUploadBytes: cfg.Upload.MaxBytesPerUpload,
-				MinDurationMs:  cfg.Upload.MinDurationMs,
-			},
-			stagingDir,
-			repos.Users,
-			repos.UploadAudit,
-			eventBus,
-			upload.NewLibraryPicker(repos.Libraries),
-			prober,
-			clk,
-			logger,
-		)
-		// basePath debe casar EXACTAMENTE con el path bajo el que se
-		// monta en chi (/api/v1/uploads/). tusd usa este string para
-		// generar el Location: <basePath><id> tras el POST de creación.
-		tusd, err := upload.NewTusdHandler(upSvc, "/api/v1/uploads/")
-		if err != nil {
-			return fmt.Errorf("upload tusd handler: %w", err)
-		}
-		// http.StripPrefix es REQUERIDO entre chi y tusd. Razón:
-		// chi.Mount NO modifica r.URL.Path — sólo actualiza un
-		// RouteContext interno que tusd no consulta. tusd, dentro
-		// de su Handler.ServeHTTP, hace `strings.Trim(r.URL.Path, "/")`
-		// y compara contra "" para decidir si es POST de creación.
-		// Sin strip, tusd ve "/api/v1/uploads/" → no coincide con ""
-		// → cae al default que devuelve 405 method not allowed.  Con
-		// strip, r.URL.Path queda "/", tusd lo trimea a "" → POST
-		// creación OK; en los chunks queda "/<id>", tusd extrae el
-		// id correctamente y rutea a PatchFile.
-		//
-		// El BasePath de la config tusd (/api/v1/uploads/) se preserva
-		// porque tusd lo usa SÓLO para componer el Location: header
-		// que devuelve al cliente — no para route matching.
-		uploadsHandler = http.StripPrefix("/api/v1/uploads", tusd)
-		logger.Info("uploads enabled",
-			"staging_dir", stagingDir.Root(),
-			"max_bytes", cfg.Upload.MaxBytesPerUpload)
+	// ═══ Phase 5: HTTP Server ═══
+	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
 
-		// GC de uploads huérfanos. Si el binario cae mientras un
-		// upload está en vuelo, los chunks + .info quedan en
-		// <staging>/<user>/<id>/ sin que Service.Finish/Aborted
-		// recupere espacio. El GC barre cada hora dirs con TODOS
-		// sus ficheros más antiguos que 24h — tiempo suficiente
-		// para que un "upload pausado" legítimo sobreviva un par
-		// de timeouts de red sin perderse, pero corto para que un
-		// blob abandonado no acumule días.
-		upload.NewGC(stagingDir, time.Hour, 24*time.Hour, clk, logger).Start(ctx)
-	} else {
-		logger.Info("uploads disabled (config.upload.enabled=false)")
+	uploadsHandler, err := buildUploads(ctx, cfg.Upload, repos, eventBus, prober, clk, logger)
+	if err != nil {
+		return err
 	}
 
 	// Audit service (PR5). Cableado antes que los handlers para que

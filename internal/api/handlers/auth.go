@@ -47,9 +47,18 @@ type authLibraryOps interface {
 	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
 }
 
+// authUserOps es el contrato mínimo que AuthHandler necesita del user
+// service: 4 de 14 métodos.
+type authUserOps interface {
+	GetByID(ctx context.Context, id string) (*authmodel.User, error)
+	Count(ctx context.Context) (int, error)
+	SetMaxContentRating(ctx context.Context, id, rating string) error
+	EnsureOwner(ctx context.Context, userID string) (bool, error)
+}
+
 type AuthHandler struct {
 	auth      AuthService
-	users     UserService
+	users     authUserOps
 	libraries authLibraryOps
 	authCfg   config.AuthConfig
 	audit     AuditEmitter
@@ -132,7 +141,7 @@ func (noopAudit) LogDBSwap(_ context.Context, _ *http.Request, _, _ string)     
 // NewAuthHandler wires the auth handler. libraries may be nil (the setup
 // wizard reuses a slimmer handler that never receives grant_library_ids);
 // the main router always passes the real service. audit nil-safe.
-func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries authLibraryOps, authCfg config.AuthConfig, audit AuditEmitter, logger *slog.Logger) *AuthHandler {
+func NewAuthHandler(authSvc AuthService, userSvc authUserOps, libraries authLibraryOps, authCfg config.AuthConfig, audit AuditEmitter, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		auth:      authSvc,
 		users:     userSvc,

@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"fmt"
+
+	librarymodel "hubplay/internal/library/model"
 )
 
 // HomeRepository sirve las queries cross-cutting de la home page
@@ -247,7 +249,7 @@ func splitGroupConcat(s string) []string {
 }
 
 // IDsFromTrending extrae solo los IDs de los resultados de trending.
-func IDsFromTrending(items []HomeTrendingItem) []string {
+func IDsFromTrending(items []librarymodel.HomeTrendingItem) []string {
 	if len(items) == 0 {
 		return nil
 	}

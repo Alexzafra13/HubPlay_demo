@@ -37,7 +37,10 @@ import (
 // puntero (misma técnica que ItemHandler). Los métodos que aún no han
 // migrado a sub-handler viven como receivers directos del facade.
 type IPTVHandler struct {
-	// Sub-handlers con micro-interfaces (cierre progresivo de NN).
+	// Sub-handlers con micro-interfaces. Cada uno define su contrato
+	// mínimo del iptv.Service (~2-11 métodos cada uno, de ~50 total).
+	// Cierra NN (interfaces de servicio gigantes).
+	*iptvChannelHandler
 	*iptvPlaybackFailureHandler
 	*iptvEPGHandler
 	*iptvPersonalisationHandler
@@ -46,19 +49,6 @@ type IPTVHandler struct {
 	*iptvHealthHandler
 	*iptvFavoritesHandler
 	*iptvLogoHandler
-
-	// Campos del facade — usados por los métodos que aún no han
-	// migrado a sub-handler propio.
-	svc       IPTVService
-	proxy     IPTVStreamProxyService
-	transmux  IPTVTransmuxer
-	logoCache *iptv.LogoCache
-	imageDir  string
-	libraries LibraryRepository
-	access    LibraryAccessService
-	audit     AuditEmitter
-	bus       EventBusPublisher
-	logger    *slog.Logger
 }
 
 // NewIPTVHandler creates a new IPTV handler. `transmux` and `logoCache`
@@ -73,9 +63,28 @@ type IPTVHandler struct {
 //     Functional but wasteful (N×404 per grid paint); the cache is
 //     constructed best-effort in main.go and only ends up nil if the
 //     cache directory can't be created.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, bus EventBusPublisher, logger *slog.Logger) *IPTVHandler {
+// iptvOps es la unión de las micro-interfaces de los 9 sub-handlers.
+// *iptv.Service la satisface.
+type iptvOps interface {
+	channelBrowseOps
+	playbackFailureReporter
+	epgManager
+	channelPersonaliser
+	adminChannelOrderManager
+	iptvAdminOps
+	channelHealthOps
+	channelFavoritesOps
+	channelLogoOps
+}
+
+func NewIPTVHandler(svc iptvOps, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, bus EventBusPublisher, logger *slog.Logger) *IPTVHandler {
 	lg := logger.With("module", "iptv-handler")
 	return &IPTVHandler{
+		iptvChannelHandler: &iptvChannelHandler{
+			svc: svc, proxy: proxy, transmux: transmux,
+			logoCache: logoCache, imageDir: imageDir,
+			access: access, logger: lg,
+		},
 		iptvPlaybackFailureHandler: &iptvPlaybackFailureHandler{
 			svc: svc, access: access, logger: lg,
 		},
@@ -100,25 +109,7 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTV
 		iptvLogoHandler: &iptvLogoHandler{
 			svc: svc, imageDir: imageDir, logger: lg,
 		},
-		svc:       svc,
-		proxy:     proxy,
-		transmux:  transmux,
-		logoCache: logoCache,
-		imageDir:  imageDir,
-		libraries: libraries,
-		access:    access,
-		audit:     audit,
-		bus:       bus,
-		logger:    lg,
 	}
-}
-
-
-// canAccessLibrary delegates to the package-level helper. Thin wrapper
-// kept so every iptv_* file can write `h.canAccessLibrary(r, id)`
-// without re-importing the helper.
-func (h *IPTVHandler) canAccessLibrary(r *http.Request, libraryID string) bool {
-	return canAccessLibrary(r, h.access, h.logger, libraryID)
 }
 
 // iptvDenyForbidden writes a NOT_FOUND response (not 403) so an
@@ -126,10 +117,4 @@ func (h *IPTVHandler) canAccessLibrary(r *http.Request, libraryID string) bool {
 // see it" from "channel doesn't exist".
 func iptvDenyForbidden(w http.ResponseWriter, r *http.Request) {
 	respondAppError(w, r.Context(), domain.NewNotFound("channel"))
-}
-
-// denyForbidden thin wrapper para mantener compatibilidad con los
-// ficheros que aún usan receiver. Se eliminará al completar el split.
-func (h *IPTVHandler) denyForbidden(w http.ResponseWriter, r *http.Request) {
-	iptvDenyForbidden(w, r)
 }

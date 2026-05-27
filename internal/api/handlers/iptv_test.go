@@ -693,7 +693,7 @@ func (a *iptvFakeAccess) UserHasAccess(_ context.Context, userID, libraryID stri
 
 // Compile-time checks.
 var (
-	_ IPTVService            = (*iptvFakeService)(nil)
+	_ iptvOps = (*iptvFakeService)(nil)
 	_ IPTVStreamProxyService = (*iptvFakeProxy)(nil)
 	_ LibraryRepository      = (*iptvFakeLibraryRepo)(nil)
 	_ LibraryAccessService   = (*iptvFakeAccess)(nil)

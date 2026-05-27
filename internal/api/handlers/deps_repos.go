@@ -76,14 +76,14 @@ type MetadataRepo interface {
 // UserDataRepo es el contrato amplio del repo de user_data (progress,
 // favoritos, continue watching, next up).
 type UserDataRepo interface {
-	Get(ctx context.Context, userID, itemID string) (*db.UserData, error)
-	GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*db.UserData, error)
+	Get(ctx context.Context, userID, itemID string) (*librarymodel.UserData, error)
+	GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*librarymodel.UserData, error)
 	UpdateProgress(ctx context.Context, userID, itemID string, positionTicks int64, completed bool) error
 	MarkPlayed(ctx context.Context, userID, itemID string) error
 	SetFavorite(ctx context.Context, userID, itemID string, favorite bool) error
-	ContinueWatching(ctx context.Context, userID string, limit int) ([]*db.ContinueWatchingItem, error)
-	Favorites(ctx context.Context, userID string, limit, offset int) ([]*db.FavoriteItem, error)
-	NextUp(ctx context.Context, userID string, limit int) ([]*db.NextUpItem, error)
+	ContinueWatching(ctx context.Context, userID string, limit int) ([]*librarymodel.ContinueWatchingItem, error)
+	Favorites(ctx context.Context, userID string, limit, offset int) ([]*librarymodel.FavoriteItem, error)
+	NextUp(ctx context.Context, userID string, limit int) ([]*librarymodel.NextUpItem, error)
 	SeriesEpisodeProgress(ctx context.Context, userID, seriesID string) (total, watched int, err error)
 	Delete(ctx context.Context, userID, itemID string) error
 	ClearProgress(ctx context.Context, userID, itemID string) error
@@ -144,10 +144,10 @@ type UserPreferencesRepoForDeps interface {
 // HomeRepo expone el repo del home dashboard (Trending, Recommended,
 // BecauseYouWatched, LiveNow).
 type HomeRepo interface {
-	Trending(ctx context.Context, userID string, windowDays, limit int) ([]db.HomeTrendingItem, error)
-	Recommended(ctx context.Context, userID string, limit int) ([]db.HomeRecommendation, error)
-	BecauseYouWatched(ctx context.Context, userID string, limit int) (*db.HomeBecauseResult, error)
-	LiveNow(ctx context.Context, userID string, limit int) ([]db.HomeLiveNowChannel, error)
+	Trending(ctx context.Context, userID string, windowDays, limit int) ([]librarymodel.HomeTrendingItem, error)
+	Recommended(ctx context.Context, userID string, limit int) ([]librarymodel.HomeRecommendation, error)
+	BecauseYouWatched(ctx context.Context, userID string, limit int) (*librarymodel.HomeBecauseResult, error)
+	LiveNow(ctx context.Context, userID string, limit int) ([]librarymodel.HomeLiveNowChannel, error)
 }
 
 // ExternalIDsRepo es el contrato amplio del repo de external IDs.

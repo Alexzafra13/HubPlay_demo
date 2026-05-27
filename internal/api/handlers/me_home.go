@@ -50,7 +50,7 @@ type HomeHandler struct {
 	// recommended can be filtered for kid profiles. Optional — when
 	// nil the cap collapses to "" and AllowedRating returns true
 	// for everything.
-	users  UserService
+	users  userProfileLookup
 	logger *slog.Logger
 }
 
@@ -60,10 +60,10 @@ type HomeHandler struct {
 // cierra parte del olor H del audit — el contrato queda expresado
 // UNA vez aquí.
 type homeRepo interface {
-	Trending(ctx context.Context, userID string, windowDays, limit int) ([]db.HomeTrendingItem, error)
-	Recommended(ctx context.Context, userID string, limit int) ([]db.HomeRecommendation, error)
-	BecauseYouWatched(ctx context.Context, userID string, limit int) (*db.HomeBecauseResult, error)
-	LiveNow(ctx context.Context, userID string, limit int) ([]db.HomeLiveNowChannel, error)
+	Trending(ctx context.Context, userID string, windowDays, limit int) ([]librarymodel.HomeTrendingItem, error)
+	Recommended(ctx context.Context, userID string, limit int) ([]librarymodel.HomeRecommendation, error)
+	BecauseYouWatched(ctx context.Context, userID string, limit int) (*librarymodel.HomeBecauseResult, error)
+	LiveNow(ctx context.Context, userID string, limit int) ([]librarymodel.HomeLiveNowChannel, error)
 }
 
 // HomeLibraryLister is the slice of LibraryRepository the home
@@ -88,7 +88,7 @@ func NewHomeHandler(
 	items ItemRepository,
 	images ImageRepository,
 	metadata HomeMetadataRepo,
-	users UserService,
+	users userProfileLookup,
 	logger *slog.Logger,
 ) *HomeHandler {
 	return &HomeHandler{
@@ -357,11 +357,11 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 			"library_id": row.LibraryID,
 			"play_count": row.PlayCount,
 		}
-		if row.Year.Valid {
-			entry["year"] = row.Year.Int64
+		if row.Year != nil {
+			entry["year"] = *row.Year
 		}
-		if row.CommunityRating.Valid {
-			entry["community_rating"] = row.CommunityRating.Float64
+		if row.CommunityRating != nil {
+			entry["community_rating"] = *row.CommunityRating
 		}
 		out = append(out, entry)
 	}
@@ -492,11 +492,11 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 			// of overpromising shared affinity.
 			"recommended_because": map[string]any{"genres": row.Because},
 		}
-		if row.Year.Valid {
-			entry["year"] = row.Year.Int64
+		if row.Year != nil {
+			entry["year"] = *row.Year
 		}
-		if row.CommunityRating.Valid {
-			entry["community_rating"] = row.CommunityRating.Float64
+		if row.CommunityRating != nil {
+			entry["community_rating"] = *row.CommunityRating
 		}
 		out = append(out, entry)
 		ids = append(ids, row.ID)
@@ -598,20 +598,20 @@ func (h *HomeHandler) LiveNow(w http.ResponseWriter, r *http.Request) {
 		// img-src CSP doesn't have to whitelist every upstream the
 		// M3U references. Empty when the channel has no logo at all
 		// — the LiveNowCard falls back to initials in that case.
-		if row.ChannelLogo.Valid && row.ChannelLogo.String != "" {
+		if row.ChannelLogo != "" {
 			entry["channel_logo"] = "/api/v1/channels/" + row.ChannelID + "/logo"
 		}
-		if row.ProgramTitle.Valid {
-			entry["program_title"] = row.ProgramTitle.String
+		if row.ProgramTitle != "" {
+			entry["program_title"] = row.ProgramTitle
 		}
-		if row.ProgramStart.Valid {
-			entry["program_start"] = row.ProgramStart.Time
+		if row.ProgramStart != nil {
+			entry["program_start"] = *row.ProgramStart
 		}
-		if row.ProgramEnd.Valid {
-			entry["program_end"] = row.ProgramEnd.Time
+		if row.ProgramEnd != nil {
+			entry["program_end"] = *row.ProgramEnd
 		}
-		if row.ProgramIcon.Valid {
-			entry["program_icon"] = row.ProgramIcon.String
+		if row.ProgramIcon != "" {
+			entry["program_icon"] = row.ProgramIcon
 		}
 		out = append(out, entry)
 	}
@@ -832,11 +832,11 @@ func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) 
 		if len(row.Because) > 0 {
 			entry["recommended_because"] = map[string]any{"genres": row.Because}
 		}
-		if row.Year.Valid {
-			entry["year"] = row.Year.Int64
+		if row.Year != nil {
+			entry["year"] = *row.Year
 		}
-		if row.CommunityRating.Valid {
-			entry["community_rating"] = row.CommunityRating.Float64
+		if row.CommunityRating != nil {
+			entry["community_rating"] = *row.CommunityRating
 		}
 		out = append(out, entry)
 		ids = append(ids, row.ID)
@@ -868,8 +868,8 @@ func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) 
 				"title":      result.Seed.Title,
 				"library_id": result.Seed.LibraryID,
 			}
-			if result.Seed.Year.Valid {
-				seed["year"] = result.Seed.Year.Int64
+			if result.Seed.Year != nil {
+				seed["year"] = *result.Seed.Year
 			}
 			if poster, ok := seedURLs["primary"]; ok {
 				seed["poster_url"] = poster.Path
@@ -894,8 +894,8 @@ func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) 
 		"title":      result.Seed.Title,
 		"library_id": result.Seed.LibraryID,
 	}
-	if result.Seed.Year.Valid {
-		seed["year"] = result.Seed.Year.Int64
+	if result.Seed.Year != nil {
+		seed["year"] = *result.Seed.Year
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{

@@ -15,7 +15,6 @@ import (
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/testutil"
 )
@@ -24,13 +23,13 @@ import (
 
 type progressFakeUserData struct {
 	mu   sync.Mutex
-	data map[string]*db.UserData // key: "userID:itemID"
+	data map[string]*librarymodel.UserData // key: "userID:itemID"
 
 	// Optional overrides for the list-returning methods; nil = use default
 	// behaviour (return an empty slice).
-	continueFn func(ctx context.Context, userID string, limit int) ([]*db.ContinueWatchingItem, error)
-	favsFn     func(ctx context.Context, userID string, limit, offset int) ([]*db.FavoriteItem, error)
-	nextUpFn   func(ctx context.Context, userID string, limit int) ([]*db.NextUpItem, error)
+	continueFn func(ctx context.Context, userID string, limit int) ([]*librarymodel.ContinueWatchingItem, error)
+	favsFn     func(ctx context.Context, userID string, limit, offset int) ([]*librarymodel.FavoriteItem, error)
+	nextUpFn   func(ctx context.Context, userID string, limit int) ([]*librarymodel.NextUpItem, error)
 
 	// Optional failure injection for write methods.
 	failGet           bool
@@ -42,12 +41,12 @@ type progressFakeUserData struct {
 }
 
 func newProgressFakeUserData() *progressFakeUserData {
-	return &progressFakeUserData{data: map[string]*db.UserData{}}
+	return &progressFakeUserData{data: map[string]*librarymodel.UserData{}}
 }
 
 func keyUD(userID, itemID string) string { return userID + ":" + itemID }
 
-func (r *progressFakeUserData) Get(_ context.Context, userID, itemID string) (*db.UserData, error) {
+func (r *progressFakeUserData) Get(_ context.Context, userID, itemID string) (*librarymodel.UserData, error) {
 	if r.failGet {
 		return nil, errors.New("boom")
 	}
@@ -61,13 +60,13 @@ func (r *progressFakeUserData) Get(_ context.Context, userID, itemID string) (*d
 	return &cp, nil
 }
 
-func (r *progressFakeUserData) GetBatch(_ context.Context, userID string, itemIDs []string) (map[string]*db.UserData, error) {
+func (r *progressFakeUserData) GetBatch(_ context.Context, userID string, itemIDs []string) (map[string]*librarymodel.UserData, error) {
 	if r.failGet {
 		return nil, errors.New("boom")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make(map[string]*db.UserData, len(itemIDs))
+	out := make(map[string]*librarymodel.UserData, len(itemIDs))
 	for _, id := range itemIDs {
 		if ud, ok := r.data[keyUD(userID, id)]; ok {
 			cp := *ud
@@ -86,7 +85,7 @@ func (r *progressFakeUserData) UpdateProgress(_ context.Context, userID, itemID 
 	k := keyUD(userID, itemID)
 	ud, ok := r.data[k]
 	if !ok {
-		ud = &db.UserData{UserID: userID, ItemID: itemID}
+		ud = &librarymodel.UserData{UserID: userID, ItemID: itemID}
 		r.data[k] = ud
 	}
 	ud.PositionTicks = pos
@@ -105,7 +104,7 @@ func (r *progressFakeUserData) MarkPlayed(_ context.Context, userID, itemID stri
 	k := keyUD(userID, itemID)
 	ud, ok := r.data[k]
 	if !ok {
-		ud = &db.UserData{UserID: userID, ItemID: itemID}
+		ud = &librarymodel.UserData{UserID: userID, ItemID: itemID}
 		r.data[k] = ud
 	}
 	ud.Completed = true
@@ -122,28 +121,28 @@ func (r *progressFakeUserData) SetFavorite(_ context.Context, userID, itemID str
 	k := keyUD(userID, itemID)
 	ud, ok := r.data[k]
 	if !ok {
-		ud = &db.UserData{UserID: userID, ItemID: itemID}
+		ud = &librarymodel.UserData{UserID: userID, ItemID: itemID}
 		r.data[k] = ud
 	}
 	ud.IsFavorite = fav
 	return nil
 }
 
-func (r *progressFakeUserData) ContinueWatching(ctx context.Context, userID string, limit int) ([]*db.ContinueWatchingItem, error) {
+func (r *progressFakeUserData) ContinueWatching(ctx context.Context, userID string, limit int) ([]*librarymodel.ContinueWatchingItem, error) {
 	if r.continueFn != nil {
 		return r.continueFn(ctx, userID, limit)
 	}
 	return nil, nil
 }
 
-func (r *progressFakeUserData) Favorites(ctx context.Context, userID string, limit, offset int) ([]*db.FavoriteItem, error) {
+func (r *progressFakeUserData) Favorites(ctx context.Context, userID string, limit, offset int) ([]*librarymodel.FavoriteItem, error) {
 	if r.favsFn != nil {
 		return r.favsFn(ctx, userID, limit, offset)
 	}
 	return nil, nil
 }
 
-func (r *progressFakeUserData) NextUp(ctx context.Context, userID string, limit int) ([]*db.NextUpItem, error) {
+func (r *progressFakeUserData) NextUp(ctx context.Context, userID string, limit int) ([]*librarymodel.NextUpItem, error) {
 	if r.nextUpFn != nil {
 		return r.nextUpFn(ctx, userID, limit)
 	}
@@ -286,7 +285,7 @@ func TestProgressHandler_GetProgress_EmptyReturnsZeroPayload(t *testing.T) {
 func TestProgressHandler_GetProgress_PopulatedReturnsState(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
-	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{
+	env.userData.data[keyUD("user-1", "item-1")] = &librarymodel.UserData{
 		UserID: "user-1", ItemID: "item-1",
 		PositionTicks: 123, PlayCount: 2, Completed: true, IsFavorite: true,
 	}
@@ -391,7 +390,7 @@ func TestProgressHandler_MarkPlayed_SetsCompleted(t *testing.T) {
 func TestProgressHandler_MarkUnplayed_DeletesRecord(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
-	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{Completed: true}
+	env.userData.data[keyUD("user-1", "item-1")] = &librarymodel.UserData{Completed: true}
 	rr := env.do(http.MethodDelete, "/api/v1/me/progress/item-1/played", "", defaultClaims())
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status: %d", rr.Code)
@@ -408,7 +407,7 @@ func TestProgressHandler_RemoveFromContinueWatching_ZeroesPosition(t *testing.T)
 	env := newProgressTestEnv(t)
 	// Pre-seed a partly-watched, favorited record to verify we zero
 	// position WITHOUT collateral damage to play_count + is_favorite.
-	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{
+	env.userData.data[keyUD("user-1", "item-1")] = &librarymodel.UserData{
 		UserID: "user-1", ItemID: "item-1",
 		PositionTicks: 1_234_567_890,
 		PlayCount:     3,
@@ -461,7 +460,7 @@ func TestProgressHandler_ToggleFavorite_FirstTime_Enables(t *testing.T) {
 func TestProgressHandler_ToggleFavorite_Inverts(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
-	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{IsFavorite: true}
+	env.userData.data[keyUD("user-1", "item-1")] = &librarymodel.UserData{IsFavorite: true}
 	rr := env.do(http.MethodPost, "/api/v1/me/favorite/item-1", "", defaultClaims())
 	d := decodeProgressData(t, rr)
 	if d["is_favorite"] != false {
@@ -490,8 +489,8 @@ func TestProgressHandler_ContinueWatching_ShapesEntries(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	now := time.Now()
-	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
-		return []*db.ContinueWatchingItem{
+	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*librarymodel.ContinueWatchingItem, error) {
+		return []*librarymodel.ContinueWatchingItem{
 			{ItemID: "it-1", PositionTicks: 100, LastPlayedAt: &now, Title: "Foo", Type: "episode", DurationTicks: 1000, ParentID: "series-1"},
 		}, nil
 	}
@@ -519,8 +518,8 @@ func TestProgressHandler_ContinueWatching_EpisodeSurfacesSeasonAndSeriesArt(t *t
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	now := time.Now()
-	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
-		return []*db.ContinueWatchingItem{
+	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*librarymodel.ContinueWatchingItem, error) {
+		return []*librarymodel.ContinueWatchingItem{
 			{
 				ItemID:        "ep-1",
 				PositionTicks: 200,
@@ -529,8 +528,8 @@ func TestProgressHandler_ContinueWatching_EpisodeSurfacesSeasonAndSeriesArt(t *t
 				Type:          "episode",
 				DurationTicks: 1000,
 				ParentID:      "season-1",
-				SeasonNumber:  1,
-				EpisodeNumber: 3,
+				SeasonNumber:  ptrTestInt(1),
+				EpisodeNumber: ptrTestInt(3),
 				SeriesID:      "series-1",
 				SeriesTitle:   "Mr Robot",
 			},
@@ -605,8 +604,8 @@ func TestProgressHandler_ContinueWatching_MovieSkipsSeasonEnrichment(t *testing.
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	now := time.Now()
-	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
-		return []*db.ContinueWatchingItem{
+	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*librarymodel.ContinueWatchingItem, error) {
+		return []*librarymodel.ContinueWatchingItem{
 			{ItemID: "movie-1", PositionTicks: 50, LastPlayedAt: &now, Title: "Foo", Type: "movie", DurationTicks: 1000},
 		}, nil
 	}
@@ -633,7 +632,7 @@ func TestProgressHandler_ContinueWatching_LimitValidated(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	var gotLimit int
-	env.userData.continueFn = func(_ context.Context, _ string, limit int) ([]*db.ContinueWatchingItem, error) {
+	env.userData.continueFn = func(_ context.Context, _ string, limit int) ([]*librarymodel.ContinueWatchingItem, error) {
 		gotLimit = limit
 		return nil, nil
 	}
@@ -660,9 +659,9 @@ func TestProgressHandler_Favorites_RespectsPagination(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	var gotLimit, gotOffset int
-	env.userData.favsFn = func(_ context.Context, _ string, limit, offset int) ([]*db.FavoriteItem, error) {
+	env.userData.favsFn = func(_ context.Context, _ string, limit, offset int) ([]*librarymodel.FavoriteItem, error) {
 		gotLimit, gotOffset = limit, offset
-		return []*db.FavoriteItem{{ItemID: "fav-1", Title: "Favy", Type: "movie", Year: 2020}}, nil
+		return []*librarymodel.FavoriteItem{{ItemID: "fav-1", Title: "Favy", Type: "movie", Year: 2020}}, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/me/favorites?limit=25&offset=100", "", defaultClaims())
 	if rr.Code != http.StatusOK {
@@ -677,7 +676,7 @@ func TestProgressHandler_Favorites_RejectsNegativeOffset(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	var gotOffset int
-	env.userData.favsFn = func(_ context.Context, _ string, _, offset int) ([]*db.FavoriteItem, error) {
+	env.userData.favsFn = func(_ context.Context, _ string, _, offset int) ([]*librarymodel.FavoriteItem, error) {
 		gotOffset = offset
 		return nil, nil
 	}
@@ -693,8 +692,8 @@ func TestProgressHandler_NextUp_ShapesEpisodes(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
 	s2, e3 := 2, 3
-	env.userData.nextUpFn = func(_ context.Context, _ string, _ int) ([]*db.NextUpItem, error) {
-		return []*db.NextUpItem{
+	env.userData.nextUpFn = func(_ context.Context, _ string, _ int) ([]*librarymodel.NextUpItem, error) {
+		return []*librarymodel.NextUpItem{
 			{EpisodeID: "ep-1", EpisodeTitle: "Pilot", SeasonNumber: &s2, EpisodeNumber: &e3,
 				DurationTicks: 1200, SeriesTitle: "Show", SeriesID: "series-1"},
 		}, nil
@@ -850,3 +849,5 @@ func TestProgressHandler_NilBus_NoOpPublish(t *testing.T) {
 		t.Fatalf("status: %d", rr.Code)
 	}
 }
+
+func ptrTestInt(v int) *int { return &v }

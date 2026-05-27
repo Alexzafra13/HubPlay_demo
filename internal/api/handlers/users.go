@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -11,20 +12,27 @@ import (
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/library"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/user"
 )
 
+// userLibraryOps es el contrato mínimo que UserHandler necesita del
+// library service. 4 de 25 métodos.
+type userLibraryOps interface {
+	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
+	CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
+	ListAccessByUser(ctx context.Context, userID string) ([]string, error)
+	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
+}
+
 type UserHandler struct {
 	users     UserService
-	libraries LibraryService
+	libraries userLibraryOps
 	audit     AuditEmitter
 	logger    *slog.Logger
 }
 
-// NewUserHandler wires the user handler. libraries may be nil in test
-// setups that don't exercise the library-access surface; production
-// always passes the real service. audit nil-safe.
-func NewUserHandler(users UserService, libraries LibraryService, audit AuditEmitter, logger *slog.Logger) *UserHandler {
+func NewUserHandler(users UserService, libraries userLibraryOps, audit AuditEmitter, logger *slog.Logger) *UserHandler {
 	return &UserHandler{
 		users:     users,
 		libraries: libraries,

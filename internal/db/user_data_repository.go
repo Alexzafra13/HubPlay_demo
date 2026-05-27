@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	librarymodel "hubplay/internal/library/model"
 	"errors"
 	"fmt"
 	"time"
@@ -12,19 +14,6 @@ import (
 )
 
 // UserData holds a user's interaction data for a specific item.
-type UserData struct {
-	UserID              string
-	ItemID              string
-	PositionTicks       int64
-	PlayCount           int
-	Completed           bool
-	IsFavorite          bool
-	Liked               *bool // nil = no opinion
-	AudioStreamIndex    *int
-	SubtitleStreamIndex *int
-	LastPlayedAt        *time.Time
-	UpdatedAt           time.Time
-}
 
 // UserDataRepository — dual-dialect (Pattern A + Pattern B). All sqlc
 // methods branch on `useSQLite()`. Two raw-SQL methods stay outside
@@ -60,7 +49,7 @@ func (r *UserDataRepository) driver() string {
 // UpdatedAt is normalised to UTC at the binding boundary: see UpdateProgress
 // for the modernc.org/sqlite serialisation contract this enforces. LastPlayedAt
 // is normalised by nullableTimePtr.
-func (r *UserDataRepository) Upsert(ctx context.Context, ud *UserData) error {
+func (r *UserDataRepository) Upsert(ctx context.Context, ud *librarymodel.UserData) error {
 	if r.useSQLite() {
 		err := r.sq.UpsertUserData(ctx, sqlc.UpsertUserDataParams{
 			UserID:              ud.UserID,
@@ -100,7 +89,7 @@ func (r *UserDataRepository) Upsert(ctx context.Context, ud *UserData) error {
 }
 
 // Get returns user data for a specific user+item pair.
-func (r *UserDataRepository) Get(ctx context.Context, userID, itemID string) (*UserData, error) {
+func (r *UserDataRepository) Get(ctx context.Context, userID, itemID string) (*librarymodel.UserData, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetUserData(ctx, sqlc.GetUserDataParams{
 			UserID: userID,
@@ -133,7 +122,7 @@ func (r *UserDataRepository) Get(ctx context.Context, userID, itemID string) (*U
 // keyed by item_id. Items with no row are simply absent from the map (the
 // caller treats that as "no progress yet"). Uses raw SQL because sqlc
 // doesn't support dynamic IN().
-func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*UserData, error) {
+func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*librarymodel.UserData, error) {
 	if userID == "" || len(itemIDs) == 0 {
 		return nil, nil
 	}
@@ -162,7 +151,7 @@ func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemID
 	defer rows.Close() //nolint:errcheck
 
 	pg := !r.useSQLite()
-	out := make(map[string]*UserData, len(itemIDs))
+	out := make(map[string]*librarymodel.UserData, len(itemIDs))
 	for rows.Next() {
 		// play_count / audio_stream_index / subtitle_stream_index
 		// are INTEGER → NullInt64 SQLite, NullInt32 Postgres. Scan
@@ -175,7 +164,7 @@ func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemID
 			lastPlayedAt          sql.NullTime
 			updatedAt             time.Time
 		)
-		ud := &UserData{}
+		ud := &librarymodel.UserData{}
 		if pg {
 			var playCount sql.NullInt32
 			var audio, subtitle sql.NullInt32
@@ -350,7 +339,7 @@ var AbandonedAfter = 30 * 24 * time.Hour
 // Items with unknown duration (`duration_ticks = 0`) are kept — we
 // can't reason about progress without it, so leaving them visible is
 // the safe default.
-func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string, limit int) ([]*ContinueWatchingItem, error) {
+func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string, limit int) ([]*librarymodel.ContinueWatchingItem, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -381,35 +370,9 @@ func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string
 }
 
 // ContinueWatchingItem is the result for continue watching queries.
-type ContinueWatchingItem struct {
-	ItemID        string
-	PositionTicks int64
-	LastPlayedAt  *time.Time
-	Title         string
-	Type          string
-	DurationTicks int64
-	ParentID      string
-	Container     string
-	// SeasonNumber + EpisodeNumber pinpoint the episode inside its
-	// show — needed for the "Sigue viendo S01E03" panel label.
-	// 0 means "not an episode" or "missing", which the frontend
-	// treats as absent (panel shows just the title).
-	SeasonNumber  int
-	EpisodeNumber int
-	// SeriesID is the show this episode belongs to, derived via
-	// `episode → season → series` in SQL. Empty when the row is a
-	// movie or an orphaned episode without a parent chain. The
-	// useResumeTarget hook keys series-scope matching off this field.
-	SeriesID string
-	// SeriesTitle is the parent show's title, joined in by SQL via
-	// `episode → season → series`. Empty for movies and orphaned
-	// episodes. The Home hero uses it as the headline when the slide
-	// is an episode (the episode's own title becomes the subtitle).
-	SeriesTitle string
-}
 
 // Favorites returns items marked as favorite by the user.
-func (r *UserDataRepository) Favorites(ctx context.Context, userID string, limit, offset int) ([]*FavoriteItem, error) {
+func (r *UserDataRepository) Favorites(ctx context.Context, userID string, limit, offset int) ([]*librarymodel.FavoriteItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -436,14 +399,6 @@ func (r *UserDataRepository) Favorites(ctx context.Context, userID string, limit
 }
 
 // FavoriteItem is the result for favorite queries.
-type FavoriteItem struct {
-	ItemID        string
-	FavoritedAt   time.Time
-	Title         string
-	Type          string
-	Year          int
-	DurationTicks int64
-}
 
 // NextUp returns the next unwatched episode for each series the user is watching.
 // Uses raw SQL because the CTE references the same param twice and sqlc
@@ -453,7 +408,7 @@ type FavoriteItem struct {
 // `= 1`) — works in SQLite (BOOLEAN stored as INTEGER, truthy on the
 // integer 1) and Postgres (real boolean predicate). Same trick the
 // item / channel repos use.
-func (r *UserDataRepository) NextUp(ctx context.Context, userID string, limit int) ([]*NextUpItem, error) {
+func (r *UserDataRepository) NextUp(ctx context.Context, userID string, limit int) ([]*librarymodel.NextUpItem, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -497,9 +452,9 @@ func (r *UserDataRepository) NextUp(ctx context.Context, userID string, limit in
 	defer rows.Close() //nolint:errcheck
 
 	pg := !r.useSQLite()
-	var items []*NextUpItem
+	var items []*librarymodel.NextUpItem
 	for rows.Next() {
-		item := &NextUpItem{}
+		item := &librarymodel.NextUpItem{}
 		// season_number / episode_number INTEGER → NullInt64 sqlite,
 		// NullInt32 pg. Scan into the dialect's type and project to *int.
 		var seasonScan, episodeScan sql.NullInt64
@@ -539,15 +494,6 @@ func (r *UserDataRepository) NextUp(ctx context.Context, userID string, limit in
 }
 
 // NextUpItem is the result for next-up queries.
-type NextUpItem struct {
-	EpisodeID     string
-	EpisodeTitle  string
-	SeasonNumber  *int
-	EpisodeNumber *int
-	DurationTicks int64
-	SeriesTitle   string
-	SeriesID      string
-}
 
 // SeriesEpisodeProgress reports total + watched episode counts for a
 // single series for one user. Used by the series detail page hero to
@@ -647,8 +593,8 @@ func nullableTimePtr(t *time.Time) sql.NullTime {
 	return sql.NullTime{Time: (*t).UTC(), Valid: true}
 }
 
-func userDataFromSqliteRow(r sqlc.UserDatum) UserData {
-	ud := UserData{
+func userDataFromSqliteRow(r sqlc.UserDatum) librarymodel.UserData {
+	ud := librarymodel.UserData{
 		UserID:        r.UserID,
 		ItemID:        r.ItemID,
 		PositionTicks: r.PositionTicks.Int64,
@@ -675,8 +621,8 @@ func userDataFromSqliteRow(r sqlc.UserDatum) UserData {
 	return ud
 }
 
-func userDataFromPgRow(r sqlc_pg.UserDatum) UserData {
-	ud := UserData{
+func userDataFromPgRow(r sqlc_pg.UserDatum) librarymodel.UserData {
+	ud := librarymodel.UserData{
 		UserID:        r.UserID,
 		ItemID:        r.ItemID,
 		PositionTicks: r.PositionTicks.Int64,
@@ -703,13 +649,13 @@ func userDataFromPgRow(r sqlc_pg.UserDatum) UserData {
 	return ud
 }
 
-func continueWatchingFromSqliteRows(rows []sqlc.ContinueWatchingRow) []*ContinueWatchingItem {
+func continueWatchingFromSqliteRows(rows []sqlc.ContinueWatchingRow) []*librarymodel.ContinueWatchingItem {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*ContinueWatchingItem, len(rows))
+	out := make([]*librarymodel.ContinueWatchingItem, len(rows))
 	for i, r := range rows {
-		item := &ContinueWatchingItem{
+		item := &librarymodel.ContinueWatchingItem{
 			ItemID:        r.ItemID,
 			PositionTicks: r.PositionTicks.Int64,
 			Title:         r.Title,
@@ -717,8 +663,8 @@ func continueWatchingFromSqliteRows(rows []sqlc.ContinueWatchingRow) []*Continue
 			DurationTicks: r.DurationTicks.Int64,
 			ParentID:      r.ParentID,
 			Container:     r.Container,
-			SeasonNumber:  int(r.SeasonNumber),
-			EpisodeNumber: int(r.EpisodeNumber),
+			SeasonNumber:  ptrInt(int64(r.SeasonNumber)),
+			EpisodeNumber: ptrInt(int64(r.EpisodeNumber)),
 			SeriesID:      r.SeriesID,
 			SeriesTitle:   r.SeriesTitle,
 		}
@@ -730,13 +676,13 @@ func continueWatchingFromSqliteRows(rows []sqlc.ContinueWatchingRow) []*Continue
 	return out
 }
 
-func continueWatchingFromPgRows(rows []sqlc_pg.ContinueWatchingRow) []*ContinueWatchingItem {
+func continueWatchingFromPgRows(rows []sqlc_pg.ContinueWatchingRow) []*librarymodel.ContinueWatchingItem {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*ContinueWatchingItem, len(rows))
+	out := make([]*librarymodel.ContinueWatchingItem, len(rows))
 	for i, r := range rows {
-		item := &ContinueWatchingItem{
+		item := &librarymodel.ContinueWatchingItem{
 			ItemID:        r.ItemID,
 			PositionTicks: r.PositionTicks.Int64,
 			Title:         r.Title,
@@ -744,8 +690,8 @@ func continueWatchingFromPgRows(rows []sqlc_pg.ContinueWatchingRow) []*ContinueW
 			DurationTicks: r.DurationTicks.Int64,
 			ParentID:      r.ParentID,
 			Container:     r.Container,
-			SeasonNumber:  int(r.SeasonNumber),
-			EpisodeNumber: int(r.EpisodeNumber),
+			SeasonNumber:  ptrInt(int64(r.SeasonNumber)),
+			EpisodeNumber: ptrInt(int64(r.EpisodeNumber)),
 			SeriesID:      r.SeriesID,
 			SeriesTitle:   r.SeriesTitle,
 		}
@@ -757,13 +703,13 @@ func continueWatchingFromPgRows(rows []sqlc_pg.ContinueWatchingRow) []*ContinueW
 	return out
 }
 
-func favoritesFromSqliteRows(rows []sqlc.ListFavoritesRow) []*FavoriteItem {
+func favoritesFromSqliteRows(rows []sqlc.ListFavoritesRow) []*librarymodel.FavoriteItem {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*FavoriteItem, len(rows))
+	out := make([]*librarymodel.FavoriteItem, len(rows))
 	for i, r := range rows {
-		out[i] = &FavoriteItem{
+		out[i] = &librarymodel.FavoriteItem{
 			ItemID:        r.ItemID,
 			FavoritedAt:   r.UpdatedAt,
 			Title:         r.Title,
@@ -775,13 +721,13 @@ func favoritesFromSqliteRows(rows []sqlc.ListFavoritesRow) []*FavoriteItem {
 	return out
 }
 
-func favoritesFromPgRows(rows []sqlc_pg.ListFavoritesRow) []*FavoriteItem {
+func favoritesFromPgRows(rows []sqlc_pg.ListFavoritesRow) []*librarymodel.FavoriteItem {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*FavoriteItem, len(rows))
+	out := make([]*librarymodel.FavoriteItem, len(rows))
 	for i, r := range rows {
-		out[i] = &FavoriteItem{
+		out[i] = &librarymodel.FavoriteItem{
 			ItemID:        r.ItemID,
 			FavoritedAt:   r.UpdatedAt,
 			Title:         r.Title,
@@ -791,4 +737,9 @@ func favoritesFromPgRows(rows []sqlc_pg.ListFavoritesRow) []*FavoriteItem {
 		}
 	}
 	return out
+}
+
+func ptrInt(v int64) *int {
+	n := int(v)
+	return &n
 }

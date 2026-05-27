@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -16,6 +18,32 @@ import (
 	iptvmodel "hubplay/internal/iptv/model"
 )
 
+// channelBrowseOps es el contrato mínimo para el surface de canales
+// (listado, detalle, groups, schedule, streaming). 11 de ~50 métodos.
+type channelBrowseOps interface {
+	GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error)
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
+	GetGroups(ctx context.Context, libraryID string) ([]string, error)
+	GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error)
+	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error)
+	NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error)
+	ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error)
+	GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error)
+	GetChannelEPGIcon(ctx context.Context, channelID string) (string, error)
+}
+
+type iptvChannelHandler struct {
+	svc       channelBrowseOps
+	proxy     IPTVStreamProxyService
+	transmux  IPTVTransmuxer
+	logoCache *iptv.LogoCache
+	imageDir  string
+	access    LibraryAccessService
+	logger    *slog.Logger
+}
+
 // ListChannels returns the channels for a library, with the caller's
 // per-user order + hidden overlay applied (admins included — they
 // can personalise their view too without losing the global defaults).
@@ -23,13 +51,13 @@ import (
 // `?include_hidden=true` is an opt-in for the personalisation panel
 // itself, which needs to show every channel (including the ones the
 // user has hidden) so the toggle remains reachable.
-func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	activeOnly := r.URL.Query().Get("active") != "false"
@@ -95,7 +123,7 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetChannel returns a single channel.
-func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -106,8 +134,8 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -149,13 +177,13 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // Groups returns channel group names for a library.
-func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) Groups(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -184,7 +212,7 @@ func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 // preserves today's behaviour for deployments without ffmpeg — those
 // users keep the broken-on-MPEG-TS state we shipped before transmux,
 // but at least HLS providers continue to work.
-func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
@@ -198,8 +226,8 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -231,7 +259,7 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 // Cache headers force every reload: the manifest is a live sliding
 // window and any client-side cache breaks the player's ability to see
 // new segments.
-func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
@@ -250,8 +278,8 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	if !ch.IsActive {
@@ -323,7 +351,7 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 // `<ChannelCard>` has an onError handler that swaps to the
 // initials/colour avatar, so the UI degrades gracefully without
 // any extra client wiring.
-func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
@@ -341,8 +369,8 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -358,7 +386,7 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 			// Local file route: bypass el cache remoto, sirve directo
 			// desde disco. El basename ya fue validado en el upload
 			// (IsSafePathSegment) así que no puede ser path traversal.
-			h.serveLocalChannelLogo(w, r, channelID, override.LogoFile)
+			serveLocalChannelLogo(w, r, h.imageDir, h.logger, channelID, override.LogoFile)
 			return
 		}
 		if override.LogoURL != "" {
@@ -439,7 +467,7 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 // 404 is the right answer when the session has expired (e.g. user
 // paused for 60+ s and we reaped it): hls.js handles it by reloading
 // the manifest, which respawns the session and resumes playback.
-func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 	// Streaming endpoint: opt-out del WriteTimeout 30s global
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = DisableWriteDeadline(w)
@@ -484,7 +512,7 @@ func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 }
 
 // ProxyURL proxies an HLS segment or sub-playlist for a channel.
-func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -503,8 +531,8 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -514,7 +542,7 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 }
 
 // Schedule returns EPG schedule for a channel.
-func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -525,8 +553,8 @@ func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -573,7 +601,7 @@ type bulkScheduleRequest struct {
 // Each channel is filtered individually through the ACL — inaccessible
 // channels are dropped silently (no error) so a single restricted channel
 // doesn't poison a bulk call for an otherwise-authorised user.
-func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
+func (h *iptvChannelHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 	bq, ok := h.parseBulkScheduleRequest(w, r)
 	if !ok {
 		return
@@ -588,7 +616,7 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue // canal desconocido — skip sin 500
 		}
-		if h.canAccessLibrary(r, ch.LibraryID) {
+		if canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
 			allowed = append(allowed, id)
 		}
 	}
@@ -626,7 +654,7 @@ type bulkScheduleQuery struct {
 // parseBulkScheduleRequest normaliza los dos transportes (GET query,
 // POST JSON body) en un bulkScheduleQuery. En error escribe la
 // respuesta y devuelve ok=false; el caller debe salir.
-func (h *IPTVHandler) parseBulkScheduleRequest(w http.ResponseWriter, r *http.Request) (bulkScheduleQuery, bool) {
+func (h *iptvChannelHandler) parseBulkScheduleRequest(w http.ResponseWriter, r *http.Request) (bulkScheduleQuery, bool) {
 	if r.Method == http.MethodPost {
 		// Body cap a 1 MiB — suficiente para 5k UUIDs de canal.
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
