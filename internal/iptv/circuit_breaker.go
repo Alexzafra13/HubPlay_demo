@@ -1,6 +1,7 @@
 package iptv
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
@@ -72,15 +73,20 @@ type channelBreaker struct {
 	mu      sync.Mutex
 	entries map[string]*breakerEntry
 	clk     clock.Clock
+	logger  *slog.Logger
 }
 
-func newChannelBreaker(clk clock.Clock) *channelBreaker {
+func newChannelBreaker(clk clock.Clock, logger *slog.Logger) *channelBreaker {
 	if clk == nil {
 		clk = clock.New()
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &channelBreaker{
 		entries: make(map[string]*breakerEntry),
 		clk:     clk,
+		logger:  logger.With("module", "iptv-breaker"),
 	}
 }
 
@@ -122,6 +128,10 @@ func (b *channelBreaker) Allow(channelID string) (bool, time.Duration) {
 		e.state = breakerHalfOpen
 		e.trialInFlight = true
 		e.lastChange = now
+		b.logger.Debug("circuit breaker half-open trial",
+			"channel", channelID,
+			"cooldown", e.cooldown,
+		)
 		return true, 0
 	case breakerHalfOpen:
 		if e.trialInFlight && now.Sub(e.lastChange) < breakerTrialTimeout {
@@ -149,11 +159,17 @@ func (b *channelBreaker) RecordSuccess(channelID string) {
 		// No prior failures — nothing to record.
 		return
 	}
+	wasHalfOpen := e.state == breakerHalfOpen
 	e.state = breakerClosed
 	e.failures = 0
 	e.cooldown = 0
 	e.trialInFlight = false
 	e.lastChange = b.clk.Now()
+	if wasHalfOpen {
+		b.logger.Info("circuit breaker recovered",
+			"channel", channelID,
+		)
+	}
 }
 
 // RecordFailure increments the failure counter (when closed) or
@@ -180,6 +196,11 @@ func (b *channelBreaker) RecordFailure(channelID string) {
 			e.openedAt = now
 			e.cooldown = breakerInitialCooldown
 			e.lastChange = now
+			b.logger.Warn("circuit breaker opened",
+				"channel", channelID,
+				"failures", e.failures,
+				"cooldown", e.cooldown,
+			)
 		}
 	case breakerHalfOpen:
 		// Trial failed — back to open with a longer cooldown.
@@ -195,6 +216,10 @@ func (b *channelBreaker) RecordFailure(channelID string) {
 		e.cooldown = next
 		e.trialInFlight = false
 		e.lastChange = now
+		b.logger.Warn("circuit breaker re-opened after failed trial",
+			"channel", channelID,
+			"cooldown", e.cooldown,
+		)
 	case breakerOpen:
 		// Already open. The Allow gate normally prevents reaching
 		// here; the rare path is a caller that bypassed Allow (for

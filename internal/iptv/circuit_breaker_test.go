@@ -1,6 +1,8 @@
 package iptv
 
 import (
+	"bytes"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +15,18 @@ import (
 func newTestBreaker(t *testing.T) (*channelBreaker, *clock.Mock) {
 	t.Helper()
 	mc := &clock.Mock{CurrentTime: time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)}
-	return newChannelBreaker(mc), mc
+	return newChannelBreaker(mc, nil), mc
+}
+
+// newTestBreakerWithLogger es como newTestBreaker pero con un logger
+// que escribe a un buffer para que los tests puedan verificar
+// transiciones logueadas.
+func newTestBreakerWithLogger(t *testing.T) (*channelBreaker, *clock.Mock, *bytes.Buffer) {
+	t.Helper()
+	mc := &clock.Mock{CurrentTime: time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)}
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return newChannelBreaker(mc, logger), mc, &buf
 }
 
 // A fresh breaker with no entries should allow every channel and
@@ -286,4 +299,103 @@ func TestBreaker_ConcurrentAccess_NoRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// Las 4 transiciones del breaker deben dejar rastro en el logger
+// para que el operador sepa cuándo un canal entró/salió en
+// cooldown sin tener que pollear BreakerState() desde la admin.
+func TestBreaker_LogsClosedToOpenTransition(t *testing.T) {
+	t.Parallel()
+	b, _, buf := newTestBreakerWithLogger(t)
+
+	for i := 0; i < breakerThreshold; i++ {
+		b.RecordFailure("c-trip")
+	}
+
+	logged := buf.String()
+	if !bytes.Contains([]byte(logged), []byte("circuit breaker opened")) {
+		t.Errorf("expected 'circuit breaker opened' log, got: %s", logged)
+	}
+	if !bytes.Contains([]byte(logged), []byte("channel=c-trip")) {
+		t.Errorf("expected channel field in log, got: %s", logged)
+	}
+}
+
+func TestBreaker_LogsHalfOpenToOpenTransition(t *testing.T) {
+	t.Parallel()
+	b, mc, buf := newTestBreakerWithLogger(t)
+
+	for i := 0; i < breakerThreshold; i++ {
+		b.RecordFailure("c-retrip")
+	}
+	// Avanza el reloj para que el cooldown expire y la siguiente
+	// Allow promueva a half-open.
+	mc.CurrentTime = mc.CurrentTime.Add(breakerInitialCooldown + time.Second)
+	allowed, _ := b.Allow("c-retrip")
+	if !allowed {
+		t.Fatal("Allow should have promoted to half-open")
+	}
+	// El trial falla → vuelve a open con cooldown doblado.
+	buf.Reset() // sólo nos interesa el re-open
+	b.RecordFailure("c-retrip")
+
+	logged := buf.String()
+	if !bytes.Contains([]byte(logged), []byte("circuit breaker re-opened after failed trial")) {
+		t.Errorf("expected re-open log, got: %s", logged)
+	}
+}
+
+func TestBreaker_LogsHalfOpenTrialAttempt(t *testing.T) {
+	t.Parallel()
+	b, mc, buf := newTestBreakerWithLogger(t)
+
+	for i := 0; i < breakerThreshold; i++ {
+		b.RecordFailure("c-trial")
+	}
+	mc.CurrentTime = mc.CurrentTime.Add(breakerInitialCooldown + time.Second)
+	buf.Reset() // ignoramos el log de open
+
+	if allowed, _ := b.Allow("c-trial"); !allowed {
+		t.Fatal("Allow should have promoted to half-open")
+	}
+
+	logged := buf.String()
+	if !bytes.Contains([]byte(logged), []byte("circuit breaker half-open trial")) {
+		t.Errorf("expected half-open trial log, got: %s", logged)
+	}
+}
+
+func TestBreaker_LogsRecoveryFromHalfOpen(t *testing.T) {
+	t.Parallel()
+	b, mc, buf := newTestBreakerWithLogger(t)
+
+	for i := 0; i < breakerThreshold; i++ {
+		b.RecordFailure("c-recover")
+	}
+	mc.CurrentTime = mc.CurrentTime.Add(breakerInitialCooldown + time.Second)
+	_, _ = b.Allow("c-recover") // promueve a half-open
+	buf.Reset()                 // sólo nos interesa el recovery
+
+	b.RecordSuccess("c-recover")
+
+	logged := buf.String()
+	if !bytes.Contains([]byte(logged), []byte("circuit breaker recovered")) {
+		t.Errorf("expected recovered log, got: %s", logged)
+	}
+}
+
+func TestBreaker_RecordSuccessOnClosedDoesNotLog(t *testing.T) {
+	// RecordSuccess sobre un breaker closed sin half-open previo
+	// no es transición — no debe ensuciar logs con "recovered"
+	// cuando no había fallo del que recuperarse.
+	t.Parallel()
+	b, _, buf := newTestBreakerWithLogger(t)
+
+	b.RecordFailure("c-quiet") // un fallo, queda closed (no llega al threshold)
+	buf.Reset()
+	b.RecordSuccess("c-quiet")
+
+	if buf.Len() > 0 {
+		t.Errorf("RecordSuccess on closed should not log, got: %s", buf.String())
+	}
 }
