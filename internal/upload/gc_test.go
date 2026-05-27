@@ -35,7 +35,7 @@ func newGC(t *testing.T, staleAfter time.Duration) (*upload.GC, *upload.StagingD
 	if err != nil {
 		t.Fatal(err)
 	}
-	gc := upload.NewGC(staging, time.Hour, staleAfter, slog.Default())
+	gc := upload.NewGC(staging, time.Hour, staleAfter, nil, slog.Default())
 	return gc, staging
 }
 

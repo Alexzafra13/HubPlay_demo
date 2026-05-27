@@ -66,7 +66,7 @@ INSERT INTO users (id, username, role) VALUES ('u2', 'admin2', 'admin');
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
-	return NewRepository("sqlite", db), func() { _ = db.Close() }
+	return NewRepository("sqlite", db, nil), func() { _ = db.Close() }
 }
 
 func newSvcForTest(t *testing.T) (*Service, *stubBus, func()) {
@@ -212,5 +212,48 @@ func TestMarkAllReadForUser_OnlyAffectsThatUser(t *testing.T) {
 	c2, _ := svc.UnreadCountForUser(ctx, "u2")
 	if c1 != 0 || c2 != 1 {
 		t.Errorf("unread u1=%d u2=%d, want 0/1 (only u1 affected)", c1, c2)
+	}
+}
+
+// TestRepository_UsesInjectedClock verifica que Insert con
+// CreatedAt zero usa el clock inyectado en NewRepository (no time.Now).
+// Sin el campo `clock`, este test se rompería: el CreatedAt sería el
+// momento de ejecución, no el del mock.
+func TestRepository_UsesInjectedClock(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close() //nolint:errcheck
+	const schema = `
+CREATE TABLE notifications (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '',
+    link       TEXT NOT NULL DEFAULT '',
+    payload    TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    read_at    TIMESTAMP
+);`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+
+	fixed := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	mock := &clock.Mock{CurrentTime: fixed}
+	repo := NewRepository("sqlite", db, mock)
+
+	n := &Notification{
+		UserID: "u1",
+		Kind:   "test",
+		Title:  "hello",
+	}
+	if err := repo.Insert(context.Background(), n); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if !n.CreatedAt.Equal(fixed) {
+		t.Errorf("CreatedAt = %v, want fixed %v", n.CreatedAt, fixed)
 	}
 }

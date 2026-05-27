@@ -214,7 +214,7 @@ func run(configPath string) error {
 	// stream, library, ...) emita con un solo handle. El bus opcional
 	// hace que Create publique un evento que /me/events empuja al
 	// frontend del destinatario - badge en vivo sin polling.
-	notificationRepo := notification.NewRepository(cfg.Database.Driver, database)
+	notificationRepo := notification.NewRepository(cfg.Database.Driver, database, clk)
 	notificationService := notification.NewService(notificationRepo, repos.Users, eventBus, clk, logger)
 
 	prober := probe.New()
@@ -472,7 +472,7 @@ func run(configPath string) error {
 	// Vive fuera del bloque federation porque el inbox es independiente
 	// (otras features podran emitir en el futuro). Las no-leidas se
 	// conservan siempre.
-	stopNotifSweeper := notification.StartReadCleanupSweeper(ctx, notificationRepo, logger, 24*time.Hour, notification.DefaultReadRetention)
+	stopNotifSweeper := notification.StartReadCleanupSweeper(ctx, notificationRepo, clk, logger, 24*time.Hour, notification.DefaultReadRetention)
 	defer stopNotifSweeper()
 
 	// Retention sweep: prune EPG programmes and federation audit log on
@@ -517,6 +517,7 @@ func run(configPath string) error {
 			eventBus,
 			upload.NewLibraryPicker(repos.Libraries),
 			prober,
+			clk,
 			logger,
 		)
 		// basePath debe casar EXACTAMENTE con el path bajo el que se
@@ -554,7 +555,7 @@ func run(configPath string) error {
 		// para que un "upload pausado" legítimo sobreviva un par
 		// de timeouts de red sin perderse, pero corto para que un
 		// blob abandonado no acumule días.
-		upload.NewGC(stagingDir, time.Hour, 24*time.Hour, logger).Start(ctx)
+		upload.NewGC(stagingDir, time.Hour, 24*time.Hour, clk, logger).Start(ctx)
 	} else {
 		logger.Info("uploads disabled (config.upload.enabled=false)")
 	}
