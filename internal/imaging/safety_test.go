@@ -47,6 +47,7 @@ func forgedPNG(w, h uint32) []byte {
 }
 
 func TestIsSafePathSegment(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"item-1":                             true,
 		"abc123":                             true,
@@ -67,6 +68,7 @@ func TestIsSafePathSegment(t *testing.T) {
 }
 
 func TestSniffContentType_DetectsPNGRegardlessOfHeader(t *testing.T) {
+	t.Parallel()
 	// Build a real PNG byte stream.
 	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
 	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
@@ -95,6 +97,7 @@ func TestSniffContentType_DetectsPNGRegardlessOfHeader(t *testing.T) {
 }
 
 func TestSniffContentType_RejectsHTMLMasqueradingAsImage(t *testing.T) {
+	t.Parallel()
 	// Client could set multipart Content-Type: image/jpeg but actually upload HTML.
 	// Sniff must see through that.
 	html := []byte("<!doctype html><html><body>pwn</body></html>")
@@ -108,6 +111,7 @@ func TestSniffContentType_RejectsHTMLMasqueradingAsImage(t *testing.T) {
 }
 
 func TestEnforceMaxPixels_AcceptsReasonablePNG(t *testing.T) {
+	t.Parallel()
 	img := image.NewRGBA(image.Rect(0, 0, 1000, 1000))
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -119,6 +123,7 @@ func TestEnforceMaxPixels_AcceptsReasonablePNG(t *testing.T) {
 }
 
 func TestEnforceMaxPixels_RejectsOversizedPNG(t *testing.T) {
+	t.Parallel()
 	// 50000x50000 = 2.5e9 pixels, well over the 40M guard.
 	data := forgedPNG(50000, 50000)
 	err := EnforceMaxPixels(data)
@@ -131,6 +136,7 @@ func TestEnforceMaxPixels_RejectsOversizedPNG(t *testing.T) {
 }
 
 func TestEnforceMaxPixels_NonImageAccepted(t *testing.T) {
+	t.Parallel()
 	// Unknown formats (animated GIF, AVIF, BMP, …) skip the bomb check
 	// and rely on content-type + size limits upstream. The fixture is
 	// a malformed RIFF header that even the WebP decoder rejects, so
@@ -142,6 +148,10 @@ func TestEnforceMaxPixels_NonImageAccepted(t *testing.T) {
 	}
 }
 
+// Los tests `TestSafeGet_*` no se paralelizan: SafeGet lee la global
+// `BlockedIP` y otros tests del paquete (ingest_test.go::allowLoopback
+// + TestSafeGet_RejectsRedirectToPrivateIP) la mutan. Cerrar este seam
+// global → struct field es F15-2 extendido (sesión propia).
 func TestSafeGet_RejectsLoopback(t *testing.T) {
 	srv := httptest.NewServer(nil) // 127.0.0.1
 	defer srv.Close()

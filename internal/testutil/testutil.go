@@ -78,6 +78,13 @@ func SkipIfPostgres(tb testing.TB, reason string) {
 	}
 }
 
+// migrateMu serializa las llamadas a `db.Migrate` desde tests porque
+// goose muta globales (`SetBaseFS`, `SetDialect`, `SetLogger`) sin
+// protección. En producción Migrate corre una sola vez al boot; aquí
+// con t.Parallel() pueden solaparse varios `NewTestDB` y disparar el
+// race detector aunque cada uno opere sobre su propia DB.
+var migrateMu sync.Mutex
+
 // newTestSQLiteDB: fichero fresco en t.TempDir con WAL + pragmas vía db.Open.
 func newTestSQLiteDB(tb testing.TB) *sql.DB {
 	tb.Helper()
@@ -90,7 +97,10 @@ func newTestSQLiteDB(tb testing.TB) *sql.DB {
 		tb.Fatalf("opening test db: %v", err)
 	}
 
-	if err := db.Migrate(db.DriverSQLite, database, hubplay.SQLiteMigrations, slog.Default()); err != nil {
+	migrateMu.Lock()
+	err = db.Migrate(db.DriverSQLite, database, hubplay.SQLiteMigrations, slog.Default())
+	migrateMu.Unlock()
+	if err != nil {
 		_ = database.Close()
 		tb.Fatalf("migrating test db: %v", err)
 	}
@@ -136,7 +146,10 @@ func newTestPostgresDB(tb testing.TB) *sql.DB {
 		tb.Fatalf("open test database %q: %v", dbName, err)
 	}
 
-	if err := db.Migrate(db.DriverPostgres, testDB, hubplay.PostgresMigrations, slog.Default()); err != nil {
+	migrateMu.Lock()
+	err = db.Migrate(db.DriverPostgres, testDB, hubplay.PostgresMigrations, slog.Default())
+	migrateMu.Unlock()
+	if err != nil {
 		_ = testDB.Close()
 		_, _ = pgAdminDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, dbName))
 		tb.Fatalf("migrate test database %q: %v", dbName, err)
