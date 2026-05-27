@@ -301,6 +301,48 @@ jobs:
         with:
           path: scripts/installer.iss
 
+      # ─── Firma Authenticode vía SignPath Foundation (opt-in) ─────────
+      # Activado cuando la repo variable `HUBPLAY_SIGNING_ENABLED` es
+      # 'true' (Settings → Secrets and variables → Actions → Variables).
+      # Mientras no esté activa el flujo sigue funcionando — el .exe
+      # publicado queda sin firmar (operador ve "Unknown publisher" en
+      # SmartScreen, pero el binario funciona). Cuando SignPath
+      # Foundation apruebe el proyecto, basta con configurar los 3
+      # secrets/vars de abajo y activar la variable. Ver
+      # docs/architecture/windows-installer-signing.md para el flujo
+      # completo de aplicación + configuración.
+      #
+      # Necesario al activar:
+      #   Secrets:   SIGNPATH_API_TOKEN
+      #   Vars:      HUBPLAY_SIGNING_ENABLED=true
+      #              SIGNPATH_ORGANIZATION_ID
+      #              SIGNPATH_PROJECT_SLUG
+      #              SIGNPATH_SIGNING_POLICY_SLUG  (e.g. "release-signing")
+      - name: Upload unsigned installer for SignPath
+        if: vars.HUBPLAY_SIGNING_ENABLED == 'true'
+        id: upload-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: hubplay-installer-unsigned-${{ needs.meta.outputs.version }}
+          path: dist/HubPlay-Setup-*.exe
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Submit installer to SignPath for signing
+        if: vars.HUBPLAY_SIGNING_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          # SignPath devuelve el .exe firmado aquí; sobrescribimos el
+          # original para que el resto del workflow (hash + upload final)
+          # use la versión firmada sin condicionar más steps.
+          output-artifact-directory: dist
+
       - name: Hash the installer
         shell: bash
         run: |
@@ -308,6 +350,9 @@ jobs:
           VERSION="${{ needs.meta.outputs.version }}"
           cd dist
           ls -la
+          # Hash se calcula DESPUÉS de la firma (cuando está activa) —
+          # Authenticode altera los bytes del .exe, así que un hash
+          # pre-firma no coincidiría con lo que el operador descarga.
           # En windows-runner, sha256sum viene de git-bash.
           sha256sum "HubPlay-Setup-${VERSION}-windows-amd64.exe" \
             > "HubPlay-Setup-${VERSION}-windows-amd64.exe.sha256"
@@ -399,11 +444,8 @@ jobs:
 
             Cada archivo tiene su `.sha256` adjunto para verificación.
 
-            ### Aviso de SmartScreen en Windows
-            El installer no está firmado todavía. Windows mostrará un aviso
-            "SmartScreen protegió tu PC" — click en **"Más información" →
-            "Ejecutar de todas formas"** la primera vez. Soluble en el
-            futuro firmando con SignPath Foundation (gratis para OSS).
+            ### ${{ vars.HUBPLAY_SIGNING_ENABLED == 'true' && 'Firma digital del installer' || 'Aviso de SmartScreen en Windows' }}
+            ${{ vars.HUBPLAY_SIGNING_ENABLED == 'true' && 'El installer está firmado digitalmente por **SignPath Foundation** (servicio gratuito de code-signing para proyectos open-source). Botón-derecho → Propiedades → Firmas digitales para verificar. Si SmartScreen avisa la primera vez (reputación aún baja), click en **"Más información" → "Ejecutar de todas formas"**.' || 'El installer no está firmado todavía. Windows mostrará un aviso "SmartScreen protegió tu PC" — click en **"Más información" → "Ejecutar de todas formas"** la primera vez. Soluble en el futuro firmando con SignPath Foundation (gratis para OSS).' }}
 
             ### Licencia
 
@@ -472,8 +514,7 @@ jobs:
 
             **Windows** — usa `HubPlay-Setup-*-windows-amd64.exe` (installer
             plug-and-play: icono en escritorio + servicio sin consola).
-            Si SmartScreen avisa, click en **"Más información" → "Ejecutar
-            de todas formas"**.
+            ${{ vars.HUBPLAY_SIGNING_ENABLED == 'true' && 'Firmado digitalmente por SignPath Foundation. Si SmartScreen avisa (reputación baja en nightly), click en **"Más información" → "Ejecutar de todas formas"**.' || 'Si SmartScreen avisa, click en **"Más información" → "Ejecutar de todas formas"**.' }}
 
             **macOS** — descomprime el `.tar.gz`, edita el yaml de
             ejemplo, lanza `./hubplay --config hubplay.yaml`. Luego en el
