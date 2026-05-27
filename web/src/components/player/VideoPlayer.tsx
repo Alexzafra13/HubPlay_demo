@@ -12,6 +12,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
+import { useVideoElementSync } from "@/hooks/useVideoElementSync";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
@@ -306,15 +307,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // same item for the entire session.
   const trickplay = useTrickplay(itemId);
 
-  // ─── Sync volume/mute from store to video element ──────────────────────────
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.volume = volume;
-    video.muted = isMuted;
-  }, [volume, isMuted]);
-
   // ─── Playback controls ──────────────────────────────────────────────────
 
   const togglePlayPause = useCallback(() => {
@@ -345,14 +337,16 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     togglePlayPause();
   }, [isMobile, controlsVisible, hideControls, showControls, togglePlayPause]);
 
-  // Apply playback rate to the <video> element whenever it changes.
-  // Done as an effect so a remount (audio swap, recover) re-applies
-  // the user's chosen rate to the new media stream automatically.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.playbackRate = playbackRate;
-  }, [playbackRate, masterPlaylistUrl, directUrl]);
+  // Sincroniza volume/mute/playbackRate al `<video>`. El sourceKey
+  // garantiza que un remount (audio swap, recover) re-aplique el
+  // rate elegido — sin esto el navegador vuelve a 1× nativamente.
+  useVideoElementSync({
+    videoRef,
+    volume,
+    isMuted,
+    playbackRate,
+    sourceKey: masterPlaylistUrl ?? directUrl,
+  });
 
   const handleSeek = useCallback((time: number) => {
     const video = videoRef.current;
