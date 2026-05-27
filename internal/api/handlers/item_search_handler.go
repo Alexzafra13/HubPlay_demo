@@ -11,24 +11,26 @@ import (
 	librarymodel "hubplay/internal/library/model"
 )
 
+// itemSearcher es el contrato mínimo que SearchHandler necesita del
+// library service: un solo método. Cierra NN para este consumer.
+type itemSearcher interface {
+	ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
+}
+
 // SearchHandler aísla la búsqueda de items vía
 // `GET /items/search?q=…&library_id=&type=&genre=&year_from=&year_to=&min_rating=`.
 // Mismo gate de content-rating per-profile que las rails Latest /
 // Browse — un profile con cap PG-13 no puede ver resultados R aunque
 // tipée la query exacta.
-//
-// Extraído como sub-handler para cerrar parte del olor P (ItemHandler
-// god-handler). Sus 5 deps son disjuntas del resto del split: lib +
-// images + userData para el enrich, users sólo para el cap-rating.
 type SearchHandler struct {
-	lib      LibraryService
+	lib      itemSearcher
 	images   ImageRepository
 	userData UserDataRepository
 	users    UserService
 	logger   *slog.Logger
 }
 
-func newSearchHandler(lib LibraryService, images ImageRepository, userData UserDataRepository, users UserService, logger *slog.Logger) *SearchHandler {
+func newSearchHandler(lib itemSearcher, images ImageRepository, userData UserDataRepository, users UserService, logger *slog.Logger) *SearchHandler {
 	return &SearchHandler{
 		lib:      lib,
 		images:   images,
