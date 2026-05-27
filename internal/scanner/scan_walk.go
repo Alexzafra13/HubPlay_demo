@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"hubplay/internal/event"
 	librarymodel "hubplay/internal/library/model"
@@ -59,7 +58,7 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		return err
 	}
 
-	now := time.Now()
+	now := s.clock.Now()
 	title := titleFromPath(path)
 	itemID := uuid.NewString()
 	itemType := itemTypeFromLibrary(lib.ContentType)
@@ -168,7 +167,7 @@ func (s *Scanner) updateItem(ctx context.Context, item *librarymodel.Item, path,
 	item.Container = probeResult.Format.FormatName
 	item.Fingerprint = fp
 	item.IsAvailable = true
-	item.UpdatedAt = time.Now()
+	item.UpdatedAt = s.clock.Now()
 
 	if err := s.items.Update(ctx, item); err != nil {
 		return fmt.Errorf("updating item: %w", err)

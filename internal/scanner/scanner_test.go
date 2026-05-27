@@ -18,6 +18,7 @@ import (
 	"time"
 
 	librarymodel "hubplay/internal/library/model"
+	"hubplay/internal/clock"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/imaging"
@@ -82,7 +83,15 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	// path covered by the new TestScanLibrary_PersistsChapters test
 	// without spinning up another fixture.
 	chaptersRepo := db.NewChapterRepository(testutil.Driver(), database)
-	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository(testutil.Driver(), database), db.NewItemValueRepository(testutil.Driver(), database), db.NewStudioRepository(testutil.Driver(), database), db.NewCollectionRepository(testutil.Driver(), database), nil, nil, prober, bus, "", nil, slog.Default())
+	s := New(Config{
+		Items: itemRepo, Streams: streamRepo, Metadata: metaRepo, ExternalIDs: extIDRepo,
+		Images: imageRepo, Chapters: chaptersRepo,
+		People:      db.NewPeopleRepository(testutil.Driver(), database),
+		ItemValues:  db.NewItemValueRepository(testutil.Driver(), database),
+		Studios:     db.NewStudioRepository(testutil.Driver(), database),
+		Collections: db.NewCollectionRepository(testutil.Driver(), database),
+		Prober:      prober, Bus: bus, Logger: slog.Default(),
+	})
 	return s, itemRepo, streamRepo
 }
 
@@ -583,14 +592,20 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(testutil.Driver(), database),
-		db.NewMetadataRepository(testutil.Driver(), database), db.NewExternalIDRepository(testutil.Driver(), database),
-		imgRepo, db.NewChapterRepository(testutil.Driver(), database), db.NewPeopleRepository(testutil.Driver(), database),
-		db.NewItemValueRepository(testutil.Driver(), database),
-		db.NewStudioRepository(testutil.Driver(), database),
-		db.NewCollectionRepository(testutil.Driver(), database),
-		nil /* metaLocks */, nil /* providers — overridden below */, prober, bus,
-		imageDir, pm, slog.Default())
+	s := New(Config{
+		Items:       itemRepo,
+		Streams:     db.NewMediaStreamRepository(testutil.Driver(), database),
+		Metadata:    db.NewMetadataRepository(testutil.Driver(), database),
+		ExternalIDs: db.NewExternalIDRepository(testutil.Driver(), database),
+		Images:      imgRepo,
+		Chapters:    db.NewChapterRepository(testutil.Driver(), database),
+		People:      db.NewPeopleRepository(testutil.Driver(), database),
+		ItemValues:  db.NewItemValueRepository(testutil.Driver(), database),
+		Studios:     db.NewStudioRepository(testutil.Driver(), database),
+		Collections: db.NewCollectionRepository(testutil.Driver(), database),
+		// providers overridden below
+		Prober: prober, Bus: bus, ImageDir: imageDir, Pathmap: pm, Logger: slog.Default(),
+	})
 
 	// Inject the stub. The constructor took *provider.Manager (nil
 	// here) but the field is the interface; tests can swap directly.
@@ -733,12 +748,19 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	pm := pathmap.New(imageDir)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(testutil.Driver(), database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(testutil.Driver(), database), db.NewPeopleRepository(testutil.Driver(), database),
-		db.NewItemValueRepository(testutil.Driver(), database),
-		db.NewStudioRepository(testutil.Driver(), database),
-		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, nil, prober, bus, imageDir, pm, slog.Default())
+	s := New(Config{
+		Items:       itemRepo,
+		Streams:     db.NewMediaStreamRepository(testutil.Driver(), database),
+		Metadata:    metaRepo,
+		ExternalIDs: extRepo,
+		Images:      imgRepo,
+		Chapters:    db.NewChapterRepository(testutil.Driver(), database),
+		People:      db.NewPeopleRepository(testutil.Driver(), database),
+		ItemValues:  db.NewItemValueRepository(testutil.Driver(), database),
+		Studios:     db.NewStudioRepository(testutil.Driver(), database),
+		Collections: db.NewCollectionRepository(testutil.Driver(), database),
+		Prober:      prober, Bus: bus, ImageDir: imageDir, Pathmap: pm, Logger: slog.Default(),
+	})
 
 	rating := 8.4
 	premiere, _ := time.Parse("2006-01-02", "2025-03-04")
@@ -838,12 +860,19 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(testutil.Driver(), database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(testutil.Driver(), database), db.NewPeopleRepository(testutil.Driver(), database),
-		db.NewItemValueRepository(testutil.Driver(), database),
-		db.NewStudioRepository(testutil.Driver(), database),
-		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
+	s := New(Config{
+		Items:       itemRepo,
+		Streams:     db.NewMediaStreamRepository(testutil.Driver(), database),
+		Metadata:    metaRepo,
+		ExternalIDs: extRepo,
+		Images:      imgRepo,
+		Chapters:    db.NewChapterRepository(testutil.Driver(), database),
+		People:      db.NewPeopleRepository(testutil.Driver(), database),
+		ItemValues:  db.NewItemValueRepository(testutil.Driver(), database),
+		Studios:     db.NewStudioRepository(testutil.Driver(), database),
+		Collections: db.NewCollectionRepository(testutil.Driver(), database),
+		Prober:      prober, Bus: bus, ImageDir: t.TempDir(), Pathmap: pathmap.New(t.TempDir()), Logger: slog.Default(),
+	})
 
 	called := false
 	s.providers = &stubProviderTrackingCalls{onEpisode: func() { called = true }}
@@ -930,12 +959,19 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	pm := pathmap.New(imageDir)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(testutil.Driver(), database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(testutil.Driver(), database), db.NewPeopleRepository(testutil.Driver(), database),
-		db.NewItemValueRepository(testutil.Driver(), database),
-		db.NewStudioRepository(testutil.Driver(), database),
-		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, nil, prober, bus, imageDir, pm, slog.Default())
+	s := New(Config{
+		Items:       itemRepo,
+		Streams:     db.NewMediaStreamRepository(testutil.Driver(), database),
+		Metadata:    metaRepo,
+		ExternalIDs: extRepo,
+		Images:      imgRepo,
+		Chapters:    db.NewChapterRepository(testutil.Driver(), database),
+		People:      db.NewPeopleRepository(testutil.Driver(), database),
+		ItemValues:  db.NewItemValueRepository(testutil.Driver(), database),
+		Studios:     db.NewStudioRepository(testutil.Driver(), database),
+		Collections: db.NewCollectionRepository(testutil.Driver(), database),
+		Prober:      prober, Bus: bus, ImageDir: imageDir, Pathmap: pm, Logger: slog.Default(),
+	})
 
 	rating := 8.7
 	premiere, _ := time.Parse("2006-01-02", "2025-03-04")
@@ -1035,13 +1071,19 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	stub := &stubProvider{images: []provider.ImageResult{
 		{Type: "primary", URL: "http://example.test/poster.png", Score: 1},
 	}}
-	s := New(itemRepo, db.NewMediaStreamRepository(testutil.Driver(), database),
-		db.NewMetadataRepository(testutil.Driver(), database), db.NewExternalIDRepository(testutil.Driver(), database),
-		imgRepo, db.NewChapterRepository(testutil.Driver(), database), db.NewPeopleRepository(testutil.Driver(), database),
-		db.NewItemValueRepository(testutil.Driver(), database),
-		db.NewStudioRepository(testutil.Driver(), database),
-		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, nil, prober, bus, "", nil, slog.Default())
+	s := New(Config{
+		Items:       itemRepo,
+		Streams:     db.NewMediaStreamRepository(testutil.Driver(), database),
+		Metadata:    db.NewMetadataRepository(testutil.Driver(), database),
+		ExternalIDs: db.NewExternalIDRepository(testutil.Driver(), database),
+		Images:      imgRepo,
+		Chapters:    db.NewChapterRepository(testutil.Driver(), database),
+		People:      db.NewPeopleRepository(testutil.Driver(), database),
+		ItemValues:  db.NewItemValueRepository(testutil.Driver(), database),
+		Studios:     db.NewStudioRepository(testutil.Driver(), database),
+		Collections: db.NewCollectionRepository(testutil.Driver(), database),
+		Prober:      prober, Bus: bus, Logger: slog.Default(),
+	})
 	s.providers = stub
 
 	// Re-run a minimal version of the enrichItemWithMetadata image
@@ -1054,5 +1096,31 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	imgs, _ := imgRepo.ListByItem(context.Background(), "item-1")
 	if len(imgs) != 0 {
 		t.Errorf("expected no images persisted, got %d", len(imgs))
+	}
+}
+
+// TestNew_DefaultsClockToReal verifica que omitir `Config.Clock`
+// arranca con `clock.New()` (no nil, valor próximo a time.Now()).
+func TestNew_DefaultsClockToReal(t *testing.T) {
+	s := New(Config{Logger: slog.Default()})
+	if s.clock == nil {
+		t.Fatal("clock should default to clock.New(), got nil")
+	}
+	diff := time.Since(s.clock.Now())
+	if diff < 0 || diff > time.Second {
+		t.Errorf("default clock.Now() should be ~time.Now(); got delta %v", diff)
+	}
+}
+
+// TestNew_UsesInjectedClock verifica que un clock.Mock pasado por
+// Config se cablea como el clock del Scanner. Habilita tests
+// determinísticos en futuras suites (timestamps de items, Elapsed,
+// AddedAt, etc.).
+func TestNew_UsesInjectedClock(t *testing.T) {
+	fixed := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	mock := &clock.Mock{CurrentTime: fixed}
+	s := New(Config{Logger: slog.Default(), Clock: mock})
+	if !s.clock.Now().Equal(fixed) {
+		t.Errorf("injected clock not used: got %v, want %v", s.clock.Now(), fixed)
 	}
 }

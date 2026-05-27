@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"hubplay/internal/clock"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/imaging/pathmap"
@@ -81,51 +82,66 @@ type Scanner struct {
 	imageDir  string
 	pathmap   *pathmap.Store
 	logger    *slog.Logger
+	clock     clock.Clock
 }
 
-func New(
-	items *db.ItemRepository,
-	streams *db.MediaStreamRepository,
-	metadata *db.MetadataRepository,
-	externalIDs *db.ExternalIDRepository,
-	images *db.ImageRepository,
-	chapters *db.ChapterRepository,
-	people *db.PeopleRepository,
-	itemValues *db.ItemValueRepository,
-	studios *db.StudioRepository,
-	collections *db.CollectionRepository,
-	metaLocks *db.ItemMetadataLockRepository,
-	providers *provider.Manager,
-	prober probe.Prober,
-	bus *event.Bus,
-	imageDir string,
-	pm *pathmap.Store,
-	logger *slog.Logger,
-) *Scanner {
+// Config agrupa los 17 parámetros que necesita el scanner. Antes era
+// un constructor posicional difícil de leer; ahora cada campo se nombra
+// en el call site y los nuevos opcionales (clock) tienen default sin
+// romper callers existentes.
+type Config struct {
+	Items       *db.ItemRepository
+	Streams     *db.MediaStreamRepository
+	Metadata    *db.MetadataRepository
+	ExternalIDs *db.ExternalIDRepository
+	Images      *db.ImageRepository
+	Chapters    *db.ChapterRepository
+	People      *db.PeopleRepository
+	ItemValues  *db.ItemValueRepository
+	Studios     *db.StudioRepository
+	Collections *db.CollectionRepository
+	MetaLocks   *db.ItemMetadataLockRepository
+	Providers   *provider.Manager
+	Prober      probe.Prober
+	Bus         *event.Bus
+	ImageDir    string
+	Pathmap     *pathmap.Store
+	Logger      *slog.Logger
+	// Clock opcional — default `clock.New()` (tiempo real). Inyectable
+	// para tests determinísticos.
+	Clock clock.Clock
+}
+
+func New(cfg Config) *Scanner {
 	// Por fuera aceptamos *provider.Manager para que el wiring en main.go
 	// sea claro; por dentro lo guardamos como interfaz pequeña para los tests.
 	var pf providerFetcher
-	if providers != nil {
-		pf = providers
+	if cfg.Providers != nil {
+		pf = cfg.Providers
+	}
+	clk := cfg.Clock
+	if clk == nil {
+		clk = clock.New()
 	}
 	return &Scanner{
-		items:       items,
-		streams:     streams,
-		metadata:    metadata,
-		externalIDs: externalIDs,
-		images:      images,
-		chapters:    chapters,
-		people:      people,
-		itemValues:  itemValues,
-		studios:     studios,
-		collections: collections,
-		metaLocks:   metaLocks,
+		items:       cfg.Items,
+		streams:     cfg.Streams,
+		metadata:    cfg.Metadata,
+		externalIDs: cfg.ExternalIDs,
+		images:      cfg.Images,
+		chapters:    cfg.Chapters,
+		people:      cfg.People,
+		itemValues:  cfg.ItemValues,
+		studios:     cfg.Studios,
+		collections: cfg.Collections,
+		metaLocks:   cfg.MetaLocks,
 		providers:   pf,
-		prober:      prober,
-		bus:         bus,
-		imageDir:    imageDir,
-		pathmap:     pm,
-		logger:      logger.With("module", "scanner"),
+		prober:      cfg.Prober,
+		bus:         cfg.Bus,
+		imageDir:    cfg.ImageDir,
+		pathmap:     cfg.Pathmap,
+		logger:      cfg.Logger.With("module", "scanner"),
+		clock:       clk,
 	}
 }
 
@@ -138,7 +154,7 @@ type ScanResult struct {
 }
 
 func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*ScanResult, error) {
-	start := time.Now()
+	start := s.clock.Now()
 	result := &ScanResult{}
 	log := s.logger.With("library_id", lib.ID)
 
@@ -198,7 +214,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 			}
 			if item.IsAvailable {
 				item.IsAvailable = false
-				item.UpdatedAt = time.Now()
+				item.UpdatedAt = s.clock.Now()
 				if err := s.items.Update(ctx, item); err == nil {
 					result.Removed++
 					s.bus.Publish(event.Event{
@@ -210,7 +226,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		}
 	}
 
-	result.Elapsed = time.Since(start)
+	result.Elapsed = s.clock.Now().Sub(start)
 
 	s.bus.Publish(event.Event{
 		Type: event.LibraryScanCompleted,

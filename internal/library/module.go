@@ -87,25 +87,26 @@ type Deps struct {
 // bind mounts no soporta inotify), el error se loggea Warn y el
 // scheduler periódico sigue siendo la fuente de truth.
 func New(ctx context.Context, deps Deps) (*Module, error) {
-	scnr := scanner.New(
-		deps.Items,
-		deps.MediaStreams,
-		deps.Metadata,
-		deps.ExternalIDs,
-		deps.Images,
-		deps.Chapters,
-		deps.People,
-		deps.ItemValues,
-		deps.Studios,
-		deps.Collections,
-		deps.ItemMetadataLocks,
-		deps.Providers,
-		deps.Prober,
-		deps.EventBus,
-		deps.ImageDir,
-		deps.Pathmap,
-		deps.Logger,
-	)
+	scnr := scanner.New(scanner.Config{
+		Items:       deps.Items,
+		Streams:     deps.MediaStreams,
+		Metadata:    deps.Metadata,
+		ExternalIDs: deps.ExternalIDs,
+		Images:      deps.Images,
+		Chapters:    deps.Chapters,
+		People:      deps.People,
+		ItemValues:  deps.ItemValues,
+		Studios:     deps.Studios,
+		Collections: deps.Collections,
+		MetaLocks:   deps.ItemMetadataLocks,
+		Providers:   deps.Providers,
+		Prober:      deps.Prober,
+		Bus:         deps.EventBus,
+		ImageDir:    deps.ImageDir,
+		Pathmap:     deps.Pathmap,
+		Logger:      deps.Logger,
+		// Clock defaults to clock.New() inside scanner.New.
+	})
 
 	svc := NewService(
 		deps.Libraries,
