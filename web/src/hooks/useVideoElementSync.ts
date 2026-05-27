@@ -31,6 +31,12 @@ export function useVideoElementSync({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    // Mutar atributos del HTMLMediaElement es la API estándar
+    // para sincronizar audio settings — no es state mutation
+    // sino un side-effect sobre el DOM node. El compiler lo
+    // detecta como mutación de "props del hook" (videoRef
+    // pasado como argumento) pero no lo es semánticamente.
+    // eslint-disable-next-line react-compiler/react-compiler
     video.volume = volume;
     video.muted = isMuted;
   }, [videoRef, volume, isMuted]);
@@ -38,6 +44,7 @@ export function useVideoElementSync({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    // Misma razón que arriba — ver comentario del primer effect.
     video.playbackRate = playbackRate;
   }, [videoRef, playbackRate, sourceKey]);
 }
