@@ -368,7 +368,9 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		ids := db.IDsFromTrending(rows)
 		imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids)
 		if ierr != nil {
-			h.logger.Warn("trending image fetch", "error", ierr)
+			// Debug: home polleada al abrir y al navegar; un Warn por request
+			// satura. Fail-soft cubre (cards sin poster).
+			h.logger.Debug("trending image fetch", "error", ierr)
 		} else {
 			for i, row := range rows {
 				if urls, ok := imgs[row.ID]; ok {
@@ -393,7 +395,7 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		ids := db.IDsFromTrending(rows)
 		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
 		if merr != nil {
-			h.logger.Warn("trending metadata fetch", "error", merr)
+			h.logger.Debug("trending metadata fetch", "error", merr)
 		} else {
 			for i, row := range rows {
 				if m, ok := metas[row.ID]; ok {
@@ -498,7 +500,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 	if h.images != nil && len(ids) > 0 {
 		imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids)
 		if ierr != nil {
-			h.logger.Warn("recommended image fetch", "error", ierr)
+			h.logger.Debug("recommended image fetch", "error", ierr)
 		} else {
 			for i, row := range rows {
 				if urls, ok := imgs[row.ID]; ok {
@@ -520,7 +522,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 	if h.metadata != nil && len(ids) > 0 {
 		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
 		if merr != nil {
-			h.logger.Warn("recommended metadata fetch", "error", merr)
+			h.logger.Debug("recommended metadata fetch", "error", merr)
 		} else {
 			for i, row := range rows {
 				if m, ok := metas[row.ID]; ok {

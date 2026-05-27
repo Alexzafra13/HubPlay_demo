@@ -90,13 +90,15 @@ func (d *SegmentDetector) Start(ctx context.Context) (unsub func()) {
 		if libID == "" {
 			return
 		}
+		// Sub-logger por library para que el Warn de abajo y futuros
+		// logs no repitan "library_id". DetectLibrary también lo extrae
+		// internamente; aquí lo necesitamos para el handler del bus.
+		log := d.logger.With("library_id", libID)
 		d.bgWG.Add(1)
 		go func() {
 			defer d.bgWG.Done()
 			if err := d.DetectLibrary(ctx, libID); err != nil {
-				d.logger.Warn("segment detection failed",
-					"library_id", libID,
-					"error", err)
+				log.Warn("segment detection failed", "error", err)
 			}
 		}()
 	})
@@ -146,14 +148,15 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 		}
 		chapters, err := d.chapters.ListByItem(ctx, ep.ID)
 		if err != nil {
-			d.logger.Warn("list chapters for segment detection",
+			// Usa el `log` con library_id ya capturado al entry; añadimos item_id.
+			log.Warn("list chapters for segment detection",
 				"item_id", ep.ID,
 				"error", err)
 			continue
 		}
 		segs := DetectFromChapters(ep.DurationTicks, chapters, time.Now().Unix())
 		if err := d.segments.Replace(ctx, ep.ID, librarymodel.EpisodeSegmentSourceChapter, segs); err != nil {
-			d.logger.Warn("replace segments",
+			log.Warn("replace segments",
 				"item_id", ep.ID,
 				"error", err)
 			continue

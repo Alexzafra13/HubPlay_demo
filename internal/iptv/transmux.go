@@ -648,6 +648,10 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 // outcomeOnce on the session ensures we don't double-record either way.
 func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 	defer close(s.done)
+	// Sub-logger con channel + mode: los 3 logs de salida ya repetían
+	// "channel" + a veces "mode". Reduce verbosidad y facilita filtrado.
+	log := m.logger.With("channel", s.ChannelID, "mode", s.mode.String())
+
 	err := s.cmd.Wait()
 	// Synchronise with the stderr consumer goroutine before reading
 	// the ring. cmd.Wait() returns when the process is reaped but
@@ -663,9 +667,9 @@ func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 	case err != nil && !wasReady:
 		// Spawn never reached first segment. This is the case the
 		// breaker exists for — repeat occurrences trip the cooldown.
-		m.logger.Info("transmux ffmpeg exited before first segment",
-			"channel", s.ChannelID,
-			"mode", s.mode.String(),
+		// Warn (no Info): dispara breaker + promete-reencode; el operador
+		// necesita verlo en logs de nivel por defecto.
+		log.Warn("transmux ffmpeg exited before first segment",
 			"error", err,
 			"ffmpeg_stderr_tail", stderrTail)
 		m.recordFailure(s, s.ChannelID, fmt.Errorf("ffmpeg exit before ready: %w (stderr: %s)", err, stderrTail))
@@ -688,12 +692,11 @@ func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 		// The first-segment success already counted; treat the late
 		// exit as informational so a single mid-stream blip doesn't
 		// reopen the breaker against a working channel.
-		m.logger.Info("transmux ffmpeg exited",
-			"channel", s.ChannelID,
+		log.Info("transmux ffmpeg exited",
 			"error", err,
 			"ffmpeg_stderr_tail", stderrTail)
 	default:
-		m.logger.Info("transmux ffmpeg exited cleanly", "channel", s.ChannelID)
+		log.Info("transmux ffmpeg exited cleanly")
 	}
 	m.evict(s)
 	// Belt-and-braces: closing ready unblocks any GetOrStart caller

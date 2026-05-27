@@ -62,6 +62,10 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 	title := titleFromPath(path)
 	itemID := uuid.NewString()
 	itemType := itemTypeFromLibrary(lib.ContentType)
+	// Sub-logger con item_id + path desde el entry: los Warns de series/
+	// season ensure de abajo + los de streams/people/chapters más adelante
+	// comparten contexto. Antes los primeros warns no llevaban item_id.
+	log := s.logger.With("item_id", itemID, "path", path)
 
 	// En bibliotecas de series construimos la jerarquía
 	// serie → temporada → episodio. La serie y la temporada se crean la
@@ -76,11 +80,11 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		if match.OK {
 			sID, err := s.ensureSeriesRow(ctx, lib, cache, match.SeriesName)
 			if err != nil {
-				s.logger.Warn("failed to ensure series row", "series", match.SeriesName, "error", err)
+				log.Warn("failed to ensure series row", "series", match.SeriesName, "error", err)
 			} else {
 				seasonID, err := s.ensureSeasonRow(ctx, lib, cache, sID, match.SeasonNumber)
 				if err != nil {
-					s.logger.Warn("failed to ensure season row", "series", match.SeriesName, "season", match.SeasonNumber, "error", err)
+					log.Warn("failed to ensure season row", "series", match.SeriesName, "season", match.SeasonNumber, "error", err)
 				} else {
 					parentID = seasonID
 					sn := match.SeasonNumber
@@ -121,7 +125,6 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		return fmt.Errorf("creating item: %w", err)
 	}
 
-	log := s.logger.With("item_id", itemID)
 	streams := probeResultToStreams(itemID, probeResult)
 	if len(streams) > 0 {
 		if err := s.streams.ReplaceForItem(ctx, itemID, streams); err != nil {

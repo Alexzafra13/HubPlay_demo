@@ -195,6 +195,11 @@ func (s *Scheduler) runOne(ctx context.Context, job *iptvmodel.IPTVScheduledJob)
 	runCtx, cancel := context.WithTimeout(ctx, s.runTimeout)
 	defer cancel()
 
+	// Sub-logger compartido por runOne + recordOutcome: 5 logs (panic,
+	// skipped, failed, ran, record-run-failed) repetían los mismos campos
+	// library_id + kind. Pasamos `log` por parámetro a recordOutcome.
+	log := s.logger.With("library_id", job.LibraryID, "kind", job.Kind)
+
 	startedAt := s.now()
 	defer func() {
 		if r := recover(); r != nil {
@@ -202,11 +207,10 @@ func (s *Scheduler) runOne(ctx context.Context, job *iptvmodel.IPTVScheduledJob)
 			// goroutine alive. Log loudly so the admin's next
 			// look at the logs surfaces the cause.
 			runErr = fmt.Errorf("panic: %v", r)
-			s.logger.Error("iptv scheduled job panicked",
-				"library", job.LibraryID, "kind", job.Kind, "panic", r)
+			log.Error("iptv scheduled job panicked", "panic", r)
 		}
 		duration := s.now().Sub(startedAt)
-		s.recordOutcome(ctx, job, runErr, duration, startedAt)
+		s.recordOutcome(ctx, log, job, runErr, duration, startedAt)
 	}()
 
 	switch job.Kind {
@@ -229,14 +233,14 @@ func (s *Scheduler) runOne(ctx context.Context, job *iptvmodel.IPTVScheduledJob)
 // but skip updating last_status so the previous real outcome wins.
 func (s *Scheduler) recordOutcome(
 	ctx context.Context,
+	log *slog.Logger,
 	job *iptvmodel.IPTVScheduledJob,
 	runErr error,
 	duration time.Duration,
 	startedAt time.Time,
 ) {
 	if errors.Is(runErr, ErrRefreshInProgress) {
-		s.logger.Info("iptv scheduled job skipped (concurrent refresh)",
-			"library", job.LibraryID, "kind", job.Kind)
+		log.Info("iptv scheduled job skipped (concurrent refresh)")
 		return
 	}
 
@@ -245,12 +249,10 @@ func (s *Scheduler) recordOutcome(
 	if runErr != nil {
 		status = "error"
 		errMsg = runErr.Error()
-		s.logger.Warn("iptv scheduled job failed",
-			"library", job.LibraryID, "kind", job.Kind,
+		log.Warn("iptv scheduled job failed",
 			"duration_ms", duration.Milliseconds(), "error", runErr)
 	} else {
-		s.logger.Info("iptv scheduled job ran",
-			"library", job.LibraryID, "kind", job.Kind,
+		log.Info("iptv scheduled job ran",
 			"duration_ms", duration.Milliseconds())
 	}
 
@@ -258,8 +260,7 @@ func (s *Scheduler) recordOutcome(
 	// UPDATE is a no-op against zero rows, which is the correct
 	// behaviour for a row-less RunNow.
 	if recErr := s.repo.RecordRun(ctx, job.LibraryID, job.Kind, status, errMsg, duration, startedAt); recErr != nil {
-		s.logger.Error("record iptv job run",
-			"library", job.LibraryID, "kind", job.Kind, "error", recErr)
+		log.Error("record iptv job run", "error", recErr)
 	}
 }
 

@@ -295,7 +295,11 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 
 	body, err := os.ReadFile(sess.ManifestPath())
 	if err != nil {
-		h.logger.Error("transmux read manifest", "channel", channelID, "error", err)
+		// Warn y no Error: hls.js pide el manifest cada 2-6s; si la sesión
+		// está arrancando o muerta, generaríamos Error por request → spam.
+		// El status 500 al cliente sí queda — el operador ve el patrón si
+		// persiste sin saturar logs.
+	    h.logger.Warn("transmux read manifest", "channel", channelID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "MANIFEST_UNAVAILABLE",
 			"transmux manifest is not yet available")
 		return

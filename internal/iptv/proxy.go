@@ -280,7 +280,9 @@ func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, ch
 	p.mu.Unlock()
 	defer p.removeListener(channelID)
 
-	p.logger.Info("proxying stream", "channel", channelID, "url", streamURL)
+	// Debug: viewer-attach se dispara una vez por cliente; en un grid con
+	// auto-zap (cambiar canal rápido) genera Info por cada pulsación.
+	p.logger.Debug("proxying stream", "channel", channelID, "url", streamURL)
 
 	return p.streamWithReconnect(ctx, w, channelID, streamURL)
 }

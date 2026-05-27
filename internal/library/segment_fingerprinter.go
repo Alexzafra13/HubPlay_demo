@@ -92,12 +92,12 @@ func (f *SegmentFingerprinter) Start(ctx context.Context) (unsub func()) {
 		if libID == "" {
 			return
 		}
+		log := f.logger.With("library_id", libID)
 		f.bgWG.Add(1)
 		go func() {
 			defer f.bgWG.Done()
 			if err := f.DetectLibrary(ctx, libID); err != nil {
-				f.logger.Warn("fingerprint detection failed",
-					"library_id", libID, "error", err)
+				log.Warn("fingerprint detection failed", "error", err)
 			}
 		}()
 	})
@@ -176,7 +176,8 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 				segs = append(segs, toSegment(r, librarymodel.EpisodeSegmentOutro, now))
 			}
 			if err := f.segments.Replace(ctx, ep.ID, librarymodel.EpisodeSegmentSourceFingerprint, segs); err != nil {
-				f.logger.Warn("replace fingerprint segments",
+				// Usa el `log` con library_id ya capturado al entry.
+				log.Warn("replace fingerprint segments",
 					"item_id", ep.ID, "season_id", seasonID, "error", err)
 				continue
 			}

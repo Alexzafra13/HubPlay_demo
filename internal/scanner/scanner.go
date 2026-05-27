@@ -210,18 +210,27 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		if !seenPaths[path] {
 			item, err := s.items.GetByPath(ctx, path)
 			if err != nil {
+				// Debug: típicamente "no encontrado" si el item se borró
+				// entre el listado inicial y este pase. No es error real.
+				log.Debug("mark unavailable: item lookup failed", "path", path, "error", err)
 				continue
 			}
 			if item.IsAvailable {
 				item.IsAvailable = false
 				item.UpdatedAt = s.clock.Now()
-				if err := s.items.Update(ctx, item); err == nil {
-					result.Removed++
-					s.bus.Publish(event.Event{
-						Type: event.ItemRemoved,
-						Data: map[string]any{"item_id": item.ID, "path": path},
-					})
+				if err := s.items.Update(ctx, item); err != nil {
+					// Antes: error silenciado. La marca "no disponible" se
+					// pierde y el rail "Continue Watching" sigue mostrando
+					// la card de un fichero ya borrado.
+					log.Warn("mark item unavailable failed",
+						"item_id", item.ID, "path", path, "error", err)
+					continue
 				}
+				result.Removed++
+				s.bus.Publish(event.Event{
+					Type: event.ItemRemoved,
+					Data: map[string]any{"item_id": item.ID, "path": path},
+				})
 			}
 		}
 	}

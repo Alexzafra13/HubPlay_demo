@@ -222,8 +222,17 @@ func (r *ImageRefresher) RefreshForLibrary(ctx context.Context, libraryID string
 // refreshForItem is the per-item loop extracted for readability. Errors are
 // logged and counted as zero updates — the caller keeps going.
 func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.Item) int {
+	// Sub-logger con item_id para no repetir el campo en cada Warn de abajo.
+	log := r.logger.With("item_id", item.ID)
+
 	extIDs, err := r.externalIDs.ListByItem(ctx, item.ID)
-	if err != nil || len(extIDs) == 0 {
+	if err != nil {
+		// Debug: si la consulta falla puntualmente, el siguiente refresh
+		// vuelve a intentar. No es operacional.
+		log.Debug("refresh: list external IDs failed", "error", err)
+		return 0
+	}
+	if len(extIDs) == 0 {
 		return 0
 	}
 
@@ -233,12 +242,21 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.
 	}
 
 	results, err := r.providers.FetchImages(ctx, idMap, itemTypeOf(item))
-	if err != nil || len(results) == 0 {
+	if err != nil {
+		// Warn: fallo del provider (TMDb). Intermitente es esperado, pero
+		// persistente es síntoma de credenciales o red.
+		log.Warn("refresh: fetch images from provider failed", "error", err)
+		return 0
+	}
+	if len(results) == 0 {
 		return 0
 	}
 
 	existing, err := r.images.ListByItem(ctx, item.ID)
 	if err != nil {
+		// Warn: la query de imágenes existentes es DB local; si falla
+		// algo serio pasa en la DB.
+		log.Warn("refresh: list existing images failed", "error", err)
 		return 0
 	}
 	existingTypes := make(map[string]bool, len(existing))
@@ -260,7 +278,7 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.
 			continue
 		}
 		if locked, err := r.images.HasLockedForKind(ctx, item.ID, img.Type); err != nil {
-			r.logger.Warn("refresh: lock check failed", "item_id", item.ID, "kind", img.Type, "error", err)
+			log.Warn("refresh: lock check failed", "kind", img.Type, "error", err)
 			continue
 		} else if locked {
 			continue
@@ -289,10 +307,12 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.
 // stays per-caller is what we record in the DB and the path-mapping
 // table.
 func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType string, best provider.ImageResult) bool {
+	log := r.logger.With("item_id", itemID, "kind", imgType)
+
 	dir := filepath.Join(r.imageDir, itemID)
 	ing, err := imaging.IngestRemoteImage(dir, imgType, best.URL, r.logger)
 	if err != nil {
-		r.logger.Warn("refresh: ingest failed", "url", best.URL, "error", err)
+		log.Warn("refresh: ingest failed", "url", best.URL, "error", err)
 		return false
 	}
 
@@ -314,17 +334,21 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 
 	if err := r.images.Create(ctx, dbImg); err != nil {
 		// DB rejected the row; back out the on-disk file so we don't
-		// leak storage behind a record that no longer exists.
+		// leak storage behind a record that no longer exists. Antes:
+		// rollback silencioso — el operador no se enteraba del fallo
+		// de DB, sólo veía "0 updated" sin contexto.
+		log.Warn("refresh: persist image row failed; rolling back file",
+			"image_id", imgID, "error", err)
 		_ = os.Remove(ing.LocalPath)
 		return false
 	}
 
 	if err := r.images.SetPrimary(ctx, itemID, imgType, imgID); err != nil {
-		r.logger.Warn("refresh: failed to set primary", "error", err)
+		log.Warn("refresh: failed to set primary", "image_id", imgID, "error", err)
 	}
 
 	if err := r.pathmap.Write(imgID, ing.LocalPath); err != nil {
-		r.logger.Warn("refresh: pathmap write failed", "id", imgID, "error", err)
+		log.Warn("refresh: pathmap write failed", "image_id", imgID, "error", err)
 	}
 	return true
 }

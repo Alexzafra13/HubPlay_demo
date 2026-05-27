@@ -1313,3 +1313,112 @@ completed) es solo un nuevo Subscribe en el wire-up.
   apuntando a federation_pending_requests)**: descartado. Acopla el
   schema cross-feature y dificulta el modelo "cualquier feature
   puede emitir". El payload JSON cubre lo mismo sin acoplar tablas.
+
+---
+
+## ADR-026 — Convención de logs (nivel, sub-logger, hot paths, secretos)
+
+- **Fecha**: 2026-05-27
+- **Estado**: Aceptado
+- **Supersede**: —
+- **Contexto de descubrimiento**: Auditoría 4 paquetes top (handlers, iptv, scanner, library) — 568 logs en producción.
+
+### Contexto
+
+A medida que crece el codebase los logs se convierten en la herramienta principal del operador self-hosted para entender qué pasa en su servidor. Sin convención clara:
+
+- El nivel `Info`/`Warn`/`Error` se elige por instinto del autor del momento → mismo evento aparece como `Info` en un sitio y `Warn` en otro.
+- Endpoints polleados (home, miniaturas, SSE) que loguean `Info` o `Warn` saturan el log con cientos de líneas iguales en minutos.
+- Errores se "tragan" con `if err != nil { return }` sin loguear → el operador ve un 500 en el frontend pero nada en logs.
+- Campos repetidos (`library_id`, `item_id`, `channel_id`) se escriben a mano en cada log de la misma función.
+- Cero defensa explícita sobre PII / secretos → fácil que alguien añada `"token", t` sin pensar.
+
+### Decisión
+
+Cuatro reglas, en orden de importancia.
+
+#### 1. Niveles
+
+| Nivel | Cuándo |
+|---|---|
+| `Debug` | Detalle de desarrollo. Información que un operador NO quiere ver por defecto pero que ayuda al diagnosticar. Endpoints frecuentes (GET image, SSE connect, home tiles) van aquí cuando fallan fail-soft. |
+| `Info` | Eventos importantes y esperados: lifecycle (start/stop), mutaciones (library created, user updated), scans completados, jobs ejecutados. Frecuencia baja — un Info no debe disparar más de una vez por minuto en uso normal. |
+| `Warn` | Situación inesperada pero NO rompe la operación: best-effort failures, fallbacks, TLS auto-firmado, breaker abriendo, M3U sin canales. El operador debería ver esto y poder decidir si actuar. |
+| `Error` | Fallo que rompe una operación visible al usuario o al operador. Devuelve 500 al frontend, aborta un scan, no se persistió algo que debería. |
+
+Regla operacional: **si un log se dispara > 1 vez por minuto en uso normal, está mal de nivel** (suele querer ser `Debug`).
+
+#### 2. Sub-logger `.With()` al entry
+
+Si una función tiene ≥ 2 logs que comparten un campo (`library_id`, `item_id`, `channel_id`, `peer_id`, `request_id`), abrir un sub-logger al entry:
+
+```go
+func (s *Scanner) processLibrary(ctx context.Context, lib *Library) {
+    log := s.logger.With("library_id", lib.ID, "name", lib.Name)
+    log.Info("scan starting")
+    // ...
+    log.Warn("walker hit error", "path", p, "error", err)
+}
+```
+
+Beneficios:
+1. El campo viaja con cada log sin repetirlo en el call.
+2. Si el handler del bus que llama a la función ya tiene `library_id` en su sub-logger, el ÚNICO log queda con el campo una vez.
+3. Filtrar logs por entidad (`library_id=X`) es trivial.
+
+#### 3. Hot paths
+
+Endpoints o paths que pueden dispararse muchas veces por segundo NO deben loguear `Info`/`Warn` en flujo normal:
+
+- `GET /api/v1/images/file/{id}` (cada miniatura del grid)
+- `GET /api/v1/home/*` (continue watching, trending, favorites — polleado al abrir y al navegar)
+- `GET /api/v1/iptv/channels/{id}/manifest.m3u8` (hls.js cada 2-6 s)
+- SSE connect/disconnect (red móvil reconecta seguido)
+- HLS segment fetches (cada ~2-6 s por viewer)
+
+En estos paths, fail-soft → `Debug`. Si el operador necesita diagnóstico puntual, sube el nivel del logger global a Debug temporalmente.
+
+#### 4. Secretos / PII
+
+Nunca loguear en crudo:
+- `password`, `token`, `refresh_token`, `JWT`, `apiKey`, `pin`, `clientSecret`
+- `email` completo en eventos de usuario (usar `user_id`)
+- `device_code` completo (sólo prefijo: `code[:8]`)
+
+Patrón aceptado: si necesitas señalar "el usuario configuró un API key", loggea booleano:
+
+```go
+log.Info("setup: tmdb api key saved", "key_set", req.APIKey != "")
+```
+
+### Consecuencias
+
+- El operador self-hosted puede correr el binario con nivel `Info` por defecto sin que los logs se inunden por endpoints polleados.
+- Filtrar logs por entidad (`library_id=lib-x`) es directo gracias al sub-logger.
+- Errores que antes se tragaban (`_ = repo.Delete(...)`) ahora son al menos `Debug` con contexto — diagnosticar corrupción inexplicable se vuelve posible.
+- Nuevo código tiene una referencia clara para decidir nivel y sub-logger.
+
+### Naming de campos
+
+Convención unificada (no `id` cuando hay ambigüedad):
+- `library_id`, `item_id`, `channel_id`, `peer_id`, `user_id`, `image_id`, `request_id`, `peer_request_id`
+- `path`, `url` (no acortar)
+- `error` (no `err` en el campo — sí en la variable local)
+- `kind`, `mode`, `phase`, `outcome`, `status` para enums
+
+### Alternativas descartadas
+
+- **Niveles más finos (Trace, Notice)**: stdlib slog no los tiene; añadir wrapper introduce dependencia sin beneficio claro.
+- **Loggear todos los errores de DB como Error automáticamente**: ya cubierto por handlers que sí mapean al frontend; loggear "no encontrado" como Error sería ruido.
+- **Métricas por contador en lugar de logs Warn agregables**: en el roadmap, pero requiere infra de observability — no quita la necesidad de logs para diagnóstico puntual.
+- **Inyectar logger en circuit_breaker / prober para loguear transiciones**: pendiente — el cambio de API era invasivo en esta PR. El estado se expone vía `BreakerState()` que el caller puede pollear y loguear con contexto propio.
+
+### Follow-ups documentados
+
+Sitios identificados en la auditoría que no entraron en la PR inicial:
+
+- **handlers grandes**: sub-loggers en `federation_admin.go` (5 handlers de pairing), `me_home.go` (3 endpoints rails), `me_peers.go` (4 handlers browse), `collections.go` (3 handlers override), `image.go` (ServeImageByID + persistManualImage).
+- **iptv/proxy.go**: sub-logger en `ProxyURL`.
+- **iptv/transmux.go**: log de spawn-error en `startLocked` antes de los 3 returns.
+- **iptv/circuit_breaker.go**: inyectar logger y loguear apertura (cambio de API, sesión propia).
+- **handlers/handleServiceError**: verificar que los servicios efectivamente loguean 5xx antes; si no, los 500 quedan ciegos para el operador.

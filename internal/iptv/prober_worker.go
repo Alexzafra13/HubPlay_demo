@@ -23,6 +23,7 @@ package iptv
 
 import (
 	"context"
+	"runtime/debug"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -212,7 +213,11 @@ func (w *ProberWorker) runOnce(parent context.Context) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			w.logger.Error("prober panic recovered", "panic", fmt.Sprintf("%v", r))
+			// Stack trace explícito: sin él, un panic con un valor opaco
+			// (nil deref, índice fuera de rango) no nos dice DÓNDE ocurrió.
+			w.logger.Error("prober panic recovered",
+				"panic", fmt.Sprintf("%v", r),
+				"stack", string(debug.Stack()))
 		}
 	}()
 
