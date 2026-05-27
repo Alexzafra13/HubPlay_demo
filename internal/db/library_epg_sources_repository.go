@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -112,7 +111,7 @@ func (r *LibraryEPGSourceRepository) Create(ctx context.Context, src *iptvmodel.
 		src.Priority = next
 	}
 	if src.CreatedAt.IsZero() {
-		src.CreatedAt = time.Now().UTC()
+		src.CreatedAt = timeNow().UTC()
 	}
 
 	var err error
@@ -252,7 +251,7 @@ func (r *LibraryEPGSourceRepository) RecordRefresh(
 	id, status, errMsg string,
 	programs, channels int,
 ) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	var err error
 	if r.useSQLite() {
 		err = r.sq.RecordLibraryEPGSourceRefresh(ctx, sqlc.RecordLibraryEPGSourceRefreshParams{

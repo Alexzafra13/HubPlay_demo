@@ -78,7 +78,7 @@ func (r *UserPreferenceRepository) ListByUser(ctx context.Context, userID string
 // Set upserts one key. Returns the persisted row so handlers can echo
 // it back to the client without an extra read.
 func (r *UserPreferenceRepository) Set(ctx context.Context, userID, key, value string) (*UserPreference, error) {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if _, err := r.db.ExecContext(ctx, r.upsertSQL, userID, key, value, now); err != nil {
 		return nil, fmt.Errorf("set preference: %w", err)
 	}

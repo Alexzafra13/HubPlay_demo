@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
 )
@@ -33,7 +32,7 @@ func (r *ChannelLogoOverrideRepository) UpsertURL(ctx context.Context, libraryID
 	if logoURL == "" {
 		return fmt.Errorf("channel_logo_overrides: logo_url required for URL override")
 	}
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := RewritePlaceholders(r.driver, `
 		INSERT INTO channel_logo_overrides (library_id, stream_url, logo_url, logo_file, created_at, updated_at)
 		VALUES (?, ?, ?, '', ?, ?)
@@ -54,7 +53,7 @@ func (r *ChannelLogoOverrideRepository) UpsertFile(ctx context.Context, libraryI
 	if logoFile == "" {
 		return fmt.Errorf("channel_logo_overrides: logo_file required for file override")
 	}
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := RewritePlaceholders(r.driver, `
 		INSERT INTO channel_logo_overrides (library_id, stream_url, logo_url, logo_file, created_at, updated_at)
 		VALUES (?, ?, '', ?, ?, ?)

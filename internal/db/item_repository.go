@@ -611,7 +611,7 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 	if limit > 50 {
 		limit = 50
 	}
-	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+	cutoff := timeNow().UTC().Add(-14 * 24 * time.Hour)
 
 	// libraryID == "" significa "todas las bibliotecas" - usado por
 	// el strip "Recientemente añadido" del dashboard admin, que

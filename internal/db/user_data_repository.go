@@ -245,7 +245,7 @@ func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemID
 // parse back. UTC times round-trip via RFC3339. Same hard contract the EPG
 // repository documents in epg_repository.go.
 func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID string, positionTicks int64, completed bool) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if r.useSQLite() {
 		err := r.sq.UpdateProgress(ctx, sqlc.UpdateProgressParams{
 			UserID:        userID,
@@ -276,7 +276,7 @@ func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID 
 
 // MarkPlayed increments play count and marks completed.
 func (r *UserDataRepository) MarkPlayed(ctx context.Context, userID, itemID string) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if r.useSQLite() {
 		err := r.sq.MarkPlayed(ctx, sqlc.MarkPlayedParams{
 			UserID:       userID,
@@ -303,7 +303,7 @@ func (r *UserDataRepository) MarkPlayed(ctx context.Context, userID, itemID stri
 
 // SetFavorite sets or unsets favorite for an item.
 func (r *UserDataRepository) SetFavorite(ctx context.Context, userID, itemID string, favorite bool) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if r.useSQLite() {
 		err := r.sq.SetFavorite(ctx, sqlc.SetFavoriteParams{
 			UserID:     userID,
@@ -354,7 +354,7 @@ func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string
 	if limit <= 0 {
 		limit = 20
 	}
-	abandonedThreshold := time.Now().UTC().Add(-AbandonedAfter)
+	abandonedThreshold := timeNow().UTC().Add(-AbandonedAfter)
 	if r.useSQLite() {
 		// LastPlayedAt is sqlc's auto-name for the abandoned-threshold
 		// param (it's the column the comparison is against). Same value as
@@ -600,7 +600,7 @@ func (r *UserDataRepository) Delete(ctx context.Context, userID, itemID string) 
 // MarkPlayed (which lies about completion). Idempotent — no error
 // when the row doesn't exist (the UPDATE simply matches zero rows).
 func (r *UserDataRepository) ClearProgress(ctx context.Context, userID, itemID string) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	var err error
 	if r.useSQLite() {
 		err = r.sq.ClearProgress(ctx, sqlc.ClearProgressParams{

@@ -127,7 +127,7 @@ func MigrateSQLiteToPostgres(ctx context.Context, opts MigrateOptions) (*Migrate
 		}
 	}
 
-	started := time.Now()
+	started := timeNow()
 	emit("init", "", 0, 0)
 
 	// ── Phase 1: open + ping target ─────────────────────────────

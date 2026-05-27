@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // UserChannelOrderRepository wraps the `user_channel_order` table
@@ -32,7 +31,7 @@ func NewUserChannelOrderRepository(driver string, database *sql.DB) *UserChannel
 // SQLite (the CHECK constraint enforces 0/1). The bool→int coerce
 // happens here so callers can use the same shape across dialects.
 func (r *UserChannelOrderRepository) Upsert(ctx context.Context, userID, channelID string, position int, hidden bool) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := RewritePlaceholders(r.driver, `
 		INSERT INTO user_channel_order (user_id, channel_id, position, hidden, updated_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -150,7 +149,7 @@ func (r *UserChannelOrderRepository) ReplaceAll(ctx context.Context, userID stri
 	// 5-placeholder block.
 	placeholders := make([]string, 0, len(entries))
 	args := make([]any, 0, len(entries)*5)
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	for i, e := range entries {
 		placeholders = append(placeholders, "(?, ?, ?, ?, ?)")
 		var hiddenArg any

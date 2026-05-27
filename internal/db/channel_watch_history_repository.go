@@ -45,7 +45,7 @@ func (r *ChannelWatchHistoryRepository) useSQLite() bool { return r.sq != nil }
 // Returns the timestamp written so handlers can echo it to the client
 // without an extra read.
 func (r *ChannelWatchHistoryRepository) RecordByStreamURL(ctx context.Context, userID, streamURL string) (time.Time, error) {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	var err error
 	if r.useSQLite() {
 		err = r.sq.RecordChannelWatch(ctx, sqlc.RecordChannelWatchParams{

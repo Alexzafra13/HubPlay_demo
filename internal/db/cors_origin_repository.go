@@ -49,7 +49,7 @@ func (r *CorsOriginRepository) Insert(ctx context.Context, row CorsOriginRow) er
 		VALUES (?, ?, ?, ?)`)
 	createdAt := row.CreatedAt
 	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
+		createdAt = timeNow().UTC()
 	}
 	_, err := r.db.ExecContext(ctx, query,
 		row.Origin,
