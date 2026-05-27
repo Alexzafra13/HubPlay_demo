@@ -547,6 +547,11 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 	startedAt := m.now()
 	workDir := filepath.Join(m.cfg.CacheDir, channelID, fmt.Sprintf("%d", startedAt.UnixNano()))
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		m.logger.Warn("transmux spawn failed: mkdir work dir",
+			"channel", channelID,
+			"work_dir", workDir,
+			"error", err,
+		)
 		return nil, fmt.Errorf("iptv-transmux: mkdir work dir: %w", err)
 	}
 
@@ -593,6 +598,10 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 	if err != nil {
 		cancel()
 		_ = os.RemoveAll(workDir)
+		m.logger.Warn("transmux spawn failed: stderr pipe",
+			"channel", channelID,
+			"error", err,
+		)
 		return nil, fmt.Errorf("iptv-transmux: stderr pipe: %w", err)
 	}
 
@@ -614,6 +623,13 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		cancel()
 		_ = stderrPipe.Close()
 		_ = os.RemoveAll(workDir)
+		m.logger.Warn("transmux spawn failed: ffmpeg start",
+			"channel", channelID,
+			"upstream", upstreamURL,
+			"mode", mode.String(),
+			"ffmpeg_path", m.cfg.FFmpegPath,
+			"error", err,
+		)
 		return nil, fmt.Errorf("iptv-transmux: start ffmpeg: %w", err)
 	}
 
