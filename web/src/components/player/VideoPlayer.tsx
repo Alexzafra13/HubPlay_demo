@@ -13,6 +13,7 @@ import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
 import { useExternalSubMode } from "@/hooks/useExternalSubMode";
+import { usePlayerActions } from "@/hooks/usePlayerActions";
 import { useFullscreenSync } from "@/hooks/useFullscreenSync";
 import { useStartPositionSeek } from "@/hooks/useStartPositionSeek";
 import { useStreamSessionCleanup } from "@/hooks/useStreamSessionCleanup";
@@ -310,36 +311,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // same item for the entire session.
   const trickplay = useTrickplay(itemId);
 
-  // ─── Playback controls ──────────────────────────────────────────────────
-
-  const togglePlayPause = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play().catch(() => {});
-    } else {
-      video.pause();
-    }
-  }, []);
-
-  // Surface tap: on mobile this only toggles control visibility (no
-  // accidental pause when the user is just trying to bring up the
-  // bar). On desktop this falls through to togglePlayPause — mouse
-  // users expect click-to-pause. The decision is made at click-time,
-  // not via different handlers, so a viewport resize that flips
-  // isMobile mid-session keeps behaviour consistent.
-  const handleSurfaceTap = useCallback(() => {
-    if (isMobile) {
-      if (controlsVisible) {
-        hideControls();
-      } else {
-        showControls();
-      }
-      return;
-    }
-    togglePlayPause();
-  }, [isMobile, controlsVisible, hideControls, showControls, togglePlayPause]);
-
   // Sincroniza volume/mute/playbackRate al `<video>`. El sourceKey
   // garantiza que un remount (audio swap, recover) re-aplique el
   // rate elegido — sin esto el navegador vuelve a 1× nativamente.
@@ -351,67 +322,29 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     sourceKey: masterPlaylistUrl ?? directUrl,
   });
 
-  const handleSeek = useCallback((time: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = time;
-  }, []);
+  // ─── Playback controls ──────────────────────────────────────────────────
 
-  const handleVolumeChange = useCallback(
-    (v: number) => {
-      const clamped = Math.max(0, Math.min(1, v));
-      setVolume(clamped);
-      if (clamped > 0 && isMuted) {
-        toggleMute();
-      }
-    },
-    [isMuted, setVolume, toggleMute],
-  );
-
-  const handleToggleMute = useCallback(() => {
-    toggleMute();
-  }, [toggleMute]);
-
-  const handleToggleFullscreen = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else {
-      container.requestFullscreen().catch(() => {});
-    }
-  }, []);
-
-  const handleClose = useCallback(() => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().then(() => onClose()).catch(() => onClose());
-    } else {
-      onClose();
-    }
-  }, [onClose]);
-
-  // PiP toggle. Wrapped so the keyboard hook + a future toolbar
-  // button share the same code path. Pre-flight failures
-  // (no <video>, user-gesture missing, browser without PiP) are
-  // non-fatal — silently no-op rather than throwing in the user's
-  // face; the operator can still hit fullscreen as the fallback.
-  const handleTogglePiP = useCallback(async () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (!document.pictureInPictureEnabled || video.disablePictureInPicture) {
-      return;
-    }
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-      } else {
-        await video.requestPictureInPicture();
-      }
-    } catch {
-      // Ignored — pre-flight + browser-policy errors are recoverable
-      // by the user trying again from a confirmed gesture.
-    }
-  }, []);
+  const {
+    togglePlayPause,
+    handleSurfaceTap,
+    handleSeek,
+    handleVolumeChange,
+    handleToggleMute,
+    handleToggleFullscreen,
+    handleClose,
+    handleTogglePiP,
+  } = usePlayerActions({
+    videoRef,
+    containerRef,
+    isMobile,
+    controlsVisible,
+    showControls,
+    hideControls,
+    isMuted,
+    setVolume,
+    toggleMute,
+    onClose,
+  });
 
   useStreamSessionCleanup(itemId);
 
