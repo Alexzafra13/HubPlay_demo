@@ -12,6 +12,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
+import { useFullscreenSync } from "@/hooks/useFullscreenSync";
 import { useStartPositionSeek } from "@/hooks/useStartPositionSeek";
 import { useStreamSessionCleanup } from "@/hooks/useStreamSessionCleanup";
 import { useVideoElementSync } from "@/hooks/useVideoElementSync";
@@ -512,17 +513,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onAudioStreamSelected,
   });
 
-  // ─── Fullscreen change listener ──────────────────────────────────────────
-
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      setFullscreen(!!document.fullscreenElement);
-    };
-
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () =>
-      document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, [setFullscreen]);
+  useFullscreenSync(setFullscreen);
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
