@@ -5,24 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	librarymodel "hubplay/internal/library/model"
 )
 
-// HomeTrendingItem is one entry in the trending rail.
-type HomeTrendingItem struct {
-	ID              string
-	Type            string
-	Title           string
-	Year            sql.NullInt64
-	CommunityRating sql.NullFloat64
-	LibraryID       string
-	PlayCount       int64
-	LastPlayedAt    time.Time
-	// ContentRating exposed so the handler can apply per-profile
-	// rating caps post-fetch. We push it through the same SELECT
-	// rather than a second per-row query — the items table is
-	// already in the FROM clause for trending so the column is free.
-	ContentRating string
-}
 
 // Trending returns the top `limit` items played across ALL users in
 // the last `windowDays`, scoped to libraries the caller can see.
@@ -41,7 +27,7 @@ type HomeTrendingItem struct {
 // to their series so the rail surfaces "Game of Thrones is hot",
 // not "S04E09 is hot". Series ranking aggregates plays of all its
 // episodes via the parent_id climb (one CTE).
-func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays, limit int) ([]HomeTrendingItem, error) {
+func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays, limit int) ([]librarymodel.HomeTrendingItem, error) {
 	if windowDays <= 0 {
 		windowDays = 7
 	}
@@ -56,13 +42,24 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 	}
 	defer rows.Close() //nolint:errcheck
 
-	out := make([]HomeTrendingItem, 0, limit)
+	out := make([]librarymodel.HomeTrendingItem, 0, limit)
 	for rows.Next() {
-		var it HomeTrendingItem
-		var lastPlayedRaw any
-		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.CommunityRating,
+		var it librarymodel.HomeTrendingItem
+		var (
+			year            sql.NullInt64
+			communityRating sql.NullFloat64
+			lastPlayedRaw   any
+		)
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &year, &communityRating,
 			&it.LibraryID, &it.PlayCount, &lastPlayedRaw, &it.ContentRating); err != nil {
 			return nil, fmt.Errorf("scan trending row: %w", err)
+		}
+		if year.Valid {
+			v := int(year.Int64)
+			it.Year = &v
+		}
+		if communityRating.Valid {
+			it.CommunityRating = &communityRating.Float64
 		}
 		it.LastPlayedAt, err = coerceSQLiteTime(lastPlayedRaw)
 		if err != nil {

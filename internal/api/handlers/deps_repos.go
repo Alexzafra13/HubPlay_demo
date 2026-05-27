@@ -144,10 +144,10 @@ type UserPreferencesRepoForDeps interface {
 // HomeRepo expone el repo del home dashboard (Trending, Recommended,
 // BecauseYouWatched, LiveNow).
 type HomeRepo interface {
-	Trending(ctx context.Context, userID string, windowDays, limit int) ([]db.HomeTrendingItem, error)
-	Recommended(ctx context.Context, userID string, limit int) ([]db.HomeRecommendation, error)
-	BecauseYouWatched(ctx context.Context, userID string, limit int) (*db.HomeBecauseResult, error)
-	LiveNow(ctx context.Context, userID string, limit int) ([]db.HomeLiveNowChannel, error)
+	Trending(ctx context.Context, userID string, windowDays, limit int) ([]librarymodel.HomeTrendingItem, error)
+	Recommended(ctx context.Context, userID string, limit int) ([]librarymodel.HomeRecommendation, error)
+	BecauseYouWatched(ctx context.Context, userID string, limit int) (*librarymodel.HomeBecauseResult, error)
+	LiveNow(ctx context.Context, userID string, limit int) ([]librarymodel.HomeLiveNowChannel, error)
 }
 
 // ExternalIDsRepo es el contrato amplio del repo de external IDs.
