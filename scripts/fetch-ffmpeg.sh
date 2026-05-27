@@ -36,15 +36,21 @@ mkdir -p "$OUTDIR"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-# Versión del build de FFmpeg-Builds a usar. release/N7 es la línea
-# estable; releases concretos en https://github.com/BtbN/FFmpeg-Builds/releases.
-# "latest" es un alias que GitHub redirige automáticamente — aceptable
-# para CI porque las releases son inmutables una vez publicadas.
-BTBN_RELEASE="latest"
+# Releases de BtbN/FFmpeg-Builds. La carpeta `latest` (tag explícito,
+# no alias) tiene los assets con nombres canónicos `ffmpeg-master-latest-*`
+# que el script consume. **No** usar `releases/latest/download/X` —
+# eso es el alias dinámico que GitHub resuelve al último release marcado
+# "Latest", y desde mayo 2026 BtbN marca como Latest los autobuilds
+# diarios cuyos assets llevan el SHA del commit en el nombre
+# (`ffmpeg-N-124657-gfb5dd6ec60-linux64-lgpl.tar.xz` etc) → 404 en el
+# nombre canónico. El tag explícito `latest` apunta al último autobuild
+# pero mantiene los nombres estables del asset, así que la URL
+# `releases/download/latest/ffmpeg-master-latest-*` siempre funciona.
+BTBN_BASE="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
 
 case "$GOOS-$GOARCH" in
 linux-amd64)
-	url="https://github.com/BtbN/FFmpeg-Builds/releases/${BTBN_RELEASE}/download/ffmpeg-master-latest-linux64-lgpl.tar.xz"
+	url="${BTBN_BASE}/ffmpeg-master-latest-linux64-lgpl.tar.xz"
 	echo "→ downloading $url"
 	curl -fsSL "$url" -o "$tmpdir/ff.tar.xz"
 	tar -xJf "$tmpdir/ff.tar.xz" -C "$tmpdir"
@@ -55,7 +61,7 @@ linux-amd64)
 	chmod +x "$OUTDIR/ffmpeg" "$OUTDIR/ffprobe"
 	;;
 linux-arm64)
-	url="https://github.com/BtbN/FFmpeg-Builds/releases/${BTBN_RELEASE}/download/ffmpeg-master-latest-linuxarm64-lgpl.tar.xz"
+	url="${BTBN_BASE}/ffmpeg-master-latest-linuxarm64-lgpl.tar.xz"
 	echo "→ downloading $url"
 	curl -fsSL "$url" -o "$tmpdir/ff.tar.xz"
 	tar -xJf "$tmpdir/ff.tar.xz" -C "$tmpdir"
@@ -65,7 +71,7 @@ linux-arm64)
 	chmod +x "$OUTDIR/ffmpeg" "$OUTDIR/ffprobe"
 	;;
 windows-amd64)
-	url="https://github.com/BtbN/FFmpeg-Builds/releases/${BTBN_RELEASE}/download/ffmpeg-master-latest-win64-lgpl.zip"
+	url="${BTBN_BASE}/ffmpeg-master-latest-win64-lgpl.zip"
 	echo "→ downloading $url"
 	curl -fsSL "$url" -o "$tmpdir/ff.zip"
 	unzip -q "$tmpdir/ff.zip" -d "$tmpdir"
