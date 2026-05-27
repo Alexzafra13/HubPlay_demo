@@ -999,3 +999,44 @@ Orden optimizado por valor/desbloqueo/bajo blast radius:
 Los pasos 1-3 son el núcleo y se pueden hacer sin mover ficheros de
 sitio. Los pasos 4-6 son cambios de organización física que dependen
 de que los contratos estén resueltos.
+
+---
+
+### 6.5 Estado de cierre (actualizado post-implementación)
+
+#### LibraryService — **cerrado al 100%**
+
+| Consumer | Micro-interface | Métodos |
+|----------|----------------|--------:|
+| SearchHandler | `itemSearcher` | 1 |
+| RecommendationsHandler | `itemGetter` | 1 |
+| ItemDetailHandler | `itemDetailFetcher` | 5 |
+| LibraryHandler | `libraryOps` | 12 |
+| AuthHandler | `authLibraryOps` | 2 |
+| SetupHandler | `setupLibraryOps` | 2 |
+
+#### IPTVService — **cerrado al 100% (9/9 sub-handlers)**
+
+| Sub-handler | Micro-interface | Métodos |
+|-------------|----------------|--------:|
+| `iptvChannelHandler` | `channelBrowseOps` | 11 |
+| `iptvPlaybackFailureHandler` | `playbackFailureReporter` | 2 |
+| `iptvEPGHandler` | `epgManager` | 5 |
+| `iptvPersonalisationHandler` | `channelPersonaliser` | 4 |
+| `iptvAdminOrderHandler` | `adminChannelOrderManager` | 4 |
+| `iptvAdminHandler` | `iptvAdminOps` | 7 |
+| `iptvHealthHandler` | `channelHealthOps` | 7 |
+| `iptvFavoritesHandler` | `channelFavoritesOps` | 7 |
+| `iptvLogoHandler` | `channelLogoOps` | 5 |
+
+`IPTVHandler` es ahora un facade puro (0 campos directos, 9 sub-handlers
+embebidos). `IPTVService` en `interfaces.go` puede eliminarse cuando se
+migren los tests al fake por sub-handler.
+
+#### Otros fixes implementados
+
+| Olor | Estado |
+|------|--------|
+| SS-3 (defer fuera de lifecycle) | ✅ cerrado |
+| SS-4 (os.Exit en run) | ✅ cerrado |
+| SS-5 (browse sin per-peer timeout) | ✅ cerrado |
