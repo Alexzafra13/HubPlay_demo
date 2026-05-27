@@ -371,10 +371,10 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		// Episode coordinates so the SeriesHero / season "Sigue viendo"
 		// panel can render the SXXEYY badge without a second hop.
 		// 0 means absent (movie / orphan episode); only emit when set.
-		if item.SeasonNumber > 0 {
+		if item.SeasonNumber != nil && *item.SeasonNumber > 0 {
 			entry["season_number"] = item.SeasonNumber
 		}
-		if item.EpisodeNumber > 0 {
+		if item.EpisodeNumber != nil && *item.EpisodeNumber > 0 {
 			entry["episode_number"] = item.EpisodeNumber
 		}
 		if item.SeriesID != "" {

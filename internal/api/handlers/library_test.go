@@ -18,7 +18,6 @@ import (
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/library"
 	"hubplay/internal/scanner"
@@ -737,10 +736,10 @@ func TestLibraryHandler_Items_IncludesUserDataWhenAuthenticated(t *testing.T) {
 		}, 3, nil
 	}
 	// Seed per-user state for u-2 (the userClaims fixture).
-	env.userData.data["u-2:it-1"] = &db.UserData{
+	env.userData.data["u-2:it-1"] = &librarymodel.UserData{
 		UserID: "u-2", ItemID: "it-1", Completed: true, PlayCount: 1, PositionTicks: 1_000,
 	}
-	env.userData.data["u-2:it-2"] = &db.UserData{
+	env.userData.data["u-2:it-2"] = &librarymodel.UserData{
 		UserID: "u-2", ItemID: "it-2", PositionTicks: 250, IsFavorite: true,
 	}
 
@@ -794,7 +793,7 @@ func TestLibraryHandler_Items_OmitsUserDataWhenAnonymous(t *testing.T) {
 	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return []*librarymodel.Item{{ID: "it-1", DurationTicks: 1_000}}, 1, nil
 	}
-	env.userData.data["u-2:it-1"] = &db.UserData{UserID: "u-2", ItemID: "it-1", Completed: true}
+	env.userData.data["u-2:it-1"] = &librarymodel.UserData{UserID: "u-2", ItemID: "it-1", Completed: true}
 
 	// No claims attached — this exercises the listing endpoint pre-auth
 	// (chi route exists, real wiring requires middleware) and asserts we

@@ -121,7 +121,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 		// Touch ~30 % of items so Trending has plays.
 		if i%3 == 0 {
 			played := now.AddDate(0, 0, -((i * 7) % 7))
-			_ = repos.UserData.Upsert(ctx, &db.UserData{
+			_ = repos.UserData.Upsert(ctx, &librarymodel.UserData{
 				UserID: "u-1", ItemID: fmt.Sprintf("i-%05d", i),
 				PositionTicks: ticks90min / 2, PlayCount: 1,
 				LastPlayedAt: &played, UpdatedAt: now,

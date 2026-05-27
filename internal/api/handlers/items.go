@@ -3,7 +3,6 @@ package handlers
 import (
 	"log/slog"
 
-	"hubplay/internal/db"
 	librarymodel "hubplay/internal/library/model"
 )
 
@@ -168,7 +167,7 @@ func streamResponse(s *librarymodel.MediaStream) map[string]any {
 // future native) muestre el mismo valor, y se clampa a [0, 100] para
 // que data de posición mal clamped (e.g. resume past EOF tras un
 // re-encode) no pueda renderizar UI >100 %.
-func userDataResponse(ud *db.UserData, durationTicks int64) map[string]any {
+func userDataResponse(ud *librarymodel.UserData, durationTicks int64) map[string]any {
 	if ud == nil {
 		return nil
 	}
