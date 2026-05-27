@@ -15,6 +15,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	"hubplay/internal/clock"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/probe"
@@ -85,23 +86,28 @@ func DefaultConfig() Config {
 // disparar el pipeline asíncrono que valida, prueba con ffprobe,
 // mueve a librería, audita y publica eventos).
 type Service struct {
-	cfg       Config
-	staging   *StagingDir
-	users     UserStore
-	audit     AuditStore
-	bus       EventPublisher
-	picker    *LibraryPicker
-	prober    Prober
-	logger    *slog.Logger
+	cfg     Config
+	staging *StagingDir
+	users   UserStore
+	audit   AuditStore
+	bus     EventPublisher
+	picker  *LibraryPicker
+	prober  Prober
+	logger  *slog.Logger
+	clock   clock.Clock
 }
 
-// NewService cablea las dependencias. Cualquier nil panics — son
-// invariantes de construcción que sólo el bootstrap del binario
+// NewService cablea las dependencias. Cualquier nil (excepto clk) panics
+// — son invariantes de construcción que sólo el bootstrap del binario
 // puede romper, y el panic en arranque es preferible al nil-deref
-// silencioso a las 3am del primer upload.
-func NewService(cfg Config, staging *StagingDir, users UserStore, audit AuditStore, bus EventPublisher, picker *LibraryPicker, prober Prober, logger *slog.Logger) *Service {
+// silencioso a las 3am del primer upload. `clk` opcional — default
+// `clock.New()`; inyectable para tests determinísticos.
+func NewService(cfg Config, staging *StagingDir, users UserStore, audit AuditStore, bus EventPublisher, picker *LibraryPicker, prober Prober, clk clock.Clock, logger *slog.Logger) *Service {
 	if staging == nil || users == nil || audit == nil || bus == nil || picker == nil || prober == nil || logger == nil {
 		panic("upload.NewService: nil dependency")
+	}
+	if clk == nil {
+		clk = clock.New()
 	}
 	return &Service{
 		cfg:     cfg,
@@ -112,6 +118,7 @@ func NewService(cfg Config, staging *StagingDir, users UserStore, audit AuditSto
 		picker:  picker,
 		prober:  prober,
 		logger:  logger.With("module", "upload"),
+		clock:   clk,
 	}
 }
 
@@ -275,7 +282,7 @@ type FinishResult struct {
 func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 	started := in.StartedAt
 	if started.IsZero() {
-		started = time.Now().UTC()
+		started = s.clock.Now().UTC()
 	}
 	res := FinishResult{Outcome: "error", ErrorMessage: "pipeline did not run to completion"}
 
@@ -284,7 +291,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 		res.ErrorMessage = errMsg
 		res.LibraryID = libraryID
 		res.FinalPath = finalPath
-		now := time.Now().UTC()
+		now := s.clock.Now().UTC()
 		_ = s.audit.Insert(ctx, db.UploadAuditRow{
 			ID:           RandomID(),
 			UserID:       in.UserID,
@@ -431,9 +438,9 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 func (s *Service) Aborted(ctx context.Context, in FinishInput) {
 	started := in.StartedAt
 	if started.IsZero() {
-		started = time.Now().UTC()
+		started = s.clock.Now().UTC()
 	}
-	now := time.Now().UTC()
+	now := s.clock.Now().UTC()
 	_ = s.audit.Insert(ctx, db.UploadAuditRow{
 		ID:           RandomID(),
 		UserID:       in.UserID,

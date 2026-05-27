@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"hubplay/internal/clock"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
@@ -18,15 +19,20 @@ import (
 // un wrapper dual-driver sobre los Queries generados por sqlc, que
 // expone tipos del paquete `notification` (no de sqlc) hacia arriba.
 type Repository struct {
-	sq *sqlc.Queries
-	pq *sqlc_pg.Queries
+	sq    *sqlc.Queries
+	pq    *sqlc_pg.Queries
+	clock clock.Clock
 }
 
 // NewRepository acepta o un *sql.DB sqlite o un *sql.DB postgres. El
 // driver lo discrimina el caller via NewRepository / NewRepositoryPg
-// segun la conexion que tenga.
-func NewRepository(driver string, db *sql.DB) *Repository {
-	r := &Repository{}
+// segun la conexion que tenga. `clk` opcional — default `clock.New()`
+// (tiempo real); inyectable para tests determinísticos.
+func NewRepository(driver string, db *sql.DB, clk clock.Clock) *Repository {
+	if clk == nil {
+		clk = clock.New()
+	}
+	r := &Repository{clock: clk}
 	if driver == "postgres" {
 		r.pq = sqlc_pg.New(db)
 	} else {
@@ -43,7 +49,7 @@ func (r *Repository) Insert(ctx context.Context, n *Notification) error {
 		n.ID = uuid.NewString()
 	}
 	if n.CreatedAt.IsZero() {
-		n.CreatedAt = time.Now().UTC()
+		n.CreatedAt = r.clock.Now().UTC()
 	}
 	var err error
 	if r.useSQLite() {

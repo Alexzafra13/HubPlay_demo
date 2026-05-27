@@ -177,7 +177,7 @@ func newServiceFixture(t *testing.T) (*upload.Service, *fakeUserStore, *fakeAudi
 	}
 	picker := upload.NewLibraryPicker(libs)
 	prober := &fakeProber{durationMs: 60_000}
-	svc := upload.NewService(upload.DefaultConfig(), st, users, audit, bus, picker, prober, slog.Default())
+	svc := upload.NewService(upload.DefaultConfig(), st, users, audit, bus, picker, prober, nil, slog.Default())
 	return svc, users, audit, bus, stagingRoot, libDir
 }
 
@@ -262,7 +262,7 @@ func TestService_PreCreate_RejectsOversize(t *testing.T) {
 	}
 	cfg.MaxUploadBytes = 1024
 	svc := upload.NewService(cfg, st, users, &fakeAuditStore{}, &captureBus{},
-		upload.NewLibraryPicker(&fakeLibraryStore{}), &fakeProber{durationMs: 60000}, slog.Default())
+		upload.NewLibraryPicker(&fakeLibraryStore{}), &fakeProber{durationMs: 60000}, nil, slog.Default())
 
 	_, err := svc.PreCreate(context.Background(), upload.PreCreateInput{
 		UserID: "u-alex", UploadID: "up-1", OriginalName: "x.mkv", Size: 2048,
@@ -398,7 +398,7 @@ func TestService_Finish_RejectsTooShort(t *testing.T) {
 		upload.NewLibraryPicker(&fakeLibraryStore{
 			libs: []*librarymodel.Library{{ID: "l", ContentType: "movies", Paths: []string{t.TempDir()}}},
 		}),
-		&fakeProber{durationMs: 500}, slog.Default())
+		&fakeProber{durationMs: 500}, nil, slog.Default())
 
 	got := svc.Finish(context.Background(), upload.FinishInput{
 		UserID: "u-alex", UploadID: "up-1",
@@ -422,7 +422,7 @@ func TestService_Finish_RejectsProbeFailure(t *testing.T) {
 		upload.NewLibraryPicker(&fakeLibraryStore{
 			libs: []*librarymodel.Library{{ID: "l", ContentType: "movies", Paths: []string{libDir}}},
 		}),
-		&fakeProber{err: fmt.Errorf("ffprobe exit 1")}, slog.Default())
+		&fakeProber{err: fmt.Errorf("ffprobe exit 1")}, nil, slog.Default())
 
 	src := filepath.Join(stagingRoot, "u-alex", "up-1", "x.mkv")
 	writeFakeMKV(t, src, 1024)
@@ -449,7 +449,7 @@ func TestService_Finish_RejectsNoLibrary(t *testing.T) {
 	}
 	svc := upload.NewService(upload.DefaultConfig(), st, users, &fakeAuditStore{}, &captureBus{},
 		upload.NewLibraryPicker(&fakeLibraryStore{libs: nil}), // user has nothing
-		&fakeProber{durationMs: 60_000}, slog.Default())
+		&fakeProber{durationMs: 60_000}, nil, slog.Default())
 
 	src := filepath.Join(stagingRoot, "u-alex", "up-1", "x.mkv")
 	writeFakeMKV(t, src, 1024)

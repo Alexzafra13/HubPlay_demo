@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"hubplay/internal/clock"
 )
 
 // GC limpia uploads huérfanos del staging dir — directorios de upload
@@ -36,27 +38,34 @@ import (
 // estado. Lo dejo para una v2; en v1 el operador puede ajustar la
 // cuota a mano si nota drift, y el GC al menos recupera el disco.
 type GC struct {
-	staging      *StagingDir
-	logger       *slog.Logger
-	interval     time.Duration
-	staleAfter   time.Duration
+	staging    *StagingDir
+	logger     *slog.Logger
+	interval   time.Duration
+	staleAfter time.Duration
+	clock      clock.Clock
 }
 
 // NewGC crea el garbage collector. Valores típicos:
 //   - interval   = 1 * time.Hour
 //   - staleAfter = 24 * time.Hour
 //
+// `clk` opcional — default `clock.New()`; inyectable para tests.
+//
 // Demasiado agresivo (e.g. staleAfter=1h) puede borrar uploads
 // pausados que el usuario quería retomar. Demasiado conservador
 // (staleAfter=30d) deja el disco crecer durante meses entre crashes.
 // 24h es el sweet spot — un upload que lleva 24h sin actividad es
 // claramente abandonado, no pausado.
-func NewGC(staging *StagingDir, interval, staleAfter time.Duration, logger *slog.Logger) *GC {
+func NewGC(staging *StagingDir, interval, staleAfter time.Duration, clk clock.Clock, logger *slog.Logger) *GC {
+	if clk == nil {
+		clk = clock.New()
+	}
 	return &GC{
 		staging:    staging,
 		logger:     logger.With("module", "upload-gc"),
 		interval:   interval,
 		staleAfter: staleAfter,
+		clock:      clk,
 	}
 }
 
@@ -110,7 +119,7 @@ func (g *GC) sweep(ctx context.Context) {
 		return
 	}
 
-	cutoff := time.Now().Add(-g.staleAfter)
+	cutoff := g.clock.Now().Add(-g.staleAfter)
 	deleted, scanned := 0, 0
 
 	for _, userEnt := range users {

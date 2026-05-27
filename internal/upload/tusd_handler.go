@@ -138,7 +138,7 @@ func (t *TusdHandler) preCreate(hook tushandler.HookEvent) (tushandler.HTTPRespo
 	// rellenamos el campo MetaData de FileInfoChanges, tusd CONSERVA
 	// la metadata original — así que aquí lo poblamos completo para
 	// que el consumer del CompleteUploads no tenga que volver a inferir.
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := t.svc.clock.Now().UTC().Format(time.RFC3339Nano)
 	return tushandler.HTTPResponse{}, tushandler.FileInfoChanges{
 		Storage: map[string]string{
 			"Type": "filestore",
@@ -213,6 +213,13 @@ func (t *TusdHandler) consumeTerminations() {
 // Service espera. binPath cae al default de filestore si la metadata
 // `Storage[Path]` falta — defensa por si una versión futura de tusd
 // no rellena ese campo en el complete event.
+// finishInputFromHook construye el input que Service.Finish/Aborted
+// consume a partir del evento tusd. Si la metadata no tiene
+// `started_at` (legacy o cliente con bug), cae a `time.Now()` como
+// fallback. No usa `clock` porque es función libre sin acceso al
+// Service; el caller (TusdHandler.handleComplete) ya rellena
+// `started_at` en PreCreate con el clock real, así que este fallback
+// solo se ejecuta para uploads pre-clock-injection (cero en prod).
 func finishInputFromHook(evt tushandler.HookEvent, stagingRoot string) FinishInput {
 	md := evt.Upload.MetaData
 	started, _ := time.Parse(time.RFC3339Nano, md["started_at"])

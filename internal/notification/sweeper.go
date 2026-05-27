@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"hubplay/internal/clock"
 )
 
 // DefaultReadRetention es la ventana por defecto que mantenemos las
@@ -16,11 +18,16 @@ const DefaultReadRetention = 30 * 24 * time.Hour
 // borra notificaciones leidas con read_at < ahora - retention. Las
 // no-leidas se conservan siempre - el user todavia no las ha visto.
 //
+// `clk` opcional — default `clock.New()`. Inyectable para tests.
+//
 // Mismo patron que internal/db.StartPeriodicOptimize: ticker post-
 // boot + cancel via ctx + log de cuantas borra.
-func StartReadCleanupSweeper(ctx context.Context, repo *Repository, logger *slog.Logger, interval, retention time.Duration) func() {
+func StartReadCleanupSweeper(ctx context.Context, repo *Repository, clk clock.Clock, logger *slog.Logger, interval, retention time.Duration) func() {
 	if repo == nil {
 		return func() {}
+	}
+	if clk == nil {
+		clk = clock.New()
 	}
 	if interval <= 0 {
 		interval = 24 * time.Hour
@@ -39,7 +46,7 @@ func StartReadCleanupSweeper(ctx context.Context, repo *Repository, logger *slog
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				before := time.Now().UTC().Add(-retention)
+				before := clk.Now().UTC().Add(-retention)
 				n, err := repo.DeleteOldRead(ctx, before)
 				if err != nil {
 					logger.Warn("notifications: read-cleanup sweeper", "err", err)
