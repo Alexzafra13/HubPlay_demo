@@ -52,7 +52,7 @@ func (h *MePeersHandler) ProxyPeerItemPoster(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		h.logger.Warn("federation: proxy peer poster",
-			"peer_id", peerID, "item_id", itemID, "err", err)
+			"peer_id", peerID, "item_id", itemID, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}

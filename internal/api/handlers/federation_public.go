@@ -116,7 +116,7 @@ func (h *FederationPublicHandler) ReceivePairingRequest(w http.ResponseWriter, r
 			respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "request body validation failed")
 			return
 		}
-		h.logger.Warn("federation: receive pairing request failed", "err", err)
+		h.logger.Warn("federation: receive pairing request failed", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "could not accept the request")
 		return
 	}
@@ -154,7 +154,7 @@ func (h *FederationPublicHandler) ReceivePairingCallback(w http.ResponseWriter, 
 			return
 		}
 		// Cualquier otro fallo es protocolo/firma invalida.
-		h.logger.Warn("federation: pairing callback rejected", "request_id", requestID, "err", err)
+		h.logger.Warn("federation: pairing callback rejected", "request_id", requestID, "error", err)
 		respondError(w, r, http.StatusBadRequest, "CALLBACK_REJECTED", "callback validation failed")
 		return
 	}
@@ -194,7 +194,7 @@ func (h *FederationPublicHandler) ReceivePairingCancel(w http.ResponseWriter, r 
 		return
 	}
 	if err := h.mgr.CancelIncomingPairingRequest(r.Context(), requestID); err != nil {
-		h.logger.Warn("federation: cancel incoming pairing request failed", "id", requestID, "err", err)
+		h.logger.Warn("federation: cancel incoming pairing request failed", "id", requestID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "could not cancel")
 		return
 	}
@@ -266,7 +266,7 @@ func (h *FederationPublicHandler) ListLibraries(w http.ResponseWriter, r *http.R
 	}
 	libs, err := h.mgr.ListSharedLibrariesForPeer(r.Context(), peer.ID)
 	if err != nil {
-		h.logger.Error("federation: list shared libraries", "err", err, "peer_id", peer.ID)
+		h.logger.Error("federation: list shared libraries", "error", err, "peer_id", peer.ID)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list libraries")
 		return
 	}
@@ -297,7 +297,7 @@ func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *htt
 			respondError(w, r, http.StatusNotFound, "LIBRARY_NOT_FOUND", "library not found")
 			return
 		}
-		h.logger.Error("federation: list shared items", "err", err)
+		h.logger.Error("federation: list shared items", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
 		return
 	}
@@ -329,7 +329,7 @@ func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http
 
 	items, err := h.mgr.SearchLocalSharedItems(r.Context(), peer.ID, query, limit)
 	if err != nil {
-		h.logger.Error("federation: search shared items", "err", err, "peer_id", peer.ID)
+		h.logger.Error("federation: search shared items", "error", err, "peer_id", peer.ID)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "search failed")
 		return
 	}
@@ -362,7 +362,7 @@ func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Requ
 
 	items, err := h.mgr.ListLocalRecentSharedItems(r.Context(), peer.ID, limit)
 	if err != nil {
-		h.logger.Error("federation: list recent shared items", "err", err, "peer_id", peer.ID)
+		h.logger.Error("federation: list recent shared items", "error", err, "peer_id", peer.ID)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "list recent failed")
 		return
 	}
@@ -454,7 +454,7 @@ func (h *FederationPublicHandler) Handshake(w http.ResponseWriter, r *http.Reque
 		if status >= 400 && status < 500 {
 			userMsg = err.Error()
 		}
-		h.logger.Warn("federation: inbound handshake failed", "status", status, "err", err)
+		h.logger.Warn("federation: inbound handshake failed", "status", status, "error", err)
 		respondError(w, r, status, code, userMsg)
 		return
 	}

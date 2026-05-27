@@ -152,7 +152,7 @@ func (h *CollectionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	col, err := h.collections.GetByID(r.Context(), id)
 	if err != nil {
-		h.logger.Error("get collection", "id", id, "error", err)
+		h.logger.Error("get collection", "collection_id", id, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "lookup failed")
 		return
 	}
@@ -162,7 +162,7 @@ func (h *CollectionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.collections.ListItemsForCollection(r.Context(), col.ID)
 	if err != nil {
-		h.logger.Error("list collection items", "id", id, "error", err)
+		h.logger.Error("list collection items", "collection_id", id, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "list items failed")
 		return
 	}
@@ -270,7 +270,7 @@ func (h *CollectionHandler) SetCollectionImage(w http.ResponseWriter, r *http.Re
 
 	prev, _ := h.overrides.Get(r.Context(), collectionID, imageType)
 	if err := h.overrides.UpsertURL(r.Context(), collectionID, imageType, req.URL); err != nil {
-		h.logger.Error("upsert collection image override", "id", collectionID, "type", imageType, "error", err)
+		h.logger.Error("upsert collection image override", "collection_id", collectionID, "type", imageType, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "STORAGE_ERROR", "could not save override")
 		return
 	}

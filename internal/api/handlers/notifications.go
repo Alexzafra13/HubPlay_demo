@@ -81,13 +81,13 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	notifs, err := h.svc.ListForUser(r.Context(), claims.UserID, 50)
 	if err != nil {
-		h.logger.Error("list notifications", "user_id", claims.UserID, "err", err)
+		h.logger.Error("list notifications", "user_id", claims.UserID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to list notifications")
 		return
 	}
 	unread, err := h.svc.UnreadCountForUser(r.Context(), claims.UserID)
 	if err != nil {
-		h.logger.Error("count unread notifications", "user_id", claims.UserID, "err", err)
+		h.logger.Error("count unread notifications", "user_id", claims.UserID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to count notifications")
 		return
 	}
@@ -122,7 +122,7 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		h.logger.Error("mark notification read", "user_id", claims.UserID, "id", id, "err", err)
+		h.logger.Error("mark notification read", "user_id", claims.UserID, "id", id, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to mark notification read")
 		return
 	}
@@ -139,7 +139,7 @@ func (h *NotificationsHandler) MarkAllRead(w http.ResponseWriter, r *http.Reques
 	}
 	n, err := h.svc.MarkAllReadForUser(r.Context(), claims.UserID)
 	if err != nil {
-		h.logger.Error("mark all notifications read", "user_id", claims.UserID, "err", err)
+		h.logger.Error("mark all notifications read", "user_id", claims.UserID, "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to mark all read")
 		return
 	}

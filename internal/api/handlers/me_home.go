@@ -308,6 +308,10 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 		return
 	}
+	// Sub-logger: 3 logs en este handler (query Error, image fetch Debug,
+	// metadata fetch Debug) ya tenían user_id implícito por contexto.
+	// Hacerlo explícito + endpoint facilita filtrado en prod.
+	log := h.logger.With("endpoint", "trending", "user_id", claims.UserID)
 
 	limit := parseLimit(r, 12, 30)
 
@@ -324,7 +328,7 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.home.Trending(r.Context(), claims.UserID, 7, innerLimit)
 	if err != nil {
-		h.logger.Error("trending query", "error", err)
+		log.Error("trending query", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load trending")
 		return
 	}
@@ -370,7 +374,7 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		if ierr != nil {
 			// Debug: home polleada al abrir y al navegar; un Warn por request
 			// satura. Fail-soft cubre (cards sin poster).
-			h.logger.Debug("trending image fetch", "error", ierr)
+			log.Debug("trending image fetch", "error", ierr)
 		} else {
 			for i, row := range rows {
 				if urls, ok := imgs[row.ID]; ok {
@@ -395,7 +399,7 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 		ids := db.IDsFromTrending(rows)
 		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
 		if merr != nil {
-			h.logger.Debug("trending metadata fetch", "error", merr)
+			log.Debug("trending metadata fetch", "error", merr)
 		} else {
 			for i, row := range rows {
 				if m, ok := metas[row.ID]; ok {
@@ -440,6 +444,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 		return
 	}
+	log := h.logger.With("endpoint", "recommended", "user_id", claims.UserID)
 
 	limit := parseLimit(r, 5, 20)
 
@@ -454,7 +459,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.home.Recommended(r.Context(), claims.UserID, innerLimit)
 	if err != nil {
-		h.logger.Error("recommended query", "error", err)
+		log.Error("recommended query", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load recommended")
 		return
 	}
@@ -500,7 +505,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 	if h.images != nil && len(ids) > 0 {
 		imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids)
 		if ierr != nil {
-			h.logger.Debug("recommended image fetch", "error", ierr)
+			log.Debug("recommended image fetch", "error", ierr)
 		} else {
 			for i, row := range rows {
 				if urls, ok := imgs[row.ID]; ok {
@@ -522,7 +527,7 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 	if h.metadata != nil && len(ids) > 0 {
 		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
 		if merr != nil {
-			h.logger.Debug("recommended metadata fetch", "error", merr)
+			log.Debug("recommended metadata fetch", "error", merr)
 		} else {
 			for i, row := range rows {
 				if m, ok := metas[row.ID]; ok {

@@ -77,7 +77,7 @@ func (h *FederationAdminHandler) UpdateServerIdentity(w http.ResponseWriter, r *
 		return
 	}
 	if err := h.mgr.UpdateIdentityProfile(r.Context(), name, color); err != nil {
-		h.logger.Error("update server identity", "err", err)
+		h.logger.Error("update server identity", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to update server identity")
 		return
 	}
@@ -179,7 +179,7 @@ func (h *FederationAdminHandler) GenerateInvite(w http.ResponseWriter, r *http.R
 	}
 	inv, err := h.mgr.GenerateInvite(r.Context(), claims.UserID)
 	if err != nil {
-		h.logger.Error("federation: generate invite", "err", err)
+		h.logger.Error("federation: generate invite", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite")
 		return
 	}
@@ -194,7 +194,7 @@ func (h *FederationAdminHandler) GenerateInvite(w http.ResponseWriter, r *http.R
 func (h *FederationAdminHandler) ListActiveInvites(w http.ResponseWriter, r *http.Request) {
 	invs, err := h.mgr.ListActiveInvites(r.Context())
 	if err != nil {
-		h.logger.Error("federation: list invites", "err", err)
+		h.logger.Error("federation: list invites", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list invites")
 		return
 	}
@@ -233,7 +233,7 @@ func (h *FederationAdminHandler) ProbePeer(w http.ResponseWriter, r *http.Reques
 		// El error detallado va al log (puede contener IPs internas,
 		// status code del peer, etc.); al cliente solo el mensaje
 		// genérico (audit olor F16-6).
-		h.logger.Warn("federation: probe peer failed", "base_url", req.BaseURL, "err", err)
+		h.logger.Warn("federation: probe peer failed", "base_url", req.BaseURL, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_PROBE_FAILED",
 			"could not reach the peer; check the URL and try again")
 		return
@@ -292,7 +292,7 @@ func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Req
 			msg = "this peer is already paired"
 		}
 		h.logger.Warn("federation: accept invite failed",
-			"base_url", req.BaseURL, "err", err, "status", status)
+			"base_url", req.BaseURL, "error", err, "status", status)
 		respondError(w, r, status, code, msg)
 		return
 	}
@@ -305,7 +305,7 @@ func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Req
 func (h *FederationAdminHandler) ListPeers(w http.ResponseWriter, r *http.Request) {
 	peers, err := h.mgr.ListPeers(r.Context())
 	if err != nil {
-		h.logger.Error("federation: list peers", "err", err)
+		h.logger.Error("federation: list peers", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list peers")
 		return
 	}
@@ -328,7 +328,7 @@ func (h *FederationAdminHandler) GetPeer(w http.ResponseWriter, r *http.Request)
 			respondError(w, r, http.StatusNotFound, "PEER_NOT_FOUND", "peer not found")
 			return
 		}
-		h.logger.Error("federation: get peer", "err", err)
+		h.logger.Error("federation: get peer", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch peer")
 		return
 	}
@@ -354,7 +354,7 @@ func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Reque
 	}
 	shares, err := h.mgr.ListSharesByPeer(r.Context(), peerID)
 	if err != nil {
-		h.logger.Error("federation: list shares", "err", err)
+		h.logger.Error("federation: list shares", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list shares")
 		return
 	}
@@ -407,7 +407,7 @@ func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Requ
 			status, code = http.StatusForbidden, "PEER_NOT_PAIRED"
 			msg = "peer is not paired"
 		}
-		h.logger.Warn("federation: share library failed", "err", err)
+		h.logger.Warn("federation: share library failed", "error", err)
 		respondError(w, r, status, code, msg)
 		return
 	}
@@ -426,7 +426,7 @@ func (h *FederationAdminHandler) DeleteShare(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.mgr.UnshareLibrary(r.Context(), peerID, shareID); err != nil {
-		h.logger.Error("federation: unshare library", "err", err)
+		h.logger.Error("federation: unshare library", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unshare")
 		return
 	}
@@ -482,7 +482,7 @@ func (h *FederationAdminHandler) UpdateFederationSettings(w http.ResponseWriter,
 		return
 	}
 	if err := h.mgr.SetAcceptingPairingRequests(r.Context(), body.AcceptPairingRequests); err != nil {
-		h.logger.Error("federation: update settings", "err", err)
+		h.logger.Error("federation: update settings", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to update settings")
 		return
 	}
@@ -567,7 +567,7 @@ func (h *FederationAdminHandler) SendPairingRequest(w http.ResponseWriter, r *ht
 			status, code = http.StatusConflict, "PEER_ALREADY_PAIRED"
 			msg = "this peer is already paired or has a pending request"
 		}
-		h.logger.Warn("federation: send pairing request failed", "base_url", body.BaseURL, "err", err)
+		h.logger.Warn("federation: send pairing request failed", "base_url", body.BaseURL, "error", err)
 		respondError(w, r, status, code, msg)
 		return
 	}
@@ -579,7 +579,7 @@ func (h *FederationAdminHandler) SendPairingRequest(w http.ResponseWriter, r *ht
 func (h *FederationAdminHandler) ListPairingRequests(w http.ResponseWriter, r *http.Request) {
 	reqs, err := h.mgr.ListPendingRequests(r.Context(), 100)
 	if err != nil {
-		h.logger.Error("federation: list pairing requests", "err", err)
+		h.logger.Error("federation: list pairing requests", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list pairing requests")
 		return
 	}
@@ -608,7 +608,7 @@ func (h *FederationAdminHandler) AcceptPairingRequest(w http.ResponseWriter, r *
 			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or expired")
 			return
 		}
-		h.logger.Warn("federation: accept pairing request", "id", id, "err", err)
+		h.logger.Warn("federation: accept pairing request", "request_id", id, "error", err)
 		respondError(w, r, http.StatusBadRequest, "ACCEPT_FAILED", "could not accept pairing request")
 		return
 	}
@@ -631,7 +631,7 @@ func (h *FederationAdminHandler) DeclinePairingRequest(w http.ResponseWriter, r 
 			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or expired")
 			return
 		}
-		h.logger.Warn("federation: decline pairing request", "id", id, "err", err)
+		h.logger.Warn("federation: decline pairing request", "request_id", id, "error", err)
 		respondError(w, r, http.StatusBadRequest, "DECLINE_FAILED", "could not decline pairing request")
 		return
 	}
@@ -655,7 +655,7 @@ func (h *FederationAdminHandler) CancelPairingRequest(w http.ResponseWriter, r *
 			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found")
 			return
 		}
-		h.logger.Warn("federation: cancel pairing request", "id", id, "err", err)
+		h.logger.Warn("federation: cancel pairing request", "request_id", id, "error", err)
 		respondError(w, r, http.StatusBadRequest, "CANCEL_FAILED", "could not cancel pairing request")
 		return
 	}
@@ -679,7 +679,7 @@ func (h *FederationAdminHandler) RefreshPeer(w http.ResponseWriter, r *http.Requ
 		// Detalle al log; al cliente solo mensaje generico para no
 		// filtrar IPs o status codes del peer (mismo patron que en
 		// ProbePeer/AcceptInvite — audit olor F16-6).
-		h.logger.Warn("federation: refresh peer branding", "peer_id", id, "err", err)
+		h.logger.Warn("federation: refresh peer branding", "peer_id", id, "error", err)
 		respondError(w, r, http.StatusBadGateway, "PEER_REFRESH_FAILED",
 			"could not reach the peer to refresh its branding")
 		return
@@ -698,7 +698,7 @@ func (h *FederationAdminHandler) RevokePeer(w http.ResponseWriter, r *http.Reque
 			respondError(w, r, http.StatusNotFound, "PEER_NOT_FOUND", "peer not found")
 			return
 		}
-		h.logger.Error("federation: revoke peer", "err", err)
+		h.logger.Error("federation: revoke peer", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to revoke peer")
 		return
 	}
