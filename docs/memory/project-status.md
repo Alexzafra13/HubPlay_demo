@@ -74,13 +74,16 @@ medium restantes del F16. Resumen:
 |---|---|---|
 | Alta | 1/1 (F16-1 path traversal) | 0 |
 | Medium | 8/8 | 0 ✅ |
-| Bajas | 3/10 | 7 (F16-10/11/13/14/17/18/19 — todos non-critical o decisiones deliberadas) |
+| Bajas | 10/10 ✅ | 0 |
+
+**F16 cerrado al 100%** — verificado sesión 2026-05-27. Las "7 bajas pendientes" listadas en sesiones previas ya estaban cubiertas: #440 cerró F16-10 (VacuumInto helper), F16-14 (código cambió, audit outdated) y F16-17 (cosmético); el código tiene comentarios `// F16-11/13/18/19 (audit): …` que documentan las decisiones deliberadas.
 
 ### Pendientes priorizadas (próximas sesiones)
 
-- **F16 bajas restantes** (~1h) — 7 fixes pequeños. Algunos (F16-11, F16-19) son decisiones deliberadas que sólo necesitan comentario explicativo.
-- **F15-2..12** — time.Now no inyectado, t.Parallel infrautilizado.
-- **VideoPlayer 3ª ola** — 787 LoC.
+- **F15-2 db repos** — `time.Now()` en queries INSERT/UPDATE de los repos (voluminoso pero homogéneo, ~2-3h).
+- **F15-3..6, F15-9..12** — sin desglosar todavía.
+- **F14-7-a sub-loggers `.With()`** — 145 sites mecánicos (~2h).
+- **VideoPlayer 3ª ola** — 787 LoC, frontend.
 - **LL Transcoder stateless** — sesión grande propia.
 - **Distribución** — installer Windows firmado, auto-update, TLS LAN.
 
