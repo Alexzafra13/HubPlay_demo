@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -75,7 +74,7 @@ func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *librarymodel.Library
 	cache.mu.Unlock()
 
 	id := uuid.NewString()
-	now := time.Now()
+	now := s.clock.Now()
 	item := &librarymodel.Item{
 		ID:          id,
 		LibraryID:   lib.ID,
@@ -129,7 +128,7 @@ func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *librarymodel.Library
 	cache.mu.Unlock()
 
 	id := uuid.NewString()
-	now := time.Now()
+	now := s.clock.Now()
 	title := fmt.Sprintf("Season %d", seasonNum)
 	sn := seasonNum
 	item := &librarymodel.Item{

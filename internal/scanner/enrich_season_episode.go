@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"hubplay/internal/imaging"
 	librarymodel "hubplay/internal/library/model"
@@ -72,7 +71,7 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 		item.PremiereDate = meta.PremiereDate
 		item.Year = meta.PremiereDate.Year()
 	}
-	item.UpdatedAt = time.Now()
+	item.UpdatedAt = s.clock.Now()
 	if err := s.items.Update(ctx, item); err != nil {
 		log.Warn("update season with metadata", "error", err)
 	}
@@ -114,7 +113,7 @@ func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterU
 		Blurhash:           ing.Blurhash,
 		Provider:           "tmdb",
 		IsPrimary:          true,
-		AddedAt:            time.Now(),
+		AddedAt:            s.clock.Now(),
 		DominantColor:      ing.DominantColor,
 		DominantColorMuted: ing.DominantColorMuted,
 	}
@@ -186,7 +185,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 	if item.DurationTicks == 0 && meta.RuntimeMinutes > 0 {
 		item.DurationTicks = int64(meta.RuntimeMinutes) * 60 * 10_000_000
 	}
-	item.UpdatedAt = time.Now()
+	item.UpdatedAt = s.clock.Now()
 	if err := s.items.Update(ctx, item); err != nil {
 		log.Warn("update episode with metadata", "error", err)
 	}
@@ -231,7 +230,7 @@ func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillUR
 		Blurhash:           ing.Blurhash,
 		Provider:           "tmdb",
 		IsPrimary:          true,
-		AddedAt:            time.Now(),
+		AddedAt:            s.clock.Now(),
 		DominantColor:      ing.DominantColor,
 		DominantColorMuted: ing.DominantColorMuted,
 	}

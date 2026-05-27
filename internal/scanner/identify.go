@@ -15,7 +15,6 @@ package scanner
 import (
 	"context"
 	"fmt"
-	"time"
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
@@ -163,7 +162,7 @@ func (s *Scanner) UpdateItemMetadata(ctx context.Context, itemID string, patch I
 		touchedItems = true
 	}
 	if touchedItems {
-		item.UpdatedAt = time.Now()
+		item.UpdatedAt = s.clock.Now()
 		if err := s.items.Update(ctx, item); err != nil {
 			return nil, fmt.Errorf("scanner: update item %s: %w", itemID, err)
 		}

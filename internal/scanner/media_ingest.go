@@ -16,7 +16,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"time"
 
 	"hubplay/internal/imaging"
 	librarymodel "hubplay/internal/library/model"
@@ -80,7 +79,7 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 			Blurhash:           ing.Blurhash,
 			Provider:           providerName,
 			IsPrimary:          true,
-			AddedAt:            time.Now(),
+			AddedAt:            s.clock.Now(),
 			DominantColor:      ing.DominantColor,
 			DominantColorMuted: ing.DominantColorMuted,
 		}

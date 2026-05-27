@@ -20,7 +20,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
@@ -235,7 +234,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, me
 	if meta.PremiereDate != nil {
 		item.PremiereDate = meta.PremiereDate
 	}
-	item.UpdatedAt = time.Now()
+	item.UpdatedAt = s.clock.Now()
 	if err := s.items.Update(ctx, item); err != nil {
 		log.Warn("failed to update item with metadata", "error", err)
 	}
