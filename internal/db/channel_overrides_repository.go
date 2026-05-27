@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
@@ -36,7 +35,7 @@ func (r *ChannelOverrideRepository) useSQLite() bool { return r.sq != nil }
 // Upsert records an override. Idempotent: re-running with the same
 // fields just bumps updated_at.
 func (r *ChannelOverrideRepository) Upsert(ctx context.Context, o *iptvmodel.ChannelOverride) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if o.CreatedAt.IsZero() {
 		o.CreatedAt = now
 	}

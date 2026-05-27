@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
@@ -36,7 +35,7 @@ func (r *ChannelFavoritesRepository) useSQLite() bool { return r.sq != nil }
 // Add marks a channel as favorited by a user. Idempotent: the underlying
 // query uses `ON CONFLICT DO NOTHING`, so calling twice is safe.
 func (r *ChannelFavoritesRepository) Add(ctx context.Context, userID, channelID string) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	var err error
 	if r.useSQLite() {
 		err = r.sq.AddChannelFavorite(ctx, sqlc.AddChannelFavoriteParams{

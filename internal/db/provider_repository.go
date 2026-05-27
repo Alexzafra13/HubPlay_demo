@@ -50,7 +50,7 @@ func (r *ProviderRepository) useSQLite() bool { return r.sq != nil }
 // updated_at are stamped with `now` on insert; only updated_at is touched on
 // conflict (the SQL's DO UPDATE set) — created_at of existing rows is preserved.
 func (r *ProviderRepository) Upsert(ctx context.Context, p *ProviderConfig) error {
-	now := time.Now()
+	now := timeNow()
 	var err error
 	if r.useSQLite() {
 		err = r.sq.UpsertProvider(ctx, sqlc.UpsertProviderParams{
@@ -167,13 +167,13 @@ func (r *ProviderRepository) SetStatus(ctx context.Context, name, status string)
 	if r.useSQLite() {
 		n, err = r.sq.SetProviderStatus(ctx, sqlc.SetProviderStatusParams{
 			Status:    status,
-			UpdatedAt: time.Now(),
+			UpdatedAt: timeNow(),
 			Name:      name,
 		})
 	} else {
 		n, err = r.pq.SetProviderStatus(ctx, sqlc_pg.SetProviderStatusParams{
 			Status:    status,
-			UpdatedAt: time.Now(),
+			UpdatedAt: timeNow(),
 			Name:      name,
 		})
 	}

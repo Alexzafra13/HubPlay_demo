@@ -113,7 +113,7 @@ func (r *EPGProgramRepository) ReplaceForChannel(ctx context.Context, channelID 
 // Reads via raw SQL (not sqlc) so the coerce helper can rescue rows
 // persisted by older builds in the Go-stringer time format.
 func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error) {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := rewritePlaceholders(r.driver(),
 		`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(category,''),
 		        COALESCE(icon_url,''), start_time, end_time

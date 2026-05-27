@@ -334,7 +334,7 @@ const UnhealthyThreshold = 3
 // one good response is enough to clear prior failures, so a channel
 // that was flaky yesterday comes back automatically.
 func (r *ChannelRepository) RecordProbeSuccess(ctx context.Context, channelID string) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := rewritePlaceholders(r.driver(),
 		`UPDATE channels SET
 		    last_probe_at        = ?,
@@ -353,7 +353,7 @@ func (r *ChannelRepository) RecordProbeSuccess(ctx context.Context, channelID st
 // atomic UPDATE stops two concurrent failing viewers from racing on
 // read-modify-write semantics — each failure gets its own +1.
 func (r *ChannelRepository) RecordProbeFailure(ctx context.Context, channelID, errMsg string) error {
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if len([]rune(errMsg)) > probeErrorLimit {
 		errMsg = string([]rune(errMsg)[:probeErrorLimit])
 	}

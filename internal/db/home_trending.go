@@ -48,7 +48,7 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 	if limit <= 0 || limit > 50 {
 		limit = 12
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(windowDays) * 24 * time.Hour)
+	cutoff := timeNow().UTC().Add(-time.Duration(windowDays) * 24 * time.Hour)
 
 	rows, err := r.db.QueryContext(ctx, r.trendingSQL, cutoff, userID, limit)
 	if err != nil {

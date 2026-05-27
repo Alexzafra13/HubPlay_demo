@@ -166,7 +166,7 @@ func (r *IPTVScheduleRepository) Upsert(ctx context.Context, job *iptvmodel.IPTV
 	if job.Kind != IPTVJobKindM3URefresh && job.Kind != IPTVJobKindEPGRefresh {
 		return fmt.Errorf("invalid job kind %q", job.Kind)
 	}
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	if job.CreatedAt.IsZero() {
 		job.CreatedAt = now
 	}

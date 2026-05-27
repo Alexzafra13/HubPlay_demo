@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	librarymodel "hubplay/internal/library/model"
 )
@@ -32,7 +31,7 @@ func (r *CollectionImageOverrideRepository) UpsertURL(ctx context.Context, colle
 	if imageURL == "" {
 		return fmt.Errorf("collection_image_overrides: url required")
 	}
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := RewritePlaceholders(r.driver, `
 		INSERT INTO collection_image_overrides (collection_id, image_type, url, file, created_at, updated_at)
 		VALUES (?, ?, ?, '', ?, ?)
@@ -53,7 +52,7 @@ func (r *CollectionImageOverrideRepository) UpsertFile(ctx context.Context, coll
 	if basename == "" {
 		return fmt.Errorf("collection_image_overrides: file required")
 	}
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 	query := RewritePlaceholders(r.driver, `
 		INSERT INTO collection_image_overrides (collection_id, image_type, url, file, created_at, updated_at)
 		VALUES (?, ?, '', ?, ?, ?)

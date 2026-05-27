@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 )
 
 // HomeLiveNowChannel is one entry in the "live now" rail.
@@ -38,7 +37,7 @@ func (r *HomeRepository) LiveNow(ctx context.Context, userID string, limit int) 
 	if limit <= 0 || limit > 30 {
 		limit = 5
 	}
-	now := time.Now().UTC()
+	now := timeNow().UTC()
 
 	rows, err := r.db.QueryContext(ctx, r.liveNowSQL, now, now, userID, UnhealthyThreshold, userID, limit)
 	if err != nil {

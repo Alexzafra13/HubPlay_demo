@@ -213,3 +213,35 @@ func TestAuditLogRepo_DistinctEventTypes(t *testing.T) {
 		t.Errorf("order broken: %v", types)
 	}
 }
+
+// TestAuditLogRepo_Insert_UsesSeamTimeNow demuestra el uso del
+// package-level seam timeNow: si el caller no rellena CreatedAt
+// (Insert lo resuelve internamente con `timeNow().UTC()`), el
+// timestamp persistido debe ser el que devuelva el reloj swappable.
+//
+// Sirve también de "smoke test" del seam — si alguien rompe el
+// patrón sustituyendo timeNow() por time.Now() en algún repo, este
+// test fallará.
+func TestAuditLogRepo_Insert_UsesSeamTimeNow(t *testing.T) {
+	frozen := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
+	db.SetTimeNowForTest(t, func() time.Time { return frozen })
+
+	repo := newAuditRepo(t)
+	// CreatedAt cero → Insert debe rellenarlo con el reloj swappable.
+	insertEvt(t, repo, db.AuditLogRow{
+		ID: "seam-1", ActorUserID: "u-1", EventType: "test.seam",
+	})
+
+	rows, _, err := repo.Query(context.Background(), db.AuditQuery{ActorUserID: "u-1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	got := rows[0].CreatedAt.UTC().Truncate(time.Second)
+	want := frozen.UTC().Truncate(time.Second)
+	if !got.Equal(want) {
+		t.Errorf("CreatedAt: got %v, want %v (seam not applied)", got, want)
+	}
+}

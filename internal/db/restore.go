@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // PendingRestoreFilename is the well-known sibling of the live DB
@@ -65,7 +64,7 @@ func ApplyPendingRestoreIfAny(livePath string, logger *slog.Logger) error {
 	// don't overwrite the original. We also move WAL / SHM siblings
 	// when present — leaving them around would have SQLite re-apply
 	// the old WAL onto the freshly-restored bytes on first open.
-	stamp := time.Now().UTC().Format("20060102-150405")
+	stamp := timeNow().UTC().Format("20060102-150405")
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		src := livePath + suffix
 		if _, err := os.Stat(src); err != nil {

@@ -43,13 +43,13 @@ type AuditLogRow struct {
 // Insert append a la tabla. Append-only: no se actualizan ni borran
 // filas individuales (sólo el sweep por retención).
 //
-// Si CreatedAt está zero, se rellena con time.Now().UTC() — el caller
+// Si CreatedAt está zero, se rellena con timeNow().UTC() — el caller
 // puede pasarlo cuando ya tiene el momento exacto del evento
 // (LoginHandler tras autenticar) o dejarlo a 0 para que el repo lo
 // resuelva.
 func (r *AuditLogRepository) Insert(ctx context.Context, row AuditLogRow) error {
 	if row.CreatedAt.IsZero() {
-		row.CreatedAt = time.Now().UTC()
+		row.CreatedAt = timeNow().UTC()
 	}
 	q := rewritePlaceholders(r.driver, `
 		INSERT INTO audit_log (
