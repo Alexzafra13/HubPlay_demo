@@ -222,7 +222,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.
 		return nil, fmt.Errorf("creating library: %w", err)
 	}
 
-	s.logger.Info("library created", "id", lib.ID, "name", lib.Name, "type", lib.ContentType)
+	s.logger.Info("library created", "library_id", lib.ID, "name", lib.Name, "type", lib.ContentType)
 
 	// Auto-scan the new library (like Jellyfin does on library creation).
 	// Inherits bgCtx so Shutdown can cancel in-flight scans; the WaitGroup
@@ -288,7 +288,7 @@ func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, re
 	}
 
 	s.logger.Info("personal iptv library created",
-		"id", lib.ID, "name", lib.Name, "owner_user_id", ownerUserID)
+		"library_id", lib.ID, "name", lib.Name, "owner_user_id", ownerUserID)
 	return lib, nil
 }
 
@@ -374,7 +374,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*li
 		return nil, fmt.Errorf("updating library: %w", err)
 	}
 
-	s.logger.Info("library updated", "id", id, "name", lib.Name)
+	s.logger.Info("library updated", "library_id", id, "name", lib.Name)
 	return lib, nil
 }
 
@@ -382,7 +382,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err := s.libraries.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting library: %w", err)
 	}
-	s.logger.Info("library deleted", "id", id)
+	s.logger.Info("library deleted", "library_id", id)
 	return nil
 }
 
@@ -465,7 +465,7 @@ func (s *Service) ScanAll(ctx context.Context) {
 			continue
 		}
 		if err := s.Scan(ctx, lib.ID); err != nil {
-			s.logger.Warn("scan-all: skipping library", "id", lib.ID, "name", lib.Name, "error", err)
+			s.logger.Warn("scan-all: skipping library", "library_id", lib.ID, "name", lib.Name, "error", err)
 		}
 	}
 }

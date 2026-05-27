@@ -472,7 +472,10 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 	}
 
 	if !h.isUnderImageDir(localPath) {
-		h.logger.Warn("pathmap points outside imageDir — ignoring", "id", imageID, "path", localPath)
+		// Debug y no Warn: ServeImage es hot-path (cada miniatura del grid es
+		// un GET); si una entrada del pathmap está corrupta, generaría Warn
+		// en cada request al mismo id.
+		h.logger.Debug("pathmap points outside imageDir — ignoring", "id", imageID, "path", localPath)
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image file not found")
 		return
 	}
@@ -505,7 +508,8 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 			thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_w%d%s", imageID, maxWidth, filepath.Ext(localPath)))
 			if !h.isUnderImageDir(thumbPath) {
 				// imageID was UUID-valid so this should not happen, but be safe.
-				h.logger.Warn("thumbnail path escaped imageDir", "id", imageID)
+				// Debug por la misma razón que el pathmap check de arriba (hot-path).
+				h.logger.Debug("thumbnail path escaped imageDir", "id", imageID)
 				http.ServeFile(w, r, localPath)
 				return
 			}
@@ -513,7 +517,10 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 			if _, err := os.Stat(thumbPath); err != nil {
 				// Generate the thumbnail.
 				if genErr := imaging.GenerateThumbnail(localPath, thumbPath, maxWidth); genErr != nil {
-					h.logger.Warn("failed to generate thumbnail, serving original", "error", genErr)
+					// Debug: si el resizer falla persistente generaría un Warn por
+					// GET de miniatura → saturación. El fallback a original cubre.
+					h.logger.Debug("failed to generate thumbnail, serving original",
+						"id", imageID, "width", maxWidth, "error", genErr)
 					http.ServeFile(w, r, localPath)
 					return
 				}

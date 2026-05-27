@@ -99,7 +99,9 @@ func (h *SetupHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	userCount, err := h.users.Count(r.Context())
 	if err != nil {
-		h.logger.Warn("setup status: failed to count users", "error", err)
+		// Debug: esperado en el primer arranque (DB aún migrando o setup
+		// wizard polleando el endpoint antes de que esté lista).
+		h.logger.Debug("setup status: failed to count users", "error", err)
 	}
 
 	if userCount > 0 {
@@ -107,7 +109,7 @@ func (h *SetupHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 		libs, err := h.libs.List(r.Context())
 		if err != nil {
-			h.logger.Warn("setup status: failed to list libraries", "error", err)
+			h.logger.Debug("setup status: failed to list libraries", "error", err)
 		}
 
 		if len(libs) > 0 {

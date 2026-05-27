@@ -452,7 +452,10 @@ func (w *FSWatcher) kickDebounce(ctx context.Context, libID string) {
 			}
 			log.Warn("watcher-triggered scan failed", "error", err)
 		} else {
-			log.Info("watcher-triggered scan")
+			// Debug: un fichero copiado al library dir = un Info; en una
+			// importación masiva (centenares de ficheros) satura. El
+			// scheduler ya emite "scheduled scan due" para el lifecycle.
+			log.Debug("watcher-triggered scan")
 		}
 	})
 }

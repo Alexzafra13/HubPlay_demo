@@ -92,8 +92,14 @@ func (s *Scanner) IdentifyAndApply(ctx context.Context, itemID, externalID strin
 	// estar apuntando al match equivocado y la metadata textual (overview,
 	// género, reparto) la regenera applyMetadata completa. Si el borrado
 	// falla no es bloqueante — el upsert posterior sobrescribe la fila.
-	_ = s.images.DeleteByItem(ctx, item.ID)
-	_ = s.metadata.Delete(ctx, item.ID)
+	// Debug por si en producción aparece corrupción inexplicable: poder
+	// rastrear si el delete fallaba silenciosamente.
+	if err := s.images.DeleteByItem(ctx, item.ID); err != nil {
+		s.logger.Debug("identify: delete previous images failed", "item_id", item.ID, "error", err)
+	}
+	if err := s.metadata.Delete(ctx, item.ID); err != nil {
+		s.logger.Debug("identify: delete previous metadata failed", "item_id", item.ID, "error", err)
+	}
 
 	// Aplica el título del nuevo match como Title también — sin esto el
 	// item conserva el nombre crudo del fichero ("Pelicula.2024.BRRip")
@@ -229,8 +235,12 @@ func (s *Scanner) RefreshItemMetadata(ctx context.Context, itemID string) error 
 	// Limpia el estado previo (igual que RefreshMetadata global) — un
 	// "Actualizar metadatos" implica que lo que había podía estar
 	// estale; mejor partir limpio que mergear incoherencias.
-	_ = s.images.DeleteByItem(ctx, item.ID)
-	_ = s.metadata.Delete(ctx, item.ID)
+	if err := s.images.DeleteByItem(ctx, item.ID); err != nil {
+		s.logger.Debug("refresh-metadata: delete previous images failed", "item_id", item.ID, "error", err)
+	}
+	if err := s.metadata.Delete(ctx, item.ID); err != nil {
+		s.logger.Debug("refresh-metadata: delete previous metadata failed", "item_id", item.ID, "error", err)
+	}
 
 	switch item.Type {
 	case "episode":

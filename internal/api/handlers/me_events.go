@@ -149,7 +149,8 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	h.logger.Info("user SSE client connected", "user_id", userID, "remote_addr", ClientIP(r))
+	// Debug: ver events.go — SSE reconecta seguido.
+	h.logger.Debug("user SSE client connected", "user_id", userID, "remote_addr", ClientIP(r))
 	fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -162,7 +163,7 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if d := sseDrops.Load(); d > 0 {
 				h.logger.Warn("user SSE events dropped (slow client)", "user_id", userID, "dropped", d)
 			}
-			h.logger.Info("user SSE client disconnected", "user_id", userID, "remote_addr", ClientIP(r))
+			h.logger.Debug("user SSE client disconnected", "user_id", userID, "remote_addr", ClientIP(r))
 			return
 
 		case <-keepalive.C:

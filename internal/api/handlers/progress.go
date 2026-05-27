@@ -317,10 +317,10 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 	}
 	imageMap, err := h.images.GetPrimaryURLs(r.Context(), allIDs)
 	if err != nil {
-		// Fail-soft: el rail sigue funcionando sin imágenes (cards sin
-		// poster). El log permite diagnosticar si las imágenes dejan de
-		// resolverse en producción.
-		h.logger.Warn("continue watching: GetPrimaryURLs", "error", err)
+		// Debug y no Warn: la home se pollea al abrir y al navegar;
+		// si las imágenes fallan persistente, generaríamos Warn por
+		// request → spam. Fail-soft cubre (cards sin poster).
+		h.logger.Debug("continue watching: GetPrimaryURLs", "error", err)
 	}
 
 	result := make([]map[string]any, 0, len(items))
@@ -466,8 +466,8 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	}
 	favImageMap, err := h.images.GetPrimaryURLs(r.Context(), favIDs)
 	if err != nil {
-		// Fail-soft: ver Favorites — log para diagnóstico operacional.
-		h.logger.Warn("favorites: GetPrimaryURLs", "error", err)
+		// Debug: mismo razonamiento que continue watching — endpoint polleado.
+		h.logger.Debug("favorites: GetPrimaryURLs", "error", err)
 	}
 
 	result := make([]map[string]any, 0, len(items))

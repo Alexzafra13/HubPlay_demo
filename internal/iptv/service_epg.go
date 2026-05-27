@@ -121,7 +121,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 				"url", src.URL, "error", fetchErr)
 			if src.ID != "" {
 				if rerr := s.epgSources.RecordRefresh(ctx, src.ID, "error", fetchErr.Error(), 0, 0); rerr != nil {
-					s.logger.Error("record source error", "source", src.ID, "error", rerr)
+					log.Error("record source error", "source", src.ID, "error", rerr)
 				}
 			}
 			continue
@@ -137,7 +137,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		}
 		if src.ID != "" {
 			if rerr := s.epgSources.RecordRefresh(ctx, src.ID, "ok", "", progCount, matched); rerr != nil {
-				s.logger.Error("record source ok", "source", src.ID, "error", rerr)
+				log.Error("record source ok", "source", src.ID, "error", rerr)
 			}
 		}
 		log.Info("EPG source loaded",
@@ -156,7 +156,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	matchedByLib := make(map[string]int)
 	for channelID, programs := range ownedByChannel {
 		if err := s.epgPrograms.ReplaceForChannel(ctx, channelID, programs); err != nil {
-			s.logger.Error("replace EPG programs", "channel", channelID, "error", err)
+			log.Error("replace EPG programs", "channel", channelID, "error", err)
 			continue
 		}
 		totalPrograms += len(programs)

@@ -123,7 +123,9 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	h.logger.Info("SSE client connected", "remote_addr", ClientIP(r))
+	// Debug: red móvil reconecta seguido (cada cambio de wifi/4G). Un Info
+	// por connect/disconnect satura los logs sin aportar a operación.
+	h.logger.Debug("SSE client connected", "remote_addr", ClientIP(r))
 
 	// Initial keepalive comment doubles as a "connection ready"
 	// signal for the browser EventSource: anything we write before
@@ -140,7 +142,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if d := sseDrops.Load(); d > 0 {
 				h.logger.Warn("SSE events dropped (slow client)", "remote_addr", ClientIP(r), "dropped", d)
 			}
-			h.logger.Info("SSE client disconnected", "remote_addr", ClientIP(r))
+			h.logger.Debug("SSE client disconnected", "remote_addr", ClientIP(r))
 			return
 
 		case <-keepalive.C:

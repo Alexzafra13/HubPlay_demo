@@ -259,7 +259,11 @@ func (m *searchMetadataMgr) SearchMetadata(ctx context.Context, q provider.Searc
 
 // ─── GetMetadata ────────────────────────────────────────────────────────────
 
-func TestProviderHandler_GetMetadata_Error_404(t *testing.T) {
+// Renombrado a _502: la sesión de auditoría de logs cambió el contrato.
+// Antes: fallo del provider → 404 + log Error (confuso, el operador no
+// distinguía "ID no existe" de "TMDb caído"). Ahora: 502 BadGateway +
+// log Warn (TMDb caído).
+func TestProviderHandler_GetMetadata_Error_502(t *testing.T) {
 	env := newProviderTestEnv(t)
 	mgr := &getMetadataMgr{fn: func(_ context.Context, _ string, _ provider.ItemType) (*provider.MetadataResult, error) {
 		return nil, errors.New("provider down")
@@ -270,8 +274,8 @@ func TestProviderHandler_GetMetadata_Error_404(t *testing.T) {
 	env.router = r
 
 	rr := env.do(http.MethodGet, "/api/v1/providers/metadata/42", "")
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status: %d", rr.Code)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status: got %d want 502", rr.Code)
 	}
 }
 

@@ -178,8 +178,15 @@ func (h *ProviderHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.manager.FetchMetadata(r.Context(), externalID, itemType)
 	if err != nil {
-		h.logger.Error("metadata fetch failed", "error", err)
-		respondAppError(w, r.Context(), domain.NewNotFound("metadata"))
+		// Warn (no Error) + 502 (no 404): TMDb caído o ID inexistente.
+		// Antes devolvía 404 + log Error → operador veía Error sin saber
+		// si era provider caído o ID genuinamente faltante. Ahora 502
+		// refleja que el upstream falló y Warn evita ruido si la red
+		// de TMDb tiembla intermitente.
+		h.logger.Warn("metadata fetch failed",
+			"external_id", externalID, "type", itemType, "error", err)
+		respondError(w, r, http.StatusBadGateway, "PROVIDER_UNAVAILABLE",
+			"metadata provider failed")
 		return
 	}
 

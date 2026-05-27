@@ -121,7 +121,10 @@ func (s *Scanner) enrichIfMissing(ctx context.Context, item *librarymodel.Item) 
 	if err == nil && len(imgs) > 0 {
 		return
 	}
-	s.logger.Info("re-enriching item missing metadata", "title", item.Title, "id", item.ID)
+	// Debug: se dispara por cada item sin imágenes en cada walk; en una
+	// biblioteca grande recién creada satura. El scan completo ya emite
+	// un Info por library con totales.
+	s.logger.Debug("re-enriching item missing metadata", "title", item.Title, "id", item.ID)
 	switch item.Type {
 	case "episode":
 		if item.SeasonNumber != nil && item.EpisodeNumber != nil && item.ParentID != "" {
@@ -163,6 +166,9 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 	if year == 0 {
 		year = item.Year
 	}
+	// Sub-logger con item_id + title: los 4 Debug de abajo repetían el
+	// title. Reduce ruido y permite filtrar logs por item completo.
+	log := s.logger.With("item_id", item.ID, "title", cleanTitle)
 
 	itemType := itemTypeForProvider(item.Type)
 
@@ -172,7 +178,7 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		ItemType: itemType,
 	})
 	if err != nil {
-		s.logger.Debug("TMDB search failed", "title", cleanTitle, "year", year, "error", err)
+		log.Debug("TMDB search failed", "year", year, "error", err)
 		return
 	}
 	// Fallback: muchos M3U / filenames traen el año entre paréntesis
@@ -187,11 +193,11 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		})
 		if retryErr == nil && len(retry) > 0 {
 			results = retry
-			s.logger.Debug("TMDB matched after year-less retry", "title", cleanTitle, "skipped_year", year)
+			log.Debug("TMDB matched after year-less retry", "skipped_year", year)
 		}
 	}
 	if len(results) == 0 {
-		s.logger.Debug("no TMDB results", "title", cleanTitle, "year", year)
+		log.Debug("no TMDB results", "year", year)
 		return
 	}
 
@@ -199,7 +205,7 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 
 	meta, err := s.providers.FetchMetadata(ctx, best.ExternalID, itemType)
 	if err != nil || meta == nil {
-		s.logger.Debug("TMDB metadata fetch failed", "id", best.ExternalID, "error", err)
+		log.Debug("TMDB metadata fetch failed", "external_id", best.ExternalID, "error", err)
 		return
 	}
 

@@ -89,7 +89,8 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 			continue
 		}
 		if err := s.pathmap.Write(imgID, ing.LocalPath); err != nil {
-			s.logger.Warn("scanner: pathmap write failed", "id", imgID, "error", err)
+			// Usa el `log` del entry con item_id capturado.
+			log.Warn("scanner: pathmap write failed", "image_id", imgID, "error", err)
 		}
 	}
 }
@@ -110,6 +111,7 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 	if s.people == nil || len(people) == 0 {
 		return
 	}
+	log := s.logger.With("item_id", itemID)
 
 	credits := make([]librarymodel.ItemPersonCredit, 0, len(people))
 	for _, p := range people {
@@ -118,7 +120,7 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 		}
 		personID, created, err := s.people.EnsureByName(ctx, p.Name, p.Role)
 		if err != nil {
-			s.logger.Warn("person upsert failed", "name", p.Name, "error", err)
+			log.Warn("person upsert failed", "name", p.Name, "error", err)
 			continue
 		}
 		// Descarga sólo para people recién creados con URL. IngestRemoteImage
@@ -127,10 +129,10 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 			dir := filepath.Join(s.imageDir, ".people", personID)
 			if ing, err := imaging.IngestRemoteImage(dir, "profile", p.ThumbURL, s.logger); err == nil {
 				if err := s.people.SetThumbPath(ctx, personID, ing.LocalPath); err != nil {
-					s.logger.Warn("person thumb path save failed", "id", personID, "error", err)
+					log.Warn("person thumb path save failed", "person_id", personID, "error", err)
 				}
 			} else {
-				s.logger.Debug("person thumb download failed", "name", p.Name, "url", p.ThumbURL, "error", err)
+				log.Debug("person thumb download failed", "name", p.Name, "url", p.ThumbURL, "error", err)
 			}
 		}
 		credits = append(credits, librarymodel.ItemPersonCredit{
@@ -144,6 +146,6 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 		return
 	}
 	if err := s.people.ReplaceItemPeople(ctx, itemID, credits); err != nil {
-		s.logger.Warn("replace item people failed", "item_id", itemID, "error", err)
+		log.Warn("replace item people failed", "error", err)
 	}
 }
