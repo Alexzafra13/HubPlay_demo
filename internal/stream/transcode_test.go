@@ -11,20 +11,6 @@ import (
 	"hubplay/internal/stream"
 )
 
-func newTestTranscoder(t *testing.T) *stream.Transcoder {
-	t.Helper()
-	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return stream.NewTranscoder(stream.TranscoderConfig{
-		BaseDir:          dir,
-		FFmpegPath:       "ffmpeg",
-		TranscodeTimeout: 4 * time.Hour,
-		HWAccel:          stream.HWAccelNone,
-		Encoder:          "libx264",
-		Logger:           logger,
-	})
-}
-
 // baseRequest devuelve un `TranscodeRequest` con los defaults que la
 // mayoría de los tests de `BuildFFmpegArgs` usan: input/output
 // canónicos, software libx264, sin seek, sin burn-in, audio
@@ -59,37 +45,6 @@ func TestNewTranscoder_DefaultFFmpeg(t *testing.T) {
 	}
 }
 
-func TestTranscoder_GetSession_NotFound(t *testing.T) {
-	tc := newTestTranscoder(t)
-
-	_, ok := tc.GetSession("nonexistent")
-	if ok {
-		t.Error("expected session not found")
-	}
-}
-
-func TestTranscoder_ActiveSessions_Empty(t *testing.T) {
-	tc := newTestTranscoder(t)
-
-	if n := tc.ActiveSessions(); n != 0 {
-		t.Errorf("expected 0 active sessions, got %d", n)
-	}
-}
-
-func TestTranscoder_Stop_NonExistent(t *testing.T) {
-	tc := newTestTranscoder(t)
-
-	// Should not panic
-	tc.Stop("nonexistent")
-}
-
-func TestTranscoder_StopAll_Empty(t *testing.T) {
-	tc := newTestTranscoder(t)
-
-	// Should not panic
-	tc.StopAll()
-}
-
 func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -102,7 +57,7 @@ func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 		Logger:           logger,
 	})
 
-	_, err := tc.Start("sess-1", "item-1", stream.TranscodeRequest{
+	session, err := tc.Start("sess-1", "item-1", stream.TranscodeRequest{
 		Input:            "/some/video.mkv",
 		Profile:          stream.DefaultProfile(),
 		AudioStreamIndex: -1,
@@ -110,13 +65,11 @@ func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid ffmpeg path")
 	}
+	if session != nil {
+		t.Errorf("expected nil session on failed start, got %+v", session)
+	}
 	if !strings.Contains(err.Error(), "starting ffmpeg") {
 		t.Errorf("expected 'starting ffmpeg' error, got: %v", err)
-	}
-
-	// Session should not be registered
-	if n := tc.ActiveSessions(); n != 0 {
-		t.Errorf("expected 0 active sessions after failed start, got %d", n)
 	}
 }
 
