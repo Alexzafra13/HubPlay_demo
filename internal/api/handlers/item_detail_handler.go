@@ -32,7 +32,7 @@ type ItemDetailHandler struct {
 	images      ImageRepository
 	metadata    MetadataRepository
 	userData    UserDataRepository
-	users       UserService
+	users       userProfileLookup
 	chapters    ChapterRepository
 	segments    EpisodeSegmentRepository
 	externalIDs ExternalIDsRepository
@@ -52,7 +52,7 @@ func newItemDetailHandler(
 	images ImageRepository,
 	metadata MetadataRepository,
 	userData UserDataRepository,
-	users UserService,
+	users userProfileLookup,
 	chapters ChapterRepository,
 	segments EpisodeSegmentRepository,
 	externalIDs ExternalIDsRepository,

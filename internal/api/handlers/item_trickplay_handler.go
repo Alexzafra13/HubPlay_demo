@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hubplay/internal/imaging"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // TrickplayHandler aísla la generación y serving de sprite-sheets de
@@ -20,8 +21,14 @@ import (
 // goroutines de generación en tests) que NO comparte con el resto de
 // ItemHandler — separarlo cierra la mitad de "trickplay state" del
 // olor P del audit 2026-05-14.
+// trickplayItemLookup es el contrato mínimo: buscar un item para
+// resolver su path en disco antes de generar el sprite.
+type trickplayItemLookup interface {
+	GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
+}
+
 type TrickplayHandler struct {
-	lib    LibraryService
+	lib    trickplayItemLookup
 	logger *slog.Logger
 	// trickplayDir is the root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
@@ -44,7 +51,7 @@ type TrickplayHandler struct {
 	trickplayBG sync.WaitGroup
 }
 
-func newTrickplayHandler(lib LibraryService, trickplayDir string, logger *slog.Logger) *TrickplayHandler {
+func newTrickplayHandler(lib trickplayItemLookup, trickplayDir string, logger *slog.Logger) *TrickplayHandler {
 	return &TrickplayHandler{
 		lib:          lib,
 		logger:       logger,

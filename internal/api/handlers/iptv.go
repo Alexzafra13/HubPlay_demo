@@ -63,7 +63,21 @@ type IPTVHandler struct {
 //     Functional but wasteful (N×404 per grid paint); the cache is
 //     constructed best-effort in main.go and only ends up nil if the
 //     cache directory can't be created.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, bus EventBusPublisher, logger *slog.Logger) *IPTVHandler {
+// iptvOps es la unión de las micro-interfaces de los 9 sub-handlers.
+// *iptv.Service la satisface.
+type iptvOps interface {
+	channelBrowseOps
+	playbackFailureReporter
+	epgManager
+	channelPersonaliser
+	adminChannelOrderManager
+	iptvAdminOps
+	channelHealthOps
+	channelFavoritesOps
+	channelLogoOps
+}
+
+func NewIPTVHandler(svc iptvOps, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, bus EventBusPublisher, logger *slog.Logger) *IPTVHandler {
 	lg := logger.With("module", "iptv-handler")
 	return &IPTVHandler{
 		iptvChannelHandler: &iptvChannelHandler{

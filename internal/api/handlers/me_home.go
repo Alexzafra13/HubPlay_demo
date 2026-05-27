@@ -50,7 +50,7 @@ type HomeHandler struct {
 	// recommended can be filtered for kid profiles. Optional — when
 	// nil the cap collapses to "" and AllowedRating returns true
 	// for everything.
-	users  UserService
+	users  userProfileLookup
 	logger *slog.Logger
 }
 
@@ -88,7 +88,7 @@ func NewHomeHandler(
 	items ItemRepository,
 	images ImageRepository,
 	metadata HomeMetadataRepo,
-	users UserService,
+	users userProfileLookup,
 	logger *slog.Logger,
 ) *HomeHandler {
 	return &HomeHandler{

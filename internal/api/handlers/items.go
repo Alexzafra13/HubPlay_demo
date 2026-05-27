@@ -43,11 +43,17 @@ type ItemHandler struct {
 	*MetadataHandler
 }
 
-// NewItemHandler construye el facade + cada uno de los 5 sub-handlers
-// con sus deps específicas. Firma preservada del pre-split — los 14
-// args llegan, se distribuyen a los newXxxHandler constructors según
-// quién necesita qué.
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, identifier MetadataIdentifier, trickplayDir string, audit AuditEmitter, logger *slog.Logger) *ItemHandler {
+// itemLibrary es la unión de las micro-interfaces que los sub-handlers
+// del item facade necesitan. *library.Service la satisface.
+type itemLibrary interface {
+	itemDetailFetcher
+	itemSearcher
+	itemGetter
+	trickplayItemLookup
+}
+
+// NewItemHandler construye el facade + cada uno de los 5 sub-handlers.
+func NewItemHandler(lib itemLibrary, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users userProfileLookup, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, identifier MetadataIdentifier, trickplayDir string, audit AuditEmitter, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		ItemDetailHandler:      newItemDetailHandler(lib, images, metadata, userData, users, chapters, segments, externalIDs, people, collections, identifier, logger),
 		TrickplayHandler:       newTrickplayHandler(lib, trickplayDir, logger),

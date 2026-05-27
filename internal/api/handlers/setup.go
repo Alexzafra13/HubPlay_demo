@@ -27,12 +27,18 @@ type setupLibraryOps interface {
 	Create(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error)
 }
 
+// setupUserCounter es el contrato mínimo que el wizard necesita del
+// user service: contar usuarios para decidir si mostrar el wizard.
+type setupUserCounter interface {
+	Count(ctx context.Context) (int, error)
+}
+
 type SetupHandler struct {
 	setup     SetupService
 	dbSaver   SetupDatabaseSaver
 	auth      AuthService
 	libs      setupLibraryOps
-	users     UserService
+	users     setupUserCounter
 	providers ProviderRepository
 	config    *config.Config
 	restart   *config.RestartRequester
@@ -48,7 +54,7 @@ type SetupHandlerConfig struct {
 	DBSaver   SetupDatabaseSaver
 	Auth      AuthService
 	Libraries setupLibraryOps
-	Users     UserService
+	Users     setupUserCounter
 	Providers ProviderRepository
 	Config    *config.Config
 	Restart   *config.RestartRequester

@@ -250,7 +250,7 @@ func (r *libFakeMetadataRepo) GetMetadataBatch(_ context.Context, ids []string) 
 
 // Compile-time checks.
 var (
-	_ LibraryService     = (*libFakeService)(nil)
+	_ libraryOps = (*libFakeService)(nil)
 	_ MetadataRepository = (*libFakeMetadataRepo)(nil)
 )
 

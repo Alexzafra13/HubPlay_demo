@@ -6,15 +6,12 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
-	iptvmodel "hubplay/internal/iptv/model"
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/iptv"
-	"hubplay/internal/library"
 	"hubplay/internal/provider"
-	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 )
@@ -65,54 +62,6 @@ type UserService interface {
 	EnsureOwner(ctx context.Context, userID string) (bool, error)
 }
 
-// ─── Library service ────────────────────────────────────────────────────────
-
-// LibraryService defines library and item operations needed by handlers.
-type LibraryService interface {
-	Create(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error)
-	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
-	List(ctx context.Context) ([]*librarymodel.Library, error)
-	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
-	Update(ctx context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error)
-	Delete(ctx context.Context, id string) error
-	Scan(ctx context.Context, id string, refreshMetadata ...bool) error
-	ScanSync(ctx context.Context, id string) (*scanner.ScanResult, error)
-	IsScanning(id string) bool
-	ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
-	GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
-	GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error)
-	// GetItemChildCounts returns how many direct children each parent
-	// id has in one round-trip. Used by the Children handler to inject
-	// `episode_count` into season summaries.
-	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
-	GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
-	GetItemImages(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
-	LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*librarymodel.Item, error)
-	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error)
-	ItemCount(ctx context.Context, libraryID string) (int, error)
-	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
-	// GrantAccess / RevokeAccess / ListAccessByUser / ReplaceAccess
-	// power the admin user-libraries matrix. The userID MUST be a
-	// top-level user (ADR-014): library_access never points at a
-	// profile, so the handler resolves the row to its parent before
-	// reaching here.
-	GrantAccess(ctx context.Context, userID, libraryID string) error
-	RevokeAccess(ctx context.Context, userID, libraryID string) error
-	ListAccessByUser(ctx context.Context, userID string) ([]string, error)
-	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
-	// CreatePersonalIPTV creates a livetv library + a grant for the
-	// owner in one tx. Powers the admin "add personal IPTV list to
-	// user X" shortcut so the operator can skip the two-navigation
-	// dance of creating a library and then ticking a checkbox.
-	CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
-	// ListGenres returns the genre vocabulary across the catalogue,
-	// optionally scoped by item type ("movie", "series", or "" for the
-	// union). Used by the /movies and /series filter panel so the
-	// available chips reflect the entire library, not just the loaded
-	// page.
-	ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error)
-}
-
 // LibraryAccessService is the minimal surface the IPTV handler uses to gate
 // channel/EPG endpoints on per-library ACLs. Defined separately so tests can
 // fake just the one method without pulling in the fat LibraryService mock.
@@ -138,125 +87,6 @@ type StreamManagerService interface {
 	// during ABR + audio-track switches.
 	StopSessionsByItem(userID, itemID string) int
 	ActiveSessions() int
-}
-
-// ─── IPTV service ───────────────────────────────────────────────────────────
-
-// IPTVService defines IPTV operations needed by handlers.
-type IPTVService interface {
-	GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
-	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
-	GetGroups(ctx context.Context, libraryID string) ([]string, error)
-	GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error)
-	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error)
-	NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error)
-	RefreshM3U(ctx context.Context, libraryID string) (int, error)
-	// TryAcquireRefresh + RunRefreshM3U + PublishRefreshFailed split
-	// the M3U refresh so the HTTP handler can return 202 immediately
-	// and run the actual import in a goroutine that survives client
-	// disconnect / nginx proxy_read_timeout. See iptv_admin.go.
-	TryAcquireRefresh(libraryID string) (func(), error)
-	RunRefreshM3U(ctx context.Context, libraryID string) (int, error)
-	PublishRefreshFailed(libraryID string, err error)
-	// SpawnBackground lanza una goroutine cuyo ctx (1er argumento de
-	// fn) se cancela en Service.Shutdown y se contabiliza en el WG
-	// interno. Los handlers iptv_admin lo usan para no perder writes
-	// si el shutdown llega durante un refresh async (audit olores
-	// DD + GGGG). El ctx que recibe fn ya está atado al lifecycle
-	// del service — los callers pueden envolverlo con WithTimeout.
-	SpawnBackground(fn func(ctx context.Context))
-	RefreshEPG(ctx context.Context, libraryID string) (int, error)
-	PreflightCheck(ctx context.Context, m3uURL string, tlsInsecure bool) iptv.PreflightResult
-
-	// Channel favorites (per-user, persisted in user_channel_favorites).
-	AddFavorite(ctx context.Context, userID, channelID string) error
-	RemoveFavorite(ctx context.Context, userID, channelID string) error
-	IsFavorite(ctx context.Context, userID, channelID string) (bool, error)
-	ListFavoriteIDs(ctx context.Context, userID string) ([]string, error)
-	ListFavoriteChannels(ctx context.Context, userID string) ([]*iptvmodel.Channel, error)
-
-	// EPG sources (per-library, multi-provider config).
-	PublicEPGCatalog() []iptv.PublicEPGSource
-	ListEPGSources(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error)
-	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error)
-	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
-	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
-
-	// Channel health — admin surface for the opportunistic probe
-	// data the stream proxy records. SetChannelActive already exists;
-	// the admin UI pairs it with ResetChannelHealth so an operator
-	// can either permanently disable a dead channel or clear its
-	// counter if they know it's actually working.
-	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error)
-	// ChannelHealthSummary is the lightweight aggregate the admin
-	// Bibliotecas panel reads on first paint (counts only) so the
-	// page doesn't pull every unhealthy / without-EPG row just to
-	// render badges.
-	ChannelHealthSummary(ctx context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error)
-	SetChannelActive(ctx context.Context, id string, active bool) error
-	ResetChannelHealth(ctx context.Context, channelID string) error
-	// RecordProbeFailure is the same hook the proxy uses; the player
-	// beacon endpoint forwards client-side fatal errors here so any
-	// failure source bumps the same `consecutive_failures` counter.
-	RecordProbeFailure(ctx context.Context, channelID string, err error)
-
-	// Manual channel editing — surfaced as the "canales sin guía"
-	// admin panel. The override layer makes SetChannelTvgID survive
-	// the next M3U refresh.
-	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*iptvmodel.Channel, error)
-	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
-
-	// Continue watching — per-user recently-played channel rail.
-	// The beacon records (user, channel); the list query resolves to
-	// current channel rows via stream_url so entries survive M3U
-	// refresh cycles.
-	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
-	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*iptvmodel.Channel, []time.Time, error)
-
-	// Per-user channel ordering + visibility. The overlay onto a
-	// library's channel list is applied by GetChannelsForUser;
-	// ReplaceChannelOrder / SetChannelVisibility / ResetChannelOrder
-	// drive the personalisation panel's mutations.
-	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error)
-	// GetChannelsForUserPersonalisation devuelve la vista del panel
-	// /live-tv/customize: todas las channels (incluso hidden por user)
-	// ordenadas con SU overlay personal aplicado, para que el panel
-	// pueda renderizar la lista que el usuario está editando.
-	GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error)
-	ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error)
-	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
-	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
-	ResetChannelOrder(ctx context.Context, userID string) error
-
-	// Admin channel curation. The admin overlay (library_channel_order)
-	// composes BEFORE the per-user overlay in GetChannelsForUser; admin-
-	// hidden channels are a hard constraint that users cannot un-hide.
-	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error)
-	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error)
-	ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error
-	SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error
-	ResetLibraryChannelOrder(ctx context.Context, libraryID string) error
-
-	// GetChannelEPGIcon devuelve el icono que el EPG haya recolectado
-	// para programas de este canal (XMLTV `<icon src=...>`). Lo usa el
-	// proxy /channels/{id}/logo como último fallback cuando ni hay
-	// override admin ni tvg-logo en el M3U. "" sin error = no hay.
-	GetChannelEPGIcon(ctx context.Context, channelID string) (string, error)
-
-	// Admin channel logo overrides — manual replacement of the M3U
-	// tvg-logo with either an external URL or an uploaded file.
-	// Survives M3U refreshes (keyed by stream_url, not channel UUID).
-	// SetChannelLogoFile + ClearChannelLogo return the previous
-	// file basename so the handler can delete the orphaned file
-	// from imageDir without a second round trip.
-	SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error
-	SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error)
-	ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error)
-	GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error)
-	// RefreshLogosFromIPTVOrg busca logos en la base pública de
-	// iptv-org y rellena los canales sin logo. Devuelve el número
-	// de canales actualizados.
-	RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (iptv.IPTVOrgRefreshSummary, error)
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

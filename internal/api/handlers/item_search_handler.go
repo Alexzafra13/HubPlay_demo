@@ -26,11 +26,11 @@ type SearchHandler struct {
 	lib      itemSearcher
 	images   ImageRepository
 	userData UserDataRepository
-	users    UserService
+	users    userProfileLookup
 	logger   *slog.Logger
 }
 
-func newSearchHandler(lib itemSearcher, images ImageRepository, userData UserDataRepository, users UserService, logger *slog.Logger) *SearchHandler {
+func newSearchHandler(lib itemSearcher, images ImageRepository, userData UserDataRepository, users userProfileLookup, logger *slog.Logger) *SearchHandler {
 	return &SearchHandler{
 		lib:      lib,
 		images:   images,
