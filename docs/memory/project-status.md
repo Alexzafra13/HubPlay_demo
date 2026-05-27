@@ -6,11 +6,12 @@
 
 ---
 
-## 🎬 Sesión 2026-05-27 (parte 2) — VideoPlayer 3ª ola COMPLETA + follow-ups logs (10 PRs)
+## 🎬 Sesión 2026-05-27 (parte 2) — VideoPlayer 3ª ola COMPLETA + ADR-026 follow-ups + F15-2 cerrado (11 PRs)
 
 Sesión larga centrada en cerrar la **3ª ola del refactor del
-VideoPlayer** (787 → 652 LoC, -17.2%) y los **follow-ups del
-ADR-026** (logs centralizados + transmux + circuit breaker).
+VideoPlayer** (787 → 652 LoC, -17.2%), los **follow-ups del
+ADR-026** (logs centralizados + transmux + circuit breaker) y
+finalmente **F15-2 db repos** (clock seam para los 21 repos).
 
 ### PRs mergeadas
 
@@ -24,6 +25,8 @@ ADR-026** (logs centralizados + transmux + circuit breaker).
 | [#462](https://github.com/Alexzafra13/HubPlay_demo/pull/462) | log spawn-error en `transmux.startLocked` (ADR-026 item 1/4) | ✅ merged |
 | [#463](https://github.com/Alexzafra13/HubPlay_demo/pull/463) | `handleServiceError` loguea 5xx aunque vengan como `AppError` (ADR-026 item 2/4) | ✅ merged |
 | [#464](https://github.com/Alexzafra13/HubPlay_demo/pull/464) | logger inyectado en `circuit_breaker` + log de las 4 transiciones (ADR-026 item 3/4) | ✅ merged |
+| [#465](https://github.com/Alexzafra13/HubPlay_demo/pull/465) | docs(memory): registro de las primeras 8 PRs de la sesión | ✅ merged |
+| [#466](https://github.com/Alexzafra13/HubPlay_demo/pull/466) | `timeNow` seam para los 21 repos con `time.Now()` (**cierra F15-2 al 100%**) | ✅ merged |
 
 PRs cerradas como superseded (su contenido vive en #460):
 [#455](https://github.com/Alexzafra13/HubPlay_demo/pull/455),
@@ -53,12 +56,27 @@ PRs cerradas como superseded (su contenido vive en #460):
 | 3. logger en `iptv/circuit_breaker.go` | API: `newChannelBreaker(clk, logger)`. 4 transiciones logueadas (open/re-open Warn, half-open Debug, recovery Info) | [#464](https://github.com/Alexzafra13/HubPlay_demo/pull/464) |
 | 4. sub-loggers handlers grandes | **No vale la pena**: auditoría mostró que `federation_admin` / `me_peers` / `collections` tienen 1-2 logs por handler. `iptv/proxy.go::ProxyURL` tiene 2 logs que comparten `channel` pero los logs del breaker (item 3) ya cubren ese contexto — doble log redundante. Cerrado a la práctica. | — |
 
+### F15-2 db repos (PR #466) — pattern decisivo
+
+`NewRepositories(...)` tiene **33 callsites** en el codebase (main + tests + benchmarks). Cambiar la API del constructor para aceptar `clock.Clock` sería ruido masivo para resolver un problema acotado — los 32 sitios son timestamps de auditoría/probe/EPG/preferences donde el reloj a nivel paquete es suficiente.
+
+Solución: **package-level seam** (`var timeNow = time.Now` en `internal/db/now.go`) con helper `SetTimeNowForTest(t, fn)` en `now_helpers_test.go` (sufijo `_test` evita que `testing` contamine producción). Idiomático en stdlib (`crypto/rand`, `os/user`) cuando el coste de DI desborda el beneficio.
+
+Cambios:
+- 21 repos: `time.Now()` → `timeNow()` (32 sitios)
+- 9 repos: eliminado import `"time"` huérfano
+- 1 test demostrativo (`TestAuditLogRepo_Insert_UsesSeamTimeNow`) que documenta el patrón y sirve de smoke test
+
+Sesiones previas que SÍ aplicaron clock injection (scanner, notification, upload) lo hicieron porque su lógica de tiempo afecta a workflows complejos (cooldowns, retries, schedulers); los repos no — sólo sellan timestamps.
+
 ### Métricas globales acumuladas
 
 - **VideoPlayer.tsx**: 787 → 652 LoC (-17.2%, -135 LoC).
 - **Tests frontend**: 622 → **717** (+95 acumulados; +69 en hooks del player, +26 en `usePlayerActions`).
 - **6 hooks nuevos** del player en `web/src/hooks/`.
-- **Backend tests añadidos**: +5 en circuit_breaker, +3 en handleServiceError = +8 (total no medido).
+- **Backend tests añadidos**: +5 en circuit_breaker, +3 en handleServiceError, +1 en audit_log seam = **+9**.
+- **F15-2 100% cerrado** (scanner + notification + upload + db repos).
+- **ADR-026 follow-ups 100% cerrados** (3 técnicos + 1 "no vale la pena").
 
 ### Aprendizajes registrados
 
@@ -66,13 +84,21 @@ PRs cerradas como superseded (su contenido vive en #460):
 - **Cherry-pick chain con conflictos triviales**: 4 PRs ramificadas de main pre-`useVideoElementSync` tenían el mismo conflicto trivial (4 líneas de import). En vez de rebasar 4 veces, **consolidé en una sola PR** (#460) y cerré las 4 originales como superseded. Más limpio para el revisor.
 - **Fix centralizado vs audit por paquete**: el follow-up #4 sugirió auditar servicio por servicio. En vez de eso, [#463](https://github.com/Alexzafra13/HubPlay_demo/pull/463) lo arregló de raíz en `handleServiceError` (1 if + 8 LoC vs horas de audit + posibles regresiones).
 - **react-compiler quirk**: mutar `video.volume = X` dentro de un `useEffect` con `videoRef` como prop dispara `react-compiler/react-compiler`. Patrón del codebase: `// eslint-disable-next-line react-compiler/react-compiler` con comentario explicativo (mutar atributos del HTMLMediaElement es la API estándar). El compiler sólo reporta la primera mutación por archivo — un disable basta.
+- **Package-level seam vs DI cuando la API es ancha**: F15-2 db repos iba a costar tocar 33 callsites de `NewRepositories(...)` si seguíamos el patrón clock injection. Cambio: `var timeNow = time.Now` en el paquete + helper de tests. 0 cambios de API, 32 sitios migrados, opt-in para tests. Idiomático cuando el coste de DI desborda el beneficio acotado.
 
 ### Pendientes priorizadas (próximas sesiones)
 
-- **F15-2 db repos** — `time.Now()` en INSERT/UPDATE de los repos
-  (voluminoso pero homogéneo, ~2-3h).
 - **Dependabot #424** — bump web-deps group (18 paquetes npm,
   posible breaking changes).
+- **F15-3/F15-4/F15-9** — sleep cleanup en tests (chan vs polling,
+  `time.After` → context, etc). Mecánico, mediana severidad.
+- **F15-5** — God-handler mocks de 16 métodos en
+  `handlers/library_test.go` e `items_test.go`. Reducir fakes +
+  añadir tests de integración con DB real.
+- **F15-6** — Happy path domina (3% de tests con naming
+  `*_Error`/`*_Fail`). Table-driven + edge cases.
+- **F15-10/11/12** — Polish (baja): fakes compartidos,
+  test naming, concurrency tests.
 - **LL Transcoder stateless** — sesión grande propia.
 - **Distribución** — installer Windows firmado (SignPath),
   auto-update, TLS LAN.
