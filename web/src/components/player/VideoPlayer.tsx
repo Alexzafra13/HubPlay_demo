@@ -12,6 +12,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
+import { useStreamSessionCleanup } from "@/hooks/useStreamSessionCleanup";
 import { useVideoElementSync } from "@/hooks/useVideoElementSync";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
@@ -410,28 +411,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     }
   }, []);
 
-  // ─── Tab close / navigation cleanup ──────────────────────────────────────
-  //
-  // If the user closes the tab or navigates away (back button, address
-  // bar) without pressing the player's close button, we'd otherwise
-  // leak the transcode session for the server's idle timeout window
-  // (~90 s). Hook into `pagehide` (more reliable than `beforeunload`,
-  // also fires on iOS Safari and on bfcache eviction) and fire a
-  // best-effort DELETE with `keepalive: true` so the request survives
-  // unload. Going through `api.stopStreamSession` (rather than a raw
-  // fetch) picks up the CSRF double-submit token the middleware
-  // requires; without it the request 403'd in production. The
-  // server's idle reaper is still there as a backstop if even
-  // keepalive drops.
-  useEffect(() => {
-    const onPageHide = () => {
-      void api.stopStreamSession(itemId).catch(() => {
-        // Best-effort only — browser may have already torn down fetch.
-      });
-    };
-    window.addEventListener("pagehide", onPageHide);
-    return () => window.removeEventListener("pagehide", onPageHide);
-  }, [itemId]);
+  useStreamSessionCleanup(itemId);
 
   // ─── Keyboard shortcuts ──────────────────────────────────────────────────
 
