@@ -23,6 +23,57 @@
 
 **Distribución**: HubPlay ya distribuible "descargar y usar" en los 3 targets (desktop / Linux server / NAS Docker). Installer Windows existente sin firma; SignPath integration **lista en CI pero opt-in** — pendiente que Alejandro aplique a SignPath Foundation y configure secrets.
 
+**Próximo trabajo arquitectónico**: nuevo audit macro [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) identifica **6 olores estructurales** que emergieron por agregación tras cerrar el audit 2026-05-14 (MM Dependencies 77 campos, NN interfaces de servicio gigantes, OO mega-paquete handlers, PP tipos db fugan, QQ main.run 630 LoC, RR duplicación). Cola de revisión por paquete (8 ítems) en §6 del audit; empezar por `internal/api` + `handlers`.
+
+---
+
+## 🏛 Sesión 2026-05-27 (parte 5) — Audit arquitectónico macro
+
+Documento nuevo: [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md). 0 PRs (sólo análisis). Sin código.
+
+### Por qué un audit nuevo
+
+El audit [`2026-05-14`](audit-2026-05-14-go-backend-review.md) está casi al
+100% cerrado (6/6 olores altos + medium + F16 + bajas). Lo que queda son
+**olores estructurales que emergieron por agregación** después de cerrar lo
+táctico: god-structs de wiring, interfaces de servicio gigantes, fuga de
+tipos de persistencia, y división del mega-paquete handlers. Son problemas
+de **shape**, no de bugs — el código funciona, pero su API es ancha y
+sufre presión a la baja con cada feature.
+
+### Olores nuevos catalogados (SS/TT no usados aún — siguen serie MM..RR)
+
+| Olor | Severidad | Tema | Bloquea |
+|---|---|---|---|
+| **MM** | 🔴 Alta | `api.Dependencies` con 77 campos (god-struct de wiring) | — |
+| **NN** | 🔴 Alta | `handlers/interfaces.go` con interfaces de servicio gigantes (LibraryService 25 métodos, IPTVService 50+) | F15-5, OO |
+| **OO** | 🟡 Media | `internal/api/handlers/` mega-paquete con 60+ ficheros y 15 dominios | — |
+| **PP** | 🟡 Media | Tipos `db.X` fugan a handlers (35 imports) — db.UserData, db.HomeTrendingItem, etc. | — |
+| **QQ** | 🟡 Media | `main.run()` con ~630 LoC de wiring imperativo | — |
+| **RR** | 🟢 Baja | Duplicación `interfaces.go` ↔ `deps_repos.go` (se resuelve cerrando NN) | — |
+
+### Cola de revisión por paquete (8 ítems)
+
+Orden optimizado por valor/coste. Cada paquete tendrá su propia sub-sección
+en §8 del audit cuando se revise.
+
+| # | Paquete | Foco principal |
+|---|---|---|
+| 1 | `internal/api` + `internal/api/handlers` | Romper Dependencies (MM) + eliminar interfaces.go gigante (NN) + sub-packages por dominio (OO) |
+| 2 | `internal/iptv` | service.go/proxy.go/transmux.go — ¿sub-domain real? IPTVService 50+ métodos |
+| 3 | `internal/stream` | Manager 823 LoC, concurrencia, lifecycle de sesiones |
+| 4 | `internal/library` + `internal/scanner` | Cross-wiring scanner/service/watcher, jobs |
+| 5 | `internal/db` | Sacar tipos de dominio (PP), shape repos vs sqlc |
+| 6 | `internal/auth` | JWT, keystore, ratelimit, AuthService 16 métodos |
+| 7 | `internal/federation` | Manager, peer protocol — aislado |
+| 8 | `internal/{provider,upload,event,observability}` | Iteraciones cortas |
+
+### Decisiones pendientes (antes de tocar paquete 1)
+
+- **Q1**: orden NN→OO→MM o MM→NN→OO. Recomendación: **NN primero** (más bloqueante).
+- **Q2**: PP inline durante NN/OO o sesión propia. Recomendación: **sesión propia** (move mecánico, oscurece el diff).
+- **Q3**: QQ timing. Recomendación: **después** de NN+OO+PP (QQ es síntoma).
+
 ---
 
 ## 🧪 Sesión 2026-05-27 (parte 4) — F15-6 error coverage en LibraryHandler
@@ -126,12 +177,13 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 
 | # | Tarea | Coste | Severidad |
 |---|---|---|---|
-| **1** | **F15-5** — Integration tests con DB real para handlers de library. Requiere extender `testApp` en `internal/api/integration_test.go` con `library.Service` real. library.Service tiene 7+ deps (libraries, items, streams, images, channels, itemValues, scanner) y scanner aún más. Setup ~4-6h. | ~4-6 h | Media |
+| **0** | **Audit macro 2026-05-27 — paquete 1: `internal/api` + `handlers`**. Cerrar olor NN (interfaces de servicio gigantes → micro en consumer). Desbloquea F15-5, OO (split sub-packages) y refactors downstream. Ver [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) §6. | ~1 sesión grande | Alta (arquitectónica) |
+| **1** | **F15-5** — Integration tests con DB real para handlers de library. **Recomendable hacerlo DESPUÉS de NN** porque las interfaces estrechas en consumer simplifican el setup. library.Service tiene 7+ deps; con micro-interfaces los fakes pasan de 25 métodos a 3-5. | ~4-6 h | Media |
 | **2** | **F15-10 / F15-11 / F15-12** — Polish: fakes compartidos en `testutil/fakes/`, naming canónico `TestX_When_Then`, concurrency tests para `provider.Manager.Register` y `stream.Manager.StartSession`. | Baja | Baja |
 | **3** | **Distribución avanzada** — auto-update del binario en producción, TLS LAN automático (mDNS + Let's Encrypt local), macOS notarized (DMG firmado), AppImage Linux. | Sesión grande | Producto |
 | **4** | **(Manual) Alejandro: SignPath Foundation** — aplicar, esperar aprobación, configurar dashboard + secrets/vars de GitHub. Doc: [`windows-installer-signing.md`](../architecture/windows-installer-signing.md). | 10 min + 1-2 sem espera | Distribución |
 
-**Sin olores altos pendientes** (6/6 cerrados desde el audit 2026-05-14). **Sin medium críticos** (salvo F15-5 que es item discreto y aislado).
+**Sin olores altos pendientes del audit 2026-05-14** (6/6 cerrados). **Audit 2026-05-27 abre 2 nuevos olores altos (MM, NN)** que son estructurales — el código funciona, pero la API es ancha y sufre presión a la baja con cada feature.
 
 ---
 
@@ -139,6 +191,7 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 
 - [`architecture-decisions.md`](architecture-decisions.md) — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter, ADR-026 logs).
 - [`conventions.md`](conventions.md) — patrones del codebase, reglas de test, anti-ciclo, comentarios en español, regeneración sqlc.
+- [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) — **audit vivo nuevo**. Olores estructurales que emergieron por agregación (MM/NN/OO/PP/QQ/RR). Cola de revisión por paquete en §6.
 - [`audit-2026-05-14-go-backend-review.md`](audit-2026-05-14-go-backend-review.md) — referencia del audit original. La mayoría cerrada; ver tabla "items audit" abajo.
 - [`intervention-2026-05-14.md`](intervention-2026-05-14.md) — review arquitectónico vivo.
 - [`perf-benchmarks-2026-05-17.md`](perf-benchmarks-2026-05-17.md) — baseline benchmarks dual-backend.
