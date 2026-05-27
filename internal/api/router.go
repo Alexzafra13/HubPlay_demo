@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"path/filepath"
 	"strings"
 
@@ -343,7 +344,7 @@ func NewRouter(deps Dependencies) http.Handler {
 // a r.RemoteAddr si el middleware no lo dejó set).
 func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
 	if len(deps.TrustedProxies) > 0 {
-		r.Use(middleware.ClientIPFromXFF(deps.TrustedProxies...))
+		r.Use(middleware.ClientIPFromXFF(normalizeCIDRs(deps.TrustedProxies)...))
 	} else {
 		r.Use(middleware.ClientIPFromRemoteAddr)
 	}
@@ -491,4 +492,28 @@ func allowedOrigins(cfg *config.Config) []string {
 		origins = append(origins, strings.TrimRight(cfg.Server.BaseURL, "/"))
 	}
 	return origins
+}
+
+// normalizeCIDRs ensures every entry is valid CIDR notation. Plain IP
+// addresses (no '/') get a /32 (IPv4) or /128 (IPv6) suffix so that
+// chi's ClientIPFromXFF — which calls netip.MustParsePrefix — doesn't panic.
+func normalizeCIDRs(raw []string) []string {
+	out := make([]string, len(raw))
+	for i, s := range raw {
+		if strings.Contains(s, "/") {
+			out[i] = s
+			continue
+		}
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			out[i] = s
+			continue
+		}
+		if addr.Is4() {
+			out[i] = s + "/32"
+		} else {
+			out[i] = s + "/128"
+		}
+	}
+	return out
 }
