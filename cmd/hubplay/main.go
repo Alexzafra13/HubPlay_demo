@@ -278,7 +278,10 @@ func run(configPath string) error {
 	// so boot doesn't pay the cost on top of the cold-start overhead.
 	// No-op on Postgres (autovacuum handles ANALYZE on its own schedule).
 	stopOptimize := db.StartPeriodicOptimize(ctx, cfg.Database.Driver, database, logger)
-	defer stopOptimize()
+	lc.AddWorker("periodic optimize", func(context.Context) error {
+		stopOptimize()
+		return nil
+	})
 
 	// ═══ Phase 4b: Streaming ═══
 	//
@@ -448,32 +451,30 @@ func run(configPath string) error {
 		if err := observability.RegisterFederationGauges(metrics, federationManager); err != nil {
 			logger.Error("federation: register gauges failed", "err", err)
 		}
-		// Flush the audit log queue on graceful shutdown so the last
-		// few peer requests aren't lost.
-		defer federationManager.Close()
+		// Drenar la cola de audit federation en shutdown (fase 1,
+		// antes de HTTP drain y antes de cerrar la DB). Cierra SS-3.
+		lc.AddWorker("federation close", func(context.Context) error {
+			federationManager.Close()
+			return nil
+		})
 
-		// Hook event-bus -> notifications: cuando llega una pairing
-		// request o se resuelve una outbound, creamos las entradas
-		// correspondientes en el inbox del admin (badge en TopBar).
-		// El federation manager publica los eventos; el wire vive
-		// aqui en main.go para mantener federation desacoplado del
-		// paquete notification (acoplamiento solo va de notification
-		// hacia event, no al reves).
 		registerFederationNotifications(ctx, eventBus, notificationService, logger)
 
-		// Job periodico: cada 1h expira las pairing requests cuyo
-		// TTL ha pasado. Sin esto las filas se acumulan eternamente
-		// y el cap defensivo nunca recicla espacio.
+		// Job periódico: cada 1h expira las pairing requests cuyo
+		// TTL ha pasado.
 		stopPendingSweeper := federation.StartPendingRequestSweeper(ctx, federationManager, logger, time.Hour)
-		defer stopPendingSweeper()
+		lc.AddWorker("pending request sweeper", func(context.Context) error {
+			stopPendingSweeper()
+			return nil
+		})
 	}
 
-	// Job periodico: cada 24h purga notificaciones leidas con > 30d.
-	// Vive fuera del bloque federation porque el inbox es independiente
-	// (otras features podran emitir en el futuro). Las no-leidas se
-	// conservan siempre.
+	// Job periódico: cada 24h purga notificaciones leídas con >30d.
 	stopNotifSweeper := notification.StartReadCleanupSweeper(ctx, notificationRepo, clk, logger, 24*time.Hour, notification.DefaultReadRetention)
-	defer stopNotifSweeper()
+	lc.AddWorker("notification sweeper", func(context.Context) error {
+		stopNotifSweeper()
+		return nil
+	})
 
 	// Retention sweep: prune EPG programmes and federation audit log on
 	// a fixed cadence so append-only tables don't grow forever. Both
@@ -503,8 +504,7 @@ func run(configPath string) error {
 	if cfg.Upload.Enabled {
 		stagingDir, err := upload.NewStagingDir(cfg.Upload.StagingDir)
 		if err != nil {
-			logger.Error("upload staging dir setup failed", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("upload staging dir: %w", err)
 		}
 		upSvc := upload.NewService(
 			upload.Config{
@@ -525,8 +525,7 @@ func run(configPath string) error {
 		// generar el Location: <basePath><id> tras el POST de creación.
 		tusd, err := upload.NewTusdHandler(upSvc, "/api/v1/uploads/")
 		if err != nil {
-			logger.Error("upload tusd handler setup failed", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("upload tusd handler: %w", err)
 		}
 		// http.StripPrefix es REQUERIDO entre chi y tusd. Razón:
 		// chi.Mount NO modifica r.URL.Path — sólo actualiza un

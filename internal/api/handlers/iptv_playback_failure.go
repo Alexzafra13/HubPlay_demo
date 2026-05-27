@@ -23,9 +23,11 @@ package handlers
 // process restart resetting the cooldown is fine.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -33,7 +35,22 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
+
+// playbackFailureReporter es el contrato mínimo que el beacon de
+// fallo de reproducción necesita del iptv.Service: 2 de ~50 métodos.
+type playbackFailureReporter interface {
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
+	RecordProbeFailure(ctx context.Context, channelID string, err error)
+}
+
+// iptvPlaybackFailureHandler aísla el endpoint de beacon de fallo.
+type iptvPlaybackFailureHandler struct {
+	svc    playbackFailureReporter
+	access LibraryAccessService
+	logger *slog.Logger
+}
 
 const (
 	// playbackBeaconCooldown is the per-(user,channel) minimum gap
@@ -83,7 +100,7 @@ type playbackFailureRequest struct {
 // ChannelHealthReporter pipeline so the same `consecutive_failures`
 // counter the proxy uses bumps by one — keeping the dead-channel
 // machinery single-sourced.
-func (h *IPTVHandler) RecordPlaybackFailure(w http.ResponseWriter, r *http.Request) {
+func (h *iptvPlaybackFailureHandler) RecordPlaybackFailure(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "auth required")
@@ -99,8 +116,8 @@ func (h *IPTVHandler) RecordPlaybackFailure(w http.ResponseWriter, r *http.Reque
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 

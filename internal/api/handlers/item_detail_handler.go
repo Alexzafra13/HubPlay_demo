@@ -12,22 +12,23 @@ import (
 	librarymodel "hubplay/internal/library/model"
 )
 
+// itemDetailFetcher es el contrato mínimo que ItemDetailHandler necesita
+// del library service. 5 métodos de 25. Cierra NN para este consumer.
+type itemDetailFetcher interface {
+	GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
+	GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error)
+	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
+	GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
+	GetItemImages(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
+}
+
 // ItemDetailHandler aísla las rutas del detalle de un item (la mayor
-// responsabilidad de los 4 sub-handlers del split de olor P):
+// responsabilidad de los sub-handlers del split de olor P):
 //
-//	GET /items/{id}            → Get (200 JSON con tu detail JSON
-//	                              completo + gate de content-rating
-//	                              per-profile)
-//	GET /items/{id}/children   → Children (episodios de una series,
-//	                              episodios de una season, etc., con
-//	                              enrich batched de posters + episode
-//	                              counts + overview metadata)
-//
-// Las 10 deps del struct son las que la responsabilidad detail
-// realmente usa — antes vivían en el ItemHandler monolítico con 13
-// deps que cubrían 4 responsabilidades distintas.
+//	GET /items/{id}            → Get
+//	GET /items/{id}/children   → Children
 type ItemDetailHandler struct {
-	lib         LibraryService
+	lib         itemDetailFetcher
 	images      ImageRepository
 	metadata    MetadataRepository
 	userData    UserDataRepository
@@ -47,7 +48,7 @@ type ItemDetailHandler struct {
 }
 
 func newItemDetailHandler(
-	lib LibraryService,
+	lib itemDetailFetcher,
 	images ImageRepository,
 	metadata MetadataRepository,
 	userData UserDataRepository,

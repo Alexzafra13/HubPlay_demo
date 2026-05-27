@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,7 +16,25 @@ import (
 	"time"
 
 	"hubplay/internal/imaging"
+	"hubplay/internal/iptv"
+	iptvmodel "hubplay/internal/iptv/model"
 )
+
+// channelLogoOps es el contrato mínimo para la gestión de logos de
+// canal. 5 de ~50 métodos de IPTVService.
+type channelLogoOps interface {
+	SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error
+	SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error)
+	ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error)
+	GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error)
+	RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (iptv.IPTVOrgRefreshSummary, error)
+}
+
+type iptvLogoHandler struct {
+	svc      channelLogoOps
+	imageDir string
+	logger   *slog.Logger
+}
 
 // Admin-only manual overrides del logo de un canal. La row vive en
 // channel_logo_overlays indexada por (library_id, stream_url) — misma
@@ -47,7 +67,7 @@ type setChannelLogoRequest struct {
 // la validación profunda (que devuelva una imagen) la hace el cache
 // remoto en la próxima petición de GET /channels/{id}/logo. URLs rotas
 // caen al fallback de iniciales como cualquier otro fallo de fetch.
-func (h *IPTVHandler) SetChannelLogo(w http.ResponseWriter, r *http.Request) {
+func (h *iptvLogoHandler) SetChannelLogo(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -92,7 +112,7 @@ func (h *IPTVHandler) SetChannelLogo(w http.ResponseWriter, r *http.Request) {
 // (cliente no se cree para esto), guard de decompression-bomb, y el
 // itemID/channel id se valida como path segment seguro antes de
 // componer el nombre del archivo.
-func (h *IPTVHandler) UploadChannelLogo(w http.ResponseWriter, r *http.Request) {
+func (h *iptvLogoHandler) UploadChannelLogo(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -178,7 +198,7 @@ func (h *IPTVHandler) UploadChannelLogo(w http.ResponseWriter, r *http.Request) 
 
 // ClearChannelLogo borra el override (URL o archivo) del canal. La
 // próxima petición al proxy cae al tvg-logo del M3U.
-func (h *IPTVHandler) ClearChannelLogo(w http.ResponseWriter, r *http.Request) {
+func (h *iptvLogoHandler) ClearChannelLogo(w http.ResponseWriter, r *http.Request) {
 	channelID := requireParam(w, r, "channelId")
 	if channelID == "" {
 		return
@@ -199,7 +219,7 @@ func (h *IPTVHandler) ClearChannelLogo(w http.ResponseWriter, r *http.Request) {
 // basename como path segment seguro defensivamente — la upsert ya lo
 // validó pero un attacker que pueda escribir directo en la tabla no
 // debería conseguir leer ficheros fuera del directorio designado.
-func (h *IPTVHandler) serveLocalChannelLogo(w http.ResponseWriter, r *http.Request, channelID, basename string) {
+func (h *iptvLogoHandler) serveLocalChannelLogo(w http.ResponseWriter, r *http.Request, channelID, basename string) {
 	if h.imageDir == "" {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "image storage not configured")
 		return
@@ -245,7 +265,7 @@ func (h *IPTVHandler) serveLocalChannelLogo(w http.ResponseWriter, r *http.Reque
 // No es bloqueante para la respuesta — los errores se logan y ya está;
 // un archivo huérfano es un coste menor frente a un 5xx por una
 // limpieza de housekeeping.
-func (h *IPTVHandler) deleteChannelLogoFile(basename string) {
+func (h *iptvLogoHandler) deleteChannelLogoFile(basename string) {
 	if h.imageDir == "" || basename == "" {
 		return
 	}
@@ -288,7 +308,7 @@ func extensionForContentType(ct string) string {
 //
 // POST /libraries/{libraryId}/iptv/refresh-logos-from-iptv-org
 // Admin-only. Retorna el count de canales actualizados.
-func (h *IPTVHandler) RefreshLogosFromIPTVOrg(w http.ResponseWriter, r *http.Request) {
+func (h *iptvLogoHandler) RefreshLogosFromIPTVOrg(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return

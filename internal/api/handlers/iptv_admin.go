@@ -7,12 +7,40 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"hubplay/internal/iptv"
 	librarymodel "hubplay/internal/library/model"
 )
+
+// iptvAdminOps es el contrato mínimo para los endpoints admin IPTV
+// (refresh M3U/EPG, preflight, import público). 7 de ~50 métodos.
+type iptvAdminOps interface {
+	PreflightCheck(ctx context.Context, m3uURL string, tlsInsecure bool) iptv.PreflightResult
+	TryAcquireRefresh(libraryID string) (func(), error)
+	RunRefreshM3U(ctx context.Context, libraryID string) (int, error)
+	PublishRefreshFailed(libraryID string, err error)
+	SpawnBackground(fn func(ctx context.Context))
+	RefreshEPG(ctx context.Context, libraryID string) (int, error)
+	RefreshM3U(ctx context.Context, libraryID string) (int, error)
+}
+
+type iptvAdminHandler struct {
+	svc       iptvAdminOps
+	libraries LibraryRepository
+	access    LibraryAccessService
+	audit     AuditEmitter
+	logger    *slog.Logger
+}
+
+func (h *iptvAdminHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
+}
 
 // PreflightM3U probes an M3U URL on the operator's behalf so the
 // admin UI can show "this is fine" / "provider is hung" / "got HTML
@@ -22,7 +50,7 @@ import (
 // Admin-only because the request body comes verbatim from the
 // caller and a public endpoint would let any unauthenticated user
 // turn the server into a generic HTTP probe (SSRF-adjacent).
-func (h *IPTVHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		M3UURL      string `json:"m3u_url"`
 		TLSInsecure bool   `json:"tls_insecure"`
@@ -62,13 +90,13 @@ const refreshM3UAsyncTimeout = 10 * time.Minute
 // defence-in-depth: admins can see every library regardless of the ACL, so
 // this check is effectively a documentation anchor today. It becomes
 // load-bearing the day a non-admin role gains access to refresh endpoints.
-func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -122,13 +150,13 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 }
 
 // RefreshEPG triggers an EPG refresh for a library.
-func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 
@@ -147,7 +175,7 @@ func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
 }
 
 // PublicCountries returns the list of countries with available public IPTV channels.
-func (h *IPTVHandler) PublicCountries(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminHandler) PublicCountries(w http.ResponseWriter, r *http.Request) {
 	countries := iptv.PublicCountries()
 
 	result := make([]map[string]any, 0, len(countries))
@@ -163,7 +191,7 @@ func (h *IPTVHandler) PublicCountries(w http.ResponseWriter, r *http.Request) {
 }
 
 // ImportPublicIPTV creates a livetv library for a country and triggers M3U import.
-func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
+func (h *iptvAdminHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Country string `json:"country"`
 		Name    string `json:"name"`

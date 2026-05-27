@@ -17,21 +17,36 @@ import (
 	librarymodel "hubplay/internal/library/model"
 )
 
+// libraryOps es el contrato mínimo que LibraryHandler necesita del
+// library service. 12 de 25 métodos — excluye ACL, personal IPTV y
+// scan síncrono que sólo usan otros handlers. Cierra NN para este
+// consumer.
+type libraryOps interface {
+	Create(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
+	List(ctx context.Context) ([]*librarymodel.Library, error)
+	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
+	Update(ctx context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error)
+	Delete(ctx context.Context, id string) error
+	Scan(ctx context.Context, id string, refreshMetadata ...bool) error
+	ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
+	LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*librarymodel.Item, error)
+	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error)
+	ItemCount(ctx context.Context, libraryID string) (int, error)
+	ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error)
+}
+
 type LibraryHandler struct {
-	lib      LibraryService
+	lib      libraryOps
 	images   ImageRepository
 	metadata MetadataRepository
 	userData UserDataRepository
-	// users resolves the caller's max_content_rating so /items/latest
-	// can scope its result set to ratings the profile is allowed to
-	// see. Optional — when nil the rating filter is skipped (admin
-	// or unknown context, fail-open is the right default).
-	users  UserService
-	audit  AuditEmitter
-	logger *slog.Logger
+	users    UserService
+	audit    AuditEmitter
+	logger   *slog.Logger
 }
 
-func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, audit AuditEmitter, logger *slog.Logger) *LibraryHandler {
+func NewLibraryHandler(lib libraryOps, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, audit AuditEmitter, logger *slog.Logger) *LibraryHandler {
 	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, users: users, audit: audit, logger: logger}
 }
 

@@ -11,6 +11,7 @@ import (
 	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/config"
 	"hubplay/internal/domain"
+	librarymodel "hubplay/internal/library/model"
 )
 
 const (
@@ -38,10 +39,18 @@ func authTokenResponse(token *auth.AuthToken, u *authmodel.User) map[string]any 
 	}
 }
 
+// authLibraryOps es el contrato mínimo que AuthHandler necesita del
+// library service: buscar por ID (register flow) y reemplazar acceso
+// (grant_library_ids del register). 2 de 25 métodos.
+type authLibraryOps interface {
+	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
+	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
+}
+
 type AuthHandler struct {
 	auth      AuthService
 	users     UserService
-	libraries LibraryService
+	libraries authLibraryOps
 	authCfg   config.AuthConfig
 	audit     AuditEmitter
 	logger    *slog.Logger
@@ -123,7 +132,7 @@ func (noopAudit) LogDBSwap(_ context.Context, _ *http.Request, _, _ string)     
 // NewAuthHandler wires the auth handler. libraries may be nil (the setup
 // wizard reuses a slimmer handler that never receives grant_library_ids);
 // the main router always passes the real service. audit nil-safe.
-func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries LibraryService, authCfg config.AuthConfig, audit AuditEmitter, logger *slog.Logger) *AuthHandler {
+func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries authLibraryOps, authCfg config.AuthConfig, audit AuditEmitter, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		auth:      authSvc,
 		users:     userSvc,

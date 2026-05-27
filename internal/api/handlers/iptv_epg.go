@@ -13,16 +13,35 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"hubplay/internal/db"
+	"hubplay/internal/iptv"
 	iptvmodel "hubplay/internal/iptv/model"
 )
 
+// epgManager es el contrato mínimo que los endpoints EPG necesitan
+// del iptv.Service. 5 de ~50 métodos.
+type epgManager interface {
+	PublicEPGCatalog() []iptv.PublicEPGSource
+	ListEPGSources(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error)
+	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error)
+	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
+	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
+}
+
+type iptvEPGHandler struct {
+	svc    epgManager
+	access LibraryAccessService
+	logger *slog.Logger
+}
+
 // EPGCatalog returns the curated EPG provider list.
-func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
+func (h *iptvEPGHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
 	catalog := h.svc.PublicEPGCatalog()
 	out := make([]map[string]any, 0, len(catalog))
 	for _, src := range catalog {
@@ -41,13 +60,13 @@ func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
 // ListEPGSources returns the EPG providers attached to a library.
 // Gated by the library ACL — the EPG source list leaks URL info we'd
 // rather keep library-private.
-func (h *IPTVHandler) ListEPGSources(w http.ResponseWriter, r *http.Request) {
+func (h *iptvEPGHandler) ListEPGSources(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	sources, err := h.svc.ListEPGSources(r.Context(), libraryID)
@@ -64,13 +83,13 @@ type addEPGSourceRequest struct {
 }
 
 // AddEPGSource attaches a new provider. Admin-only at the route level.
-func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
+func (h *iptvEPGHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	var body addEPGSourceRequest
@@ -104,7 +123,7 @@ func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveEPGSource deletes one provider from the library.
-func (h *IPTVHandler) RemoveEPGSource(w http.ResponseWriter, r *http.Request) {
+func (h *iptvEPGHandler) RemoveEPGSource(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
@@ -113,8 +132,8 @@ func (h *IPTVHandler) RemoveEPGSource(w http.ResponseWriter, r *http.Request) {
 	if sourceID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	if err := h.svc.RemoveEPGSource(r.Context(), libraryID, sourceID); err != nil {
@@ -130,13 +149,13 @@ type reorderEPGSourcesRequest struct {
 
 // ReorderEPGSources rewrites every source's priority. Body is the
 // full ordered id list.
-func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) {
+func (h *iptvEPGHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) {
 	libraryID := requireParam(w, r, "id")
 	if libraryID == "" {
 		return
 	}
-	if !h.canAccessLibrary(r, libraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, libraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	var body reorderEPGSourcesRequest

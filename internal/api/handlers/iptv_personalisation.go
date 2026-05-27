@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // Per-user channel personalisation. The admin uploads M3U lists +
@@ -18,6 +22,32 @@ import (
 //   PUT    /me/iptv/channels/order            — replace full ordering
 //   PUT    /me/iptv/channels/{channelId}/visibility — toggle hidden
 //   DELETE /me/iptv/channels/order            — restore admin defaults
+
+// channelPersonaliser es el contrato mínimo para la personalización
+// per-user de canales. 4 de ~50 métodos de IPTVService.
+type channelPersonaliser interface {
+	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
+	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
+	ResetChannelOrder(ctx context.Context, userID string) error
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
+}
+
+type iptvPersonalisationHandler struct {
+	svc    channelPersonaliser
+	access LibraryAccessService
+	bus    EventBusPublisher
+	logger *slog.Logger
+}
+
+func (h *iptvPersonalisationHandler) publishOrderUpdated(userID string) {
+	if h.bus == nil {
+		return
+	}
+	h.bus.Publish(event.Event{
+		Type: event.ChannelOrderUpdated,
+		Data: map[string]any{"user_id": userID},
+	})
+}
 
 type meIPTVChannelOrderRequest struct {
 	// OrderedChannelIDs is the user's complete preferred ordering.
@@ -37,7 +67,7 @@ type meIPTVChannelOrderRequest struct {
 
 // ReplaceChannelOrder accepts the full reordered + hidden list and
 // persists it in one transaction.
-func (h *IPTVHandler) ReplaceChannelOrder(w http.ResponseWriter, r *http.Request) {
+func (h *iptvPersonalisationHandler) ReplaceChannelOrder(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -75,7 +105,7 @@ type meIPTVVisibilityRequest struct {
 // SetChannelVisibility is the per-channel "hide / show" toggle. Used
 // by the inline button on the channel list when the user wants to
 // hide a single channel without opening the full personalisation panel.
-func (h *IPTVHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Request) {
+func (h *iptvPersonalisationHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
@@ -100,8 +130,8 @@ func (h *IPTVHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Reques
 		handleServiceError(w, r, err)
 		return
 	}
-	if !h.canAccessLibrary(r, ch.LibraryID) {
-		h.denyForbidden(w, r)
+	if !canAccessLibrary(r, h.access, h.logger, ch.LibraryID) {
+		iptvDenyForbidden(w, r)
 		return
 	}
 	if err := h.svc.SetChannelVisibility(r.Context(), claims.UserID, channelID, req.Hidden); err != nil {
@@ -114,7 +144,7 @@ func (h *IPTVHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Reques
 
 // ResetChannelOrder wipes the user's overrides, restoring the admin
 // defaults for ordering and visibility.
-func (h *IPTVHandler) ResetChannelOrder(w http.ResponseWriter, r *http.Request) {
+func (h *iptvPersonalisationHandler) ResetChannelOrder(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))

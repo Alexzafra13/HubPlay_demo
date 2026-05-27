@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/library"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // SetupDatabaseSaver is the slice of setup.Service the wizard needs to
@@ -18,11 +20,18 @@ type SetupDatabaseSaver interface {
 	SaveDatabaseConfig(driver, path, dsn string) error
 }
 
+// setupLibraryOps es el contrato mínimo que el wizard necesita del
+// library service: listar y crear. 2 de 25 métodos.
+type setupLibraryOps interface {
+	List(ctx context.Context) ([]*librarymodel.Library, error)
+	Create(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error)
+}
+
 type SetupHandler struct {
 	setup     SetupService
 	dbSaver   SetupDatabaseSaver
 	auth      AuthService
-	libs      LibraryService
+	libs      setupLibraryOps
 	users     UserService
 	providers ProviderRepository
 	config    *config.Config
@@ -38,7 +47,7 @@ type SetupHandlerConfig struct {
 	Setup     SetupService
 	DBSaver   SetupDatabaseSaver
 	Auth      AuthService
-	Libraries LibraryService
+	Libraries setupLibraryOps
 	Users     UserService
 	Providers ProviderRepository
 	Config    *config.Config

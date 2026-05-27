@@ -1,29 +1,33 @@
 package handlers
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
 )
+
+// itemGetter es el contrato mínimo que RecommendationsHandler necesita:
+// buscar un item por ID para resolver su tipo (movie/series) antes de
+// consultar TMDb. Cierra NN para este consumer.
+type itemGetter interface {
+	GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
+}
 
 // RecommendationsHandler atiende el rail "more like this" del detail
 // page. Llama a TMDb vía `ProviderManager.FetchRecommendations` y
 // cruza cada candidato contra el catálogo local para marcar
 // "in_library" (con un local_id que el frontend usa para deep-link).
-//
-// Extraído como sub-handler para cerrar parte del olor P. Deps
-// disjuntas del resto: lib (item lookup), externalIDs (TMDb id +
-// reverse-lookup para in_library), providers (la fuente de las
-// recomendaciones), logger.
 type RecommendationsHandler struct {
-	lib         LibraryService
+	lib         itemGetter
 	externalIDs ExternalIDsRepository
 	providers   ProviderManager
 	logger      *slog.Logger
 }
 
-func newRecommendationsHandler(lib LibraryService, externalIDs ExternalIDsRepository, providers ProviderManager, logger *slog.Logger) *RecommendationsHandler {
+func newRecommendationsHandler(lib itemGetter, externalIDs ExternalIDsRepository, providers ProviderManager, logger *slog.Logger) *RecommendationsHandler {
 	return &RecommendationsHandler{
 		lib:         lib,
 		externalIDs: externalIDs,
