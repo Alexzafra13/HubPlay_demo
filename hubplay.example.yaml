@@ -10,7 +10,7 @@ server:
   # primera IP no-trusted es el cliente. Los defaults cubren docker
   # bridge (172.16/12) + localhost (nginx/traefik en la misma máquina).
   trusted_proxies:
-    - "127.0.0.1"
+    - "127.0.0.1/32"
     - "172.16.0.0/12"
 
 database:

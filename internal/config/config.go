@@ -288,7 +288,7 @@ func defaults() *Config {
 		Server: ServerConfig{
 			Bind:           "0.0.0.0",
 			Port:           8096,
-			TrustedProxies: []string{"127.0.0.1", "172.16.0.0/12"},
+			TrustedProxies: []string{"127.0.0.1/32", "172.16.0.0/12"},
 		},
 		Database: DatabaseConfig{
 			Driver: "sqlite",
