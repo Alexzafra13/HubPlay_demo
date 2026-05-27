@@ -12,6 +12,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
+import { useExternalSubMode } from "@/hooks/useExternalSubMode";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
@@ -495,31 +496,16 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     [pickExternalSub, setSubtitleTrack, setActiveFederatedSubIndex],
   );
 
-  // After a new external <track> mounts the browser keeps its mode
-  // at "disabled" by default. We force it to "showing" once it's
-  // actually in the DOM. Keying on the active sub identity guarantees
-  // the effect re-runs when the user picks a different one.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !activeExternalSub) return;
-    // The DOM may not have applied the new <track> on the first
-    // microtask; wait one rAF before flipping the mode.
-    const rafID = window.requestAnimationFrame(() => {
-      const tracks = Array.from(video.textTracks);
-      // The external track is the one whose label starts with
-      // "External:" — set inside the JSX below.
-      const target = tracks.find((t) => t.label.startsWith("External:"));
-      if (target) target.mode = "showing";
-      // Suppress any other text tracks the user didn't ask for so we
-      // don't end up double-rendering cues from an HLS sub.
-      for (const t of tracks) {
-        if (t !== target && t.mode === "showing") {
-          t.mode = "disabled";
-        }
-      }
-    });
-    return () => window.cancelAnimationFrame(rafID);
-  }, [activeExternalSub]);
+  // Tras montar el <track> externo, fuerza su mode a "showing" en
+  // el siguiente rAF (el DOM aún no tiene el elemento en el
+  // microtask inmediato) y suprime cualquier otro track en showing
+  // para no doble-renderizar cues de un HLS sub pre-existente.
+  useExternalSubMode({
+    videoRef,
+    activeKey: activeExternalSub
+      ? `${activeExternalSub.source}:${activeExternalSub.file_id}`
+      : null,
+  });
 
   const {
     mergedSubtitleTracks,
