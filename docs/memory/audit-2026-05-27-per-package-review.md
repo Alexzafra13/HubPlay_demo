@@ -614,4 +614,388 @@ en lo macro.
    transmux.go 1107 LoC, proxy.go 804 LoC.
 3. **`internal/stream`** — Manager 823 LoC, concurrencia, sesiones.
 
-¿Por cuál empezamos?
+Empezamos por el paquete 1.
+
+---
+
+## 6. Revisión por paquete: `internal/api` + `internal/api/handlers`
+
+### 6.1 Inventario
+
+**`internal/api/` (7 ficheros de producción, ~2.2k LoC):**
+
+| Fichero | LoC | Responsabilidad |
+|---------|----:|-----------------|
+| `router.go` | 519 | `Dependencies` struct (77 campos) + `NewRouter` + `fillFromConfig` + CORS helpers |
+| `mount_media.go` | 434 | Streaming + Libraries + Items + IPTV |
+| `mount_admin_system.go` | 247 | Admin system (stats, settings, backup, db, cors, logs, audit, updates, streams, storage) |
+| `mount_federation.go` | 238 | Federation public + peer-auth |
+| `mount_me.go` | 132 | Auth protected + SSE + me identity + notifications + preferences |
+| `mount_users.go` | 98 | Users admin |
+| `mount_public.go` | 84 | Health + OpenAPI + setup wizard |
+| `mount_uploads.go` | 48 | Upload tus surface |
+
+**`internal/api/handlers/` (72 ficheros de producción, ~25k LoC):**
+
+- **46 handler structs** (verificado por grep).
+- **27 interfaces** en `interfaces.go` (449 LoC).
+- **19 interfaces** en `deps_repos.go` (216 LoC).
+- **~20 interfaces locales** dispersas en handler files individuales.
+- Helpers compartidos: `responses.go`, `cache_control.go`, `streaming_deadline.go`, `client_ip.go`, `imagedir.go`, `sse_limiter.go`, `iprate_middleware.go`.
+
+### 6.2 Lo que está bien
+
+**El split por `mount_*.go` es sano.** Antes `NewRouter` era un monolito
+de ~1100 LoC. Ahora son 7 funciones con scope acotado. Cada una recibe
+`Dependencies` (o un subset) y monta rutas de un dominio. Modelo a
+preservar.
+
+**`ItemHandler` como facade sobre 5 sub-handlers es correcto.** El refactor
+del olor P (god-handler de 1186 LoC, 13 deps) dejó un facade limpio por
+embedding de puntero. Cada sub-handler tiene sus propias deps estrechas.
+La firma pública de `NewItemHandler` no cambió — los tests siguen sin
+modificar. Pattern exportable al iptv handler.
+
+**Helpers `respondData`/`requireParam` eliminaron boilerplate.** 115 sites
+de `map[string]any{"data": ...}` reemplazados por una función. 53 sites
+de `chi.URLParam` + check vacío reemplazados. Código más conciso.
+
+**`handleServiceError` centraliza el mapeo error→HTTP.** En lugar de que
+cada handler mapee `domain.AppError` independientemente, hay un punto
+central que convierte `.Kind` a status code. Reduce duplicación y garantiza
+consistencia.
+
+**Interfaces locales en handlers individuales ya existen.** `system.go`
+define 5 interfaces locales (`SystemStatsProvider`, `HostInfoProvider`,
+`LibraryStatsProvider`, `activityRepo`, `SettingsReader`). `me_home.go`
+define 3 (`homeRepo`, `HomeLibraryLister`, `HomeMetadataRepo`).
+`settings.go` define 1 (`settingsStore`). Esto demuestra que **el patrón
+correcto ya se aplica en varios handlers** — sólo falta generalizarlo.
+
+### 6.3 Hallazgos (ordenados por impacto)
+
+---
+
+#### TT-1 — `IPTVService` con ~50 métodos: Interface Segregation rota (refuerza NN)
+
+**Dónde:** `handlers/interfaces.go:146-260` (114 LoC sólo para esta interface).
+
+**Datos verificados — qué usa cada consumidor:**
+
+| Fichero handler | Métodos que usa | Ratio usados/total |
+|-----------------|----------------:|-------------------:|
+| `iptv_channels.go` | 11 | 11/50 (22%) |
+| `iptv_health.go` | 7 | 7/50 (14%) |
+| `iptv_favorites.go` | 7 | 7/50 (14%) |
+| `iptv_admin.go` | 7 | 7/50 (14%) |
+| `iptv_epg.go` | 5 | 5/50 (10%) |
+| `iptv_channel_logo.go` | 5 | 5/50 (10%) |
+| `iptv_personalisation.go` | 4 | 4/50 (8%) |
+| `iptv_admin_channel_order.go` | 4 | 4/50 (8%) |
+| `iptv_playback_failure.go` | 2 | 2/50 (4%) |
+
+**Ningún handler usa más del 22% de la interface.** El más estrecho
+(`iptv_playback_failure.go`) necesita 2 métodos de 50.
+
+**Impacto concreto en tests:** `iptv_test.go` define `iptvFakeService`
+con **50+ métodos stub**. Cada test del paquete construye un fake que
+implementa 50 métodos para poder testar 2-7. Un cambio de firma en
+cualquier método (ej. `GetChannels` añade un parámetro) rompe TODOS
+los tests — los 50 métodos del fake deben compilar.
+
+**Ejemplo de cómo debería ser:**
+
+```go
+// iptv_playback_failure.go (necesita 2 métodos)
+type playbackFailureReporter interface {
+    GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
+    RecordProbeFailure(ctx context.Context, channelID string, err error)
+}
+```
+
+```go
+// iptv_epg.go (necesita 5 métodos)
+type epgManager interface {
+    PublicEPGCatalog() []iptv.PublicEPGSource
+    ListEPGSources(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error)
+    AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error)
+    RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
+    ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
+}
+```
+
+El `*iptv.Service` concreto satisface ambas interfaces sin cambios.
+**`interfaces.go` pierde 114 LoC** cuando todos los handlers migran.
+Los tests pasan de un fake de 50 métodos a fakes de 2-7 métodos.
+
+**Principio violado:** Interface Segregation Principle (literalmente),
+Go idiom ("accept interfaces, return structs" — interfaces en consumer,
+1-3 métodos).
+
+**Gravedad:** Alta (NN — ya catalogado). Es el bloqueo más importante
+del paquete.
+
+---
+
+#### TT-2 — `LibraryService` con 25 métodos: misma enfermedad, menor grado
+
+**Dónde:** `handlers/interfaces.go:71-114` (44 LoC).
+
+**Datos verificados:**
+
+| Fichero handler | Métodos que usa | Ratio |
+|-----------------|----------------:|------:|
+| `library.go` | 12 | 48% |
+| `item_detail_handler.go` | 5 | 20% |
+| `item_search_handler.go` | 1 | 4% |
+| `item_recommendations_handler.go` | 0 de lib (usa externalIDs y providers) | 0% |
+| `auth.go` | usa `LibraryService` pero sólo `ListForUser` | 4% |
+| `setup.go` | usa `LibraryService` pero sólo `Create` + `Scan` | 8% |
+
+**`SearchHandler` necesita 1 método de 25 (`ListItems`).** El fake para
+testarlo debe implementar 25. `RecommendationsHandler` recibe
+`LibraryService` pero **no usa ningún método de ella directamente** —
+hereda la dependencia del facade `ItemHandler` y sólo la pasa.
+
+**Refactor: interfaces micro en consumer.**
+
+```go
+// item_search_handler.go
+type itemSearcher interface {
+    ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
+}
+```
+
+```go
+// item_detail_handler.go
+type itemFetcher interface {
+    GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
+    GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error)
+    GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
+    GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
+    GetItemImages(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
+}
+```
+
+**Gravedad:** Alta (NN — ya catalogado).
+
+---
+
+#### TT-3 — `Dependencies` como god-struct de 77 campos pasa a CADA mount
+
+**Dónde:** `api/router.go:35-214`.
+
+**Lo que pasa hoy:** Cada `mountXxx` recibe `Dependencies` entero.
+`mountStreaming` necesita 7 campos pero recibe 77.
+`mountMeNotificationsAndPreferences` necesita 5 pero recibe 77.
+
+**Cada mount file tiene que importar `api` para el tipo `Dependencies`.**
+Cuando `Dependencies` cambia (nuevo campo = nueva feature), TODOS los
+mount files recompilan aunque no les toque.
+
+**Pero la urgencia real es otra.** El impacto práctico hoy es bajo
+porque Go compila rápido y los mounts están en el mismo paquete. El
+problema de MM es más estético/de claridad que de correctness. **NN
+importa más que MM.** Resolver NN primero y OO después; MM se simplifica
+como consecuencia porque cada sub-paquete handler definirá su propio
+"deps" struct con 3-7 campos.
+
+**Gravedad:** Alta (MM — ya catalogado), pero **prioridad 3** (después
+de NN y OO).
+
+---
+
+#### TT-4 — `deps_repos.go` duplica contratos de `interfaces.go` (refuerza RR)
+
+**Dónde:**
+- `interfaces.go:288-307` declara `ItemRepository` (2 métodos: GetByID, List).
+- `deps_repos.go:35-45` declara `ItemsRepo` (9 métodos: incluye GetByID, List + 7 más).
+
+Dos interfaces para el mismo repo (`db.ItemRepository`), en el mismo
+paquete, con nombres parecidos, contratos solapados. El comentario de
+`deps_repos.go` admite el problema sin resolverlo:
+
+> *"el handler sigue consumiendo el contrato estrecho que ya conocía"*
+
+En la práctica **NO hay composición ni embedding entre ellas**. Son
+copias independientes que hay que mantener en sincronía manual.
+
+**Refactor:** Desaparece naturalmente al cerrar NN — cada handler define
+SU interface micro; `deps_repos.go` desaparece; `Dependencies` pasa los
+repos como concretos (o como interfaces "broad" de 1 nivel, si el sub-
+paquete las necesita).
+
+**Gravedad:** Baja (RR — ya catalogado). Se resuelve sola con NN.
+
+---
+
+#### TT-5 — `SetErrorRecorder` es estado global mutable
+
+**Dónde:** `handlers/responses.go:47`.
+
+```go
+func SetErrorRecorder(fn func(code string)) {
+    apperror.SetRecorder(fn)
+}
+```
+
+`router.go:245` lo llama en `NewRouter`:
+```go
+if deps.Metrics != nil {
+    handlers.SetErrorRecorder(func(code string) {
+        deps.Metrics.HTTPErrors.WithLabelValues(code).Inc()
+    })
+}
+```
+
+**Por qué es problema:** Es un package-level global mutable compartido
+por toda la vida del proceso. En tests, dos tests paralelos que llamen
+`SetErrorRecorder` con fakes distintos se pisan. El cleanup
+(`t.Cleanup(func() { SetErrorRecorder(nil) })` en
+`responses_test.go:213`) funciona sólo si los tests NO corren en
+paralelo — y lo hacen (`t.Parallel()` en la mayoría).
+
+**Principio violado:** Shared mutable state, testability.
+
+**Impacto:** Hoy no se manifiesta como flake porque `responses_test.go`
+es el único que setea el recorder en tests. Si mañana otro test lo
+setea, hay un data race.
+
+**Gravedad:** Baja (funciona hoy, pero es una bomba de tiempo).
+
+**Refactor:** Pasar el recorder como campo del handler que emite errores
+(no como global). Alternativa: aceptar el patrón stdlib (`var timeNow`)
+documentando que el global no se toca en paralelo (sólo en init del
+proceso). Ambas opciones son 5-10 LoC.
+
+---
+
+#### TT-6 — `IPTVHandler` con 10 deps consume `IPTVService` completo
+
+**Dónde:** `handlers/iptv.go:38-70`.
+
+```go
+type IPTVHandler struct {
+    svc       IPTVService           // 50 métodos
+    proxy     IPTVStreamProxyService
+    transmux  IPTVTransmuxer
+    logoCache *iptv.LogoCache
+    imageDir  string
+    libraries LibraryRepository
+    access    LibraryAccessService
+    audit     AuditEmitter
+    bus       EventBusPublisher
+    logger    *slog.Logger
+}
+```
+
+Un solo `IPTVHandler` sirve 12 ficheros (`iptv_channels.go`,
+`iptv_favorites.go`, `iptv_admin.go`, `iptv_health.go`, etc.) mediante
+receiver `(h *IPTVHandler)`. Todos comparten las 10 deps aunque cada
+fichero use 2-4.
+
+**Es el "pre-split P" del IPTV.** El audit 2026-05-14 detectó el patrón
+en `ItemHandler` (13 deps, 4 responsabilidades) y lo resolvió con el
+facade de 5 sub-handlers. `IPTVHandler` es el mismo olor sin resolver.
+
+**Refactor (siguiendo el patrón exitoso de ItemHandler):**
+
+```
+IPTVHandler (facade por embedding)
+├── IPTVChannelHandler    (channels, groups, schedule, bulk schedule, now playing)
+├── IPTVFavoritesHandler  (add/remove/list favorites, continue watching, record watch)
+├── IPTVAdminHandler      (refresh M3U/EPG, preflight check, spawn background)
+├── IPTVHealthHandler     (unhealthy channels, health summary, channel active/reset)
+├── IPTVEPGHandler        (EPG sources CRUD)
+├── IPTVPersonalisationHandler  (per-user channel order, visibility)
+├── IPTVAdminOrderHandler (library-level channel order, visibility)
+├── IPTVLogoHandler       (channel logo CRUD, iptv-org refresh)
+└── IPTVPlaybackFailureHandler  (record probe failure)
+```
+
+Cada sub-handler define su micro-interface de `svc` (2-11 métodos).
+El facade `IPTVHandler` los embebe y `NewIPTVHandler` distribuye las
+deps.
+
+**Gravedad:** Media (nuevo, TT-6). Es el mismo patrón que P pero para
+IPTV.
+
+---
+
+#### TT-7 — `NewItemHandler` con 15 parámetros posicionales
+
+**Dónde:** `handlers/items.go:50`.
+
+```go
+func NewItemHandler(lib LibraryService, images ImageRepository,
+    metadata MetadataRepository, userData UserDataRepository,
+    users UserService, chapters ChapterRepository,
+    segments EpisodeSegmentRepository,
+    externalIDs ExternalIDsRepository,
+    people PeopleRepoForItems,
+    collections CollectionRepoForItems,
+    providers ProviderManager,
+    identifier MetadataIdentifier,
+    trickplayDir string, audit AuditEmitter,
+    logger *slog.Logger) *ItemHandler
+```
+
+15 parámetros posicionales. Si alguien reordena dos del mismo tipo
+(`ImageRepository` y `MetadataRepository` → ambos interfaces), compila
+pero el handler hace cosas raras.
+
+**Principio violado:** KISS, error-proneness.
+
+**Refactor:** Struct `ItemHandlerDeps` con campos nombrados. Ya existe
+precedente en `stream.Deps`, `library.Deps`, `iptv.Deps`.
+
+```go
+type ItemHandlerDeps struct {
+    Lib         LibraryService
+    Images      ImageRepository
+    Metadata    MetadataRepository
+    // ...
+}
+```
+
+**Gravedad:** Baja (funciona, pero es el constructor más frágil del repo).
+
+---
+
+#### TT-8 — Comentarios en inglés en handlers
+
+**Dónde:** ~40% de los comentarios en `handlers/` siguen en inglés.
+
+Ejemplos:
+- `interfaces.go:83-92` — bloques de comentario en inglés para
+  `GetItemChildCounts`, `LatestItems`, `ListGenres`.
+- `deps_repos.go:1-21` — doc block completo en inglés.
+- `responses.go:43-48` — `SetErrorRecorder` doc en inglés.
+- `streaming_deadline.go` — doc completo en inglés.
+- `cache_control.go` — doc en inglés.
+
+La convención del proyecto dice "comentarios en español, técnicos,
+concisos". `library.go`, `system.go`, `auth.go` ya están en español.
+La inconsistencia es visible.
+
+**Gravedad:** Baja (cosmética). Hacer incrementalmente al tocar cada
+fichero por refactors de NN/OO.
+
+---
+
+### 6.4 Plan de ataque para este paquete
+
+Orden optimizado por valor/desbloqueo/bajo blast radius:
+
+| Paso | Qué | Cierra | Coste | Desbloquea |
+|------|-----|--------|-------|------------|
+| **1** | Micro-interfaces en cada handler file (empezar por IPTV, luego library, luego auth) | NN | 1 sesión grande | F15-5, OO, tests limpios |
+| **2** | Split `IPTVHandler` en sub-handlers (patrón P/ItemHandler) | TT-6 | 1 sesión mediana | Tests IPTV más ligeros |
+| **3** | Borrar `interfaces.go` y `deps_repos.go` | RR | mecánico tras paso 1 | Reduce 665 LoC de contratos |
+| **4** | Sub-paquetes por dominio en `handlers/` | OO | 1 sesión grande | Blast radius, clarity |
+| **5** | Split `Dependencies` en sub-structs por mount | MM | 1 sesión mediana | Claridad composition root |
+| **6** | Struct params para `NewItemHandler` et al. | TT-7 | mecánico | Robustez constructores |
+
+Los pasos 1-3 son el núcleo y se pueden hacer sin mover ficheros de
+sitio. Los pasos 4-6 son cambios de organización física que dependen
+de que los contratos estén resueltos.
