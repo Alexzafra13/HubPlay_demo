@@ -3,7 +3,7 @@ package api
 import (
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/api/handlers"
+	"hubplay/internal/api/handlers/uploads"
 	authmodel "hubplay/internal/auth/model"
 )
 
@@ -21,7 +21,7 @@ func mountUploads(r chi.Router, deps Dependencies) {
 	if deps.Uploads == nil || deps.UploadsAudit == nil || deps.EventBus == nil {
 		return
 	}
-	uploadsAPI := handlers.NewUploadsHandler(deps.UploadsAudit, deps.EventBus, deps.SSELimiter, deps.Logger)
+	uploadsAPI := uploads.NewUploadsHandler(deps.UploadsAudit, deps.EventBus, deps.SSELimiter, deps.Logger)
 	r.Get("/uploads/mine", uploadsAPI.ListMine)
 	r.Get("/uploads/events", uploadsAPI.Stream)
 	// tus handler. Importante: bajo /api/v1/uploads/ con el slash
@@ -35,7 +35,7 @@ func mountUploads(r chi.Router, deps Dependencies) {
 	if deps.Libraries == nil {
 		return
 	}
-	browseHandler := handlers.NewUploadBrowseHandler(deps.Libraries, deps.Logger)
+	browseHandler := uploads.NewUploadBrowseHandler(deps.Libraries, deps.Logger)
 	r.Group(func(r chi.Router) {
 		if deps.Permissions != nil {
 			r.Use(deps.Permissions.Require(authmodel.PermUpload))

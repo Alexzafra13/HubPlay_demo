@@ -1,0 +1,906 @@
+// me_home.go — endpoints powering the configurable home page.
+//
+// Routes (all under /api/v1, all behind Auth middleware):
+//
+//   GET  /me/home/layout       returns the caller's home layout, with
+//                              defaults generated server-side if the
+//                              user has never customised theirs.
+//   PUT  /me/home/layout       persists the caller's layout. Accepts
+//                              the same shape returned by GET. Sections
+//                              with unknown types or unreachable
+//                              library_ids are dropped silently — the
+//                              client doesn't need to know which
+//                              libraries it can see.
+//   GET  /me/home/trending     "trending this week": top items by
+//                              distinct-user plays in the trailing
+//                              7-day window, scoped to libraries the
+//                              caller can access.
+//   GET  /me/home/live-now     up to N live channels with their
+//                              currently airing EPG program.
+//
+// "Latest in library" doesn't get a new endpoint — the existing
+// /api/v1/items/latest?library_id=... already serves the same payload
+// shape the frontend's LatestInLibraryRail consumes.
+
+package me
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"strconv"
+
+	"hubplay/internal/api/handlers"
+	"hubplay/internal/auth"
+	"hubplay/internal/db"
+	"hubplay/internal/iptv"
+	"hubplay/internal/library"
+	librarymodel "hubplay/internal/library/model"
+)
+
+// HomeHandler exposes the home-page customisation + discovery rails.
+type HomeHandler struct {
+	home     homeRepo
+	prefs    UserPreferencesRepo
+	libs     HomeLibraryLister
+	items    handlers.ItemRepository
+	images   handlers.ImageRepository
+	metadata HomeMetadataRepo
+	// users resolves the caller's max_content_rating so trending /
+	// recommended can be filtered for kid profiles. Optional — when
+	// nil the cap collapses to "" and AllowedRating returns true
+	// for everything.
+	users  userProfileLookup
+	logger *slog.Logger
+}
+
+// homeRepo es el contrato estrecho que HomeHandler usa del
+// HomeRepository de db (las cuatro rails: Trending, Recommended,
+// LiveNow, BecauseYouWatched). Interface local en lugar del concreto
+// cierra parte del olor H del audit — el contrato queda expresado
+// UNA vez aquí.
+type homeRepo interface {
+	Trending(ctx context.Context, userID string, windowDays, limit int) ([]librarymodel.HomeTrendingItem, error)
+	Recommended(ctx context.Context, userID string, limit int) ([]librarymodel.HomeRecommendation, error)
+	BecauseYouWatched(ctx context.Context, userID string, limit int) (*librarymodel.HomeBecauseResult, error)
+	LiveNow(ctx context.Context, userID string, limit int) ([]librarymodel.HomeLiveNowChannel, error)
+}
+
+// HomeLibraryLister is the slice of handlers.LibraryRepository the home
+// handler needs — kept narrow so tests can stub without dragging in
+// the entire library service.
+type HomeLibraryLister interface {
+	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
+}
+
+// HomeMetadataRepo is the slice of handlers.MetadataRepository this handler
+// uses to enrich trending cards with overview/genres/poster colour
+// hints. Optional — handler degrades gracefully when nil.
+type HomeMetadataRepo interface {
+	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*librarymodel.Metadata, error)
+}
+
+func NewHomeHandler(
+	home homeRepo,
+	prefs UserPreferencesRepo,
+	libs HomeLibraryLister,
+	items handlers.ItemRepository,
+	images handlers.ImageRepository,
+	metadata HomeMetadataRepo,
+	users userProfileLookup,
+	logger *slog.Logger,
+) *HomeHandler {
+	return &HomeHandler{
+		home:     home,
+		prefs:    prefs,
+		libs:     libs,
+		items:    items,
+		images:   images,
+		metadata: metadata,
+		users:    users,
+		logger:   logger.With("module", "home-handler"),
+	}
+}
+
+// callerCapRating mirrors LibraryHandler / ItemHandler. Resolves
+// the caller's max_content_rating cap from the JWT subject. Nil-
+// safe: handlers wired without a handlers.UserService just fall back to no
+// cap (kid profiles won't get filtered, but non-cap deployments
+// keep working).
+func (h *HomeHandler) callerCapRating(ctx context.Context) string {
+	if h.users == nil {
+		return ""
+	}
+	claims := auth.GetClaims(ctx)
+	if claims == nil {
+		return ""
+	}
+	u, err := h.users.GetByID(ctx, claims.UserID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.MaxContentRating
+}
+
+// homeLayoutKey is the well-known user_preferences row that stores
+// the user's home layout JSON. One key per user; the value is the
+// full HomeLayout struct serialised.
+const homeLayoutKey = "home_layout"
+
+// HomeLayout is the document persisted under home_layout for one
+// user. Versioned so a future schema change can detect old payloads
+// and migrate them in-place rather than wiping every user's setup.
+type HomeLayout struct {
+	Version  int           `json:"version"`
+	Sections []HomeSection `json:"sections"`
+}
+
+// HomeSection is one rail in the user's home page. The same shape is
+// used both on the wire and in storage. `LibraryID` is set only when
+// `Type == "latest_in_library"`; for global rails (continue_watching,
+// trending, live_now, next_up) it is empty.
+//
+// `LibraryName` is computed server-side on GET (so the client
+// renders the rail title without a second round-trip when a library
+// is renamed) and ignored on PUT (read-only).
+type HomeSection struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	LibraryID   string `json:"library_id,omitempty"`
+	LibraryName string `json:"library_name,omitempty"`
+	Visible     bool   `json:"visible"`
+}
+
+// validSectionType returns true for any rail type the home renderer
+// understands. PUTs containing unknown types are rejected at write
+// time so the persisted layout stays a normal form the renderer can
+// trust.
+func validSectionType(t string) bool {
+	switch t {
+	case "continue_watching", "next_up", "trending", "live_now", "latest_in_library":
+		return true
+	default:
+		return false
+	}
+}
+
+// ─── GET /me/home/layout ─────────────────────────────────────────────
+
+// GetLayout returns the caller's home layout. If the user has never
+// saved a layout, generate a sensible default from their accessible
+// libraries (movies/series get a "latest_in_library" rail each;
+// livetv libraries don't, since the global "live_now" rail covers
+// them). The default is NOT persisted — it stays implicit until the
+// user actively customises and saves.
+func (h *HomeHandler) GetLayout(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	libs, err := h.libs.ListForUser(r.Context(), claims.UserID)
+	if err != nil {
+		h.logger.Error("list libraries for layout", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load libraries")
+		return
+	}
+	libByID := indexLibraries(libs)
+
+	stored, err := h.loadStoredLayout(r.Context(), claims.UserID)
+	if err != nil {
+		h.logger.Error("load stored layout", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load layout")
+		return
+	}
+
+	var layout HomeLayout
+	if stored != nil {
+		layout = *stored
+		// Reconcile: drop sections whose library_id no longer exists
+		// (deleted library) and append rails for newly added
+		// libraries the user hasn't seen yet, defaulted to visible.
+		// Same pattern Jellyfin uses — the user's manual ordering
+		// for libraries they've already seen is preserved, new ones
+		// just slot in at the end.
+		layout.Sections = reconcileLayout(layout.Sections, libs)
+	} else {
+		layout = defaultLayout(libs)
+	}
+
+	// Resolve display names for every latest_in_library section so
+	// the client can render rail titles without a second round-trip.
+	for i := range layout.Sections {
+		if layout.Sections[i].Type == "latest_in_library" {
+			if lib, ok := libByID[layout.Sections[i].LibraryID]; ok {
+				layout.Sections[i].LibraryName = lib.Name
+			}
+		}
+	}
+
+	handlers.RespondData(w, http.StatusOK, layout)
+}
+
+// ─── PUT /me/home/layout ─────────────────────────────────────────────
+
+// PutLayout persists the caller's home layout. Sections with
+// unknown types are dropped; latest_in_library sections referencing
+// libraries the user can't see are dropped (defence in depth — the
+// handler doesn't need to trust the client's view of access).
+// Returns the persisted, normalised layout so the client can rehydrate
+// without a follow-up GET.
+func (h *HomeHandler) PutLayout(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	var body HomeLayout
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32*1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
+		return
+	}
+
+	libs, err := h.libs.ListForUser(r.Context(), claims.UserID)
+	if err != nil {
+		h.logger.Error("list libraries for layout put", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load libraries")
+		return
+	}
+	libByID := indexLibraries(libs)
+
+	cleaned := make([]HomeSection, 0, len(body.Sections))
+	for _, s := range body.Sections {
+		if !validSectionType(s.Type) {
+			continue
+		}
+		if s.Type == "latest_in_library" {
+			if _, ok := libByID[s.LibraryID]; !ok {
+				continue
+			}
+		}
+		// LibraryName is read-only — strip whatever the client sent.
+		s.LibraryName = ""
+		// IDs are required so the frontend can key drag-reorder
+		// stably; synthesise one if missing.
+		if s.ID == "" {
+			s.ID = synthSectionID(s)
+		}
+		cleaned = append(cleaned, s)
+	}
+
+	persist := HomeLayout{Version: 1, Sections: cleaned}
+	raw, err := json.Marshal(persist)
+	if err != nil {
+		h.logger.Error("marshal layout", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to encode layout")
+		return
+	}
+	if _, err := h.prefs.Set(r.Context(), claims.UserID, homeLayoutKey, string(raw)); err != nil {
+		h.logger.Error("save layout", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save layout")
+		return
+	}
+
+	// Echo back with library names resolved, same as GET.
+	for i := range persist.Sections {
+		if persist.Sections[i].Type == "latest_in_library" {
+			if lib, ok := libByID[persist.Sections[i].LibraryID]; ok {
+				persist.Sections[i].LibraryName = lib.Name
+			}
+		}
+	}
+	handlers.RespondData(w, http.StatusOK, persist)
+}
+
+// ─── GET /me/home/trending ───────────────────────────────────────────
+
+// Trending returns the top items watched across all users in the
+// trailing 7-day window, scoped to libraries the caller can see.
+// `limit` query param caps the response size (default 12, max 30).
+func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+	// Sub-logger: 3 logs en este handler (query Error, image fetch Debug,
+	// metadata fetch Debug) ya tenían user_id implícito por contexto.
+	// Hacerlo explícito + endpoint facilita filtrado en prod.
+	log := h.logger.With("endpoint", "trending", "user_id", claims.UserID)
+
+	limit := parseLimit(r, 12, 30)
+
+	// Bump the inner limit when a content cap is active so the post-
+	// fetch filter has headroom — otherwise a kid profile at PG-13
+	// would always come back light if the trending list happens to
+	// be R-heavy that week. 2x is a pragmatic pad; cap is rarely
+	// active so the cost on regular accounts is one extra LIMIT.
+	cap := h.callerCapRating(r.Context())
+	innerLimit := limit
+	if cap != "" {
+		innerLimit = limit * 2
+	}
+
+	rows, err := h.home.Trending(r.Context(), claims.UserID, 7, innerLimit)
+	if err != nil {
+		log.Error("trending query", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load trending")
+		return
+	}
+
+	// Apply the rating cap. AllowedRating returns true when cap is
+	// "" so the no-cap path is a no-op.
+	if cap != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		entry := map[string]any{
+			"id":         row.ID,
+			"type":       row.Type,
+			"title":      row.Title,
+			"library_id": row.LibraryID,
+			"play_count": row.PlayCount,
+		}
+		if row.Year != nil {
+			entry["year"] = *row.Year
+		}
+		if row.CommunityRating != nil {
+			entry["community_rating"] = *row.CommunityRating
+		}
+		out = append(out, entry)
+	}
+
+	// Enrich with images (poster + backdrop + logo) so the cards
+	// look identical to those rendered by /items/latest.
+	if h.images != nil {
+		ids := db.IDsFromTrending(rows)
+		imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids)
+		if ierr != nil {
+			// Debug: home polleada al abrir y al navegar; un Warn por request
+			// satura. Fail-soft cubre (cards sin poster).
+			log.Debug("trending image fetch", "error", ierr)
+		} else {
+			for i, row := range rows {
+				if urls, ok := imgs[row.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						out[i]["poster_url"] = poster.Path
+						handlers.AttachPosterPlaceholder(out[i], poster)
+					}
+					if backdrop, ok := urls["backdrop"]; ok {
+						out[i]["backdrop_url"] = backdrop.Path
+					}
+					if logo, ok := urls["logo"]; ok {
+						out[i]["logo_url"] = logo.Path
+					}
+				}
+			}
+		}
+	}
+
+	// Enrich with overview/genres so trending cards can show the
+	// same chips as Continue Watching.
+	if h.metadata != nil {
+		ids := db.IDsFromTrending(rows)
+		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
+		if merr != nil {
+			log.Debug("trending metadata fetch", "error", merr)
+		} else {
+			for i, row := range rows {
+				if m, ok := metas[row.ID]; ok {
+					if m.Overview != "" {
+						out[i]["overview"] = m.Overview
+					}
+					if m.GenresJSON != "" {
+						var genres []string
+						if jerr := json.Unmarshal([]byte(m.GenresJSON), &genres); jerr == nil && len(genres) > 0 {
+							out[i]["genres"] = genres
+						}
+					}
+				}
+			}
+		}
+	}
+
+	handlers.RespondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items": out,
+			"total": len(out),
+		},
+	})
+}
+
+// ─── GET /me/home/recommended ────────────────────────────────────────
+
+// Recommended powers the "Recomendado para ti" tier of the home hero.
+// Picks unwatched movies / series that share genres with what the
+// caller most actively watches, attaching the matched genres so the
+// frontend can render a "Porque te gusta {{genre}}" subtitle.
+//
+// Returns an empty list (200) when the caller has no engagement
+// history — the cold-start case. The hero hides the slot rather than
+// erroring; falling back to a generic "newest" pick would just be
+// the New tier rendered twice with different copy.
+//
+// `limit` caps the response size (default 5, max 20).
+func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+	log := h.logger.With("endpoint", "recommended", "user_id", claims.UserID)
+
+	limit := parseLimit(r, 5, 20)
+
+	// Same headroom trick as Trending: pull 2x when a cap is active
+	// so the post-fetch filter has room to drop blocked items
+	// without leaving the rail empty.
+	cap := h.callerCapRating(r.Context())
+	innerLimit := limit
+	if cap != "" {
+		innerLimit = limit * 2
+	}
+
+	rows, err := h.home.Recommended(r.Context(), claims.UserID, innerLimit)
+	if err != nil {
+		log.Error("recommended query", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load recommended")
+		return
+	}
+
+	if cap != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		entry := map[string]any{
+			"id":         row.ID,
+			"type":       row.Type,
+			"title":      row.Title,
+			"library_id": row.LibraryID,
+			// `recommended_because` is a stable wire field the hero
+			// renders as "Porque te gusta {{genres[0]}} y {{genres[1]}}".
+			// Carrying the matched genres (not the user's top-3) means
+			// the copy honestly explains *this* item's match instead
+			// of overpromising shared affinity.
+			"recommended_because": map[string]any{"genres": row.Because},
+		}
+		if row.Year != nil {
+			entry["year"] = *row.Year
+		}
+		if row.CommunityRating != nil {
+			entry["community_rating"] = *row.CommunityRating
+		}
+		out = append(out, entry)
+		ids = append(ids, row.ID)
+	}
+
+	if h.images != nil && len(ids) > 0 {
+		imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids)
+		if ierr != nil {
+			log.Debug("recommended image fetch", "error", ierr)
+		} else {
+			for i, row := range rows {
+				if urls, ok := imgs[row.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						out[i]["poster_url"] = poster.Path
+						handlers.AttachPosterPlaceholder(out[i], poster)
+					}
+					if backdrop, ok := urls["backdrop"]; ok {
+						out[i]["backdrop_url"] = backdrop.Path
+					}
+					if logo, ok := urls["logo"]; ok {
+						out[i]["logo_url"] = logo.Path
+					}
+				}
+			}
+		}
+	}
+
+	if h.metadata != nil && len(ids) > 0 {
+		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
+		if merr != nil {
+			log.Debug("recommended metadata fetch", "error", merr)
+		} else {
+			for i, row := range rows {
+				if m, ok := metas[row.ID]; ok {
+					if m.Overview != "" {
+						out[i]["overview"] = m.Overview
+					}
+					if m.GenresJSON != "" {
+						var genres []string
+						if jerr := json.Unmarshal([]byte(m.GenresJSON), &genres); jerr == nil && len(genres) > 0 {
+							out[i]["genres"] = genres
+						}
+					}
+				}
+			}
+		}
+	}
+
+	handlers.RespondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items": out,
+			"total": len(out),
+		},
+	})
+}
+
+// ─── GET /me/home/live-now ───────────────────────────────────────────
+
+// LiveNow returns up to N live channels with their currently airing
+// EPG program. `limit` query param caps the response size (default 5,
+// max 20).
+func (h *HomeHandler) LiveNow(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	limit := parseLimit(r, 5, 20)
+
+	rows, err := h.home.LiveNow(r.Context(), claims.UserID, limit)
+	if err != nil {
+		h.logger.Error("live now query", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load live now")
+		return
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		// Deterministic placeholder avatar so the home rail can match
+		// the LiveTV browser's look when a channel has no logo or the
+		// upstream 404s. Same recipe as channelDTO (iptv_dto.go) — both
+		// surfaces hand the frontend identical (initials, bg, fg) for
+		// the same channel name, so a card on the home page and on
+		// /live-tv don't drift in colour or letters. Always populated,
+		// even when channel_logo is present, so the onError fallback
+		// in <ChannelLogo> never has to guess.
+		logo := iptv.DeriveLogoFallback(row.ChannelName)
+		entry := map[string]any{
+			"channel_id":    row.ChannelID,
+			"channel_name":  row.ChannelName,
+			"library_id":    row.LibraryID,
+			"library_name":  row.LibraryName,
+			"logo_initials": logo.Initials,
+			"logo_bg":       logo.Background,
+			"logo_fg":       logo.Foreground,
+		}
+		// Channel logos go through the same-origin proxy so a strict
+		// img-src CSP doesn't have to whitelist every upstream the
+		// M3U references. Empty when the channel has no logo at all
+		// — the LiveNowCard falls back to initials in that case.
+		if row.ChannelLogo != "" {
+			entry["channel_logo"] = "/api/v1/channels/" + row.ChannelID + "/logo"
+		}
+		if row.ProgramTitle != "" {
+			entry["program_title"] = row.ProgramTitle
+		}
+		if row.ProgramStart != nil {
+			entry["program_start"] = *row.ProgramStart
+		}
+		if row.ProgramEnd != nil {
+			entry["program_end"] = *row.ProgramEnd
+		}
+		if row.ProgramIcon != "" {
+			entry["program_icon"] = row.ProgramIcon
+		}
+		out = append(out, entry)
+	}
+
+	handlers.RespondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items": out,
+			"total": len(out),
+		},
+	})
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────
+
+func (h *HomeHandler) loadStoredLayout(ctx context.Context, userID string) (*HomeLayout, error) {
+	rows, err := h.prefs.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range rows {
+		if p.Key == homeLayoutKey {
+			var layout HomeLayout
+			if jerr := json.Unmarshal([]byte(p.Value), &layout); jerr != nil {
+				// Corrupt payload → fall back to defaults rather
+				// than failing the whole home page.
+				return nil, nil //nolint:nilerr
+			}
+			return &layout, nil
+		}
+	}
+	return nil, nil
+}
+
+func indexLibraries(libs []*librarymodel.Library) map[string]*librarymodel.Library {
+	out := make(map[string]*librarymodel.Library, len(libs))
+	for _, l := range libs {
+		out[l.ID] = l
+	}
+	return out
+}
+
+// defaultLayout generates the home layout for a user who has never
+// customised theirs. Order matches the most common Jellyfin /
+// Plex web layout: continue → next-up → trending → live → catalog
+// rails (one per non-livetv library).
+func defaultLayout(libs []*librarymodel.Library) HomeLayout {
+	sections := []HomeSection{
+		{ID: "continue_watching", Type: "continue_watching", Visible: true},
+		{ID: "next_up", Type: "next_up", Visible: true},
+		{ID: "trending", Type: "trending", Visible: true},
+	}
+
+	// Live Now section only matters when there's at least one
+	// livetv library; otherwise hide it from the default so an
+	// empty rail doesn't render a stub.
+	hasLiveTV := false
+	for _, l := range libs {
+		if l.ContentType == "livetv" {
+			hasLiveTV = true
+			break
+		}
+	}
+	sections = append(sections, HomeSection{
+		ID: "live_now", Type: "live_now", Visible: hasLiveTV,
+	})
+
+	for _, l := range libs {
+		if l.ContentType == "livetv" {
+			continue
+		}
+		sections = append(sections, HomeSection{
+			ID:        "latest_in_lib_" + l.ID,
+			Type:      "latest_in_library",
+			LibraryID: l.ID,
+			Visible:   true,
+		})
+	}
+	return HomeLayout{Version: 1, Sections: sections}
+}
+
+// reconcileLayout merges a stored layout against the user's current
+// library set. Sections referencing dead libraries get dropped;
+// libraries that have no section yet get appended (visible by
+// default), preserving the user's manual order for everything else.
+func reconcileLayout(stored []HomeSection, libs []*librarymodel.Library) []HomeSection {
+	libByID := indexLibraries(libs)
+	seenLib := make(map[string]bool, len(stored))
+
+	out := make([]HomeSection, 0, len(stored))
+	for _, s := range stored {
+		if !validSectionType(s.Type) {
+			continue
+		}
+		if s.Type == "latest_in_library" {
+			if _, ok := libByID[s.LibraryID]; !ok {
+				continue
+			}
+			seenLib[s.LibraryID] = true
+		}
+		out = append(out, s)
+	}
+
+	for _, l := range libs {
+		if l.ContentType == "livetv" || seenLib[l.ID] {
+			continue
+		}
+		out = append(out, HomeSection{
+			ID:        "latest_in_lib_" + l.ID,
+			Type:      "latest_in_library",
+			LibraryID: l.ID,
+			Visible:   true,
+		})
+	}
+	return out
+}
+
+// synthSectionID generates a stable id for a section that arrived
+// without one. Kept deterministic so the same logical section gets
+// the same id across PUTs.
+func synthSectionID(s HomeSection) string {
+	if s.Type == "latest_in_library" {
+		return "latest_in_lib_" + s.LibraryID
+	}
+	return s.Type
+}
+
+// parseLimit is a small util used by Trending and LiveNow.
+func parseLimit(r *http.Request, def, max int) int {
+	q := r.URL.Query().Get("limit")
+	if q == "" {
+		return def
+	}
+	n, err := strconv.Atoi(q)
+	if err != nil || n <= 0 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
+// ─── GET /me/home/because-you-watched ────────────────────────────────
+
+// BecauseYouWatched powers the "Porque viste X" rail on Home.
+// Picks the caller's most recent COMPLETED watch as the seed, then
+// returns up to `limit` unwatched items that share genres with the
+// seed. Episode completes fold to their parent series so the
+// header reads "Porque viste Breaking Bad" instead of an episode
+// title.
+//
+// Returns 200 with `{"seed": null, "items": []}` when the caller
+// has no completed watches yet (cold-start), so the frontend can
+// hide the rail without a 404 round-trip. Same shape when the
+// seed exists but has no genres tagged — recommendations would be
+// too noisy to be useful.
+//
+// `limit` caps the response size (default 12, max 30).
+func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	limit := parseLimit(r, 12, 30)
+	cap := h.callerCapRating(r.Context())
+	innerLimit := limit
+	if cap != "" {
+		innerLimit = limit * 2
+	}
+
+	result, err := h.home.BecauseYouWatched(r.Context(), claims.UserID, innerLimit)
+	if err != nil {
+		h.logger.Error("because-you-watched query", "error", err)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
+			"failed to load recommendations")
+		return
+	}
+
+	if result == nil || result.Seed == nil {
+		handlers.RespondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"seed":  nil,
+				"items": []any{},
+			},
+		})
+		return
+	}
+
+	rows := result.Items
+	if cap != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		entry := map[string]any{
+			"id":         row.ID,
+			"type":       row.Type,
+			"title":      row.Title,
+			"library_id": row.LibraryID,
+		}
+		// Match the shape /me/home/recommended already uses so the
+		// frontend has a single Recommendation card vocabulary
+		// across both rails.
+		if len(row.Because) > 0 {
+			entry["recommended_because"] = map[string]any{"genres": row.Because}
+		}
+		if row.Year != nil {
+			entry["year"] = *row.Year
+		}
+		if row.CommunityRating != nil {
+			entry["community_rating"] = *row.CommunityRating
+		}
+		out = append(out, entry)
+		ids = append(ids, row.ID)
+	}
+
+	// Enrich with poster art for the rail tiles. The seed gets
+	// its own poster lookup so the rail header can render a small
+	// thumbnail next to "Porque viste X".
+	if h.images != nil && (len(ids) > 0 || result.Seed != nil) {
+		if result.Seed != nil {
+			ids = append(ids, result.Seed.ID)
+		}
+		if imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids); ierr == nil {
+			// Strip the seed id back off after consumption so the
+			// tiles loop only sees recommendation rows.
+			seedURLs := imgs[result.Seed.ID]
+			for i := range out {
+				rec := rows[i]
+				if urls, ok := imgs[rec.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						out[i]["poster_url"] = poster.Path
+						handlers.AttachPosterPlaceholder(out[i], poster)
+					}
+				}
+			}
+			seed := map[string]any{
+				"id":         result.Seed.ID,
+				"type":       result.Seed.Type,
+				"title":      result.Seed.Title,
+				"library_id": result.Seed.LibraryID,
+			}
+			if result.Seed.Year != nil {
+				seed["year"] = *result.Seed.Year
+			}
+			if poster, ok := seedURLs["primary"]; ok {
+				seed["poster_url"] = poster.Path
+				handlers.AttachPosterPlaceholder(seed, poster)
+			}
+			handlers.RespondJSON(w, http.StatusOK, map[string]any{
+				"data": map[string]any{
+					"seed":  seed,
+					"items": out,
+				},
+			})
+			return
+		}
+	}
+
+	// Image fetch failed (or no image repo wired) — still respond
+	// with the basic shape so the frontend can render text-only
+	// chips rather than a broken state.
+	seed := map[string]any{
+		"id":         result.Seed.ID,
+		"type":       result.Seed.Type,
+		"title":      result.Seed.Title,
+		"library_id": result.Seed.LibraryID,
+	}
+	if result.Seed.Year != nil {
+		seed["year"] = *result.Seed.Year
+	}
+	handlers.RespondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"seed":  seed,
+			"items": out,
+		},
+	})
+}

@@ -58,7 +58,7 @@ func TestHandleServiceError_RendersAppErrorDirectly(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := newRequestWithID("req-123")
 
-	handleServiceError(rr, r, domain.NewTranscodeBusy(2, 2))
+	HandleServiceError(rr, r, domain.NewTranscodeBusy(2, 2))
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("status: got %d, want 503", rr.Code)
@@ -88,7 +88,7 @@ func TestHandleServiceError_RendersWrappedAppError(t *testing.T) {
 	r := newRequestWithID("req-wrap")
 
 	wrapped := fmt.Errorf("transcode: %w", domain.NewTranscodeBusy(1, 1))
-	handleServiceError(rr, r, wrapped)
+	HandleServiceError(rr, r, wrapped)
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("status: got %d, want 503", rr.Code)
@@ -124,7 +124,7 @@ func TestHandleServiceError_SentinelFallback(t *testing.T) {
 			rr := httptest.NewRecorder()
 			r := newRequestWithID("req-" + tc.name)
 
-			handleServiceError(rr, r, tc.err)
+			HandleServiceError(rr, r, tc.err)
 
 			if rr.Code != tc.wantCode {
 				t.Errorf("status: got %d, want %d", rr.Code, tc.wantCode)
@@ -145,7 +145,7 @@ func TestHandleServiceError_ValidationErrorDetails(t *testing.T) {
 		"username": "too short",
 		"password": "required",
 	})
-	handleServiceError(rr, r, valErr)
+	HandleServiceError(rr, r, valErr)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status: got %d", rr.Code)
@@ -171,7 +171,7 @@ func TestHandleServiceError_InternalErrorDoesNotLeakCause(t *testing.T) {
 	r := newRequestWithID("req-int")
 
 	secret := errors.New("SECRET_DB_DSN=postgres://user:pass@host/db")
-	handleServiceError(rr, r, secret)
+	HandleServiceError(rr, r, secret)
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("status: got %d, want 500", rr.Code)
@@ -195,7 +195,7 @@ func TestHandleServiceError_OmitsRequestIDWhenAbsent(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/x", nil) // no request_id in ctx
 
-	handleServiceError(rr, r, domain.NewNotFound("thing"))
+	HandleServiceError(rr, r, domain.NewNotFound("thing"))
 
 	body := decodeErrorResponse(t, rr)
 	if _, present := body["request_id"]; present {
@@ -215,9 +215,9 @@ func TestSetErrorRecorder_InvokedOnEveryAppError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := newRequestWithID("req-metric")
 
-	handleServiceError(rr, r, domain.NewTranscodeBusy(1, 1))
-	handleServiceError(rr, r, domain.ErrNotFound)        // via sentinel fallback
-	handleServiceError(rr, r, errors.New("unexpected")) // 500 → INTERNAL_ERROR
+	HandleServiceError(rr, r, domain.NewTranscodeBusy(1, 1))
+	HandleServiceError(rr, r, domain.ErrNotFound)        // via sentinel fallback
+	HandleServiceError(rr, r, errors.New("unexpected")) // 500 → INTERNAL_ERROR
 
 	want := []string{"STREAM_TRANSCODE_BUSY", "NOT_FOUND", "INTERNAL_ERROR"}
 	if len(gotCodes) != len(want) {
@@ -238,7 +238,7 @@ func TestSetErrorRecorder_NilRestoresNoop(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	r := newRequestWithID("req-nil")
-	handleServiceError(rr, r, domain.NewNotFound("thing"))
+	HandleServiceError(rr, r, domain.NewNotFound("thing"))
 }
 
 func TestHandleServiceError_Logs5xxAppError(t *testing.T) {
@@ -250,7 +250,7 @@ func TestHandleServiceError_Logs5xxAppError(t *testing.T) {
 	r := newRequestWithID("req-500")
 
 	cause := errors.New("db connection refused")
-	handleServiceError(rr, r, domain.NewInternal(cause))
+	HandleServiceError(rr, r, domain.NewInternal(cause))
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("status: got %d, want 500", rr.Code)
@@ -278,7 +278,7 @@ func TestHandleServiceError_DoesNotLog4xxAppError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := newRequestWithID("req-404")
 
-	handleServiceError(rr, r, domain.NewNotFound("thing"))
+	HandleServiceError(rr, r, domain.NewNotFound("thing"))
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404", rr.Code)
@@ -296,7 +296,7 @@ func TestHandleServiceError_Logs5xxWhenAppErrorIsWrapped(t *testing.T) {
 	r := newRequestWithID("req-wrap-500")
 
 	wrapped := fmt.Errorf("save item: %w", domain.NewInternal(errors.New("disk full")))
-	handleServiceError(rr, r, wrapped)
+	HandleServiceError(rr, r, wrapped)
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("status: got %d", rr.Code)
@@ -317,7 +317,7 @@ func TestRespondError_WritesAppErrorEnvelope(t *testing.T) {
 	rr := httptest.NewRecorder()
 	r := newRequestWithID("req-resp")
 
-	respondError(rr, r, http.StatusBadRequest, "INVALID_JSON", "bad body")
+	RespondError(rr, r, http.StatusBadRequest, "INVALID_JSON", "bad body")
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status: got %d", rr.Code)

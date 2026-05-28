@@ -6,7 +6,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/api/handlers"
+	"hubplay/internal/api/handlers/admin"
+	libhandler "hubplay/internal/api/handlers/library"
+	"hubplay/internal/api/handlers/system"
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
 )
@@ -23,11 +25,11 @@ import (
 // pueden exfiltrar/reemplazar la DB entera o expandir la superficie de
 // CSRF.
 func mountAdminSystem(r chi.Router, deps Dependencies) {
-	var sysStreams handlers.SystemStatsProvider
+	var sysStreams system.SystemStatsProvider
 	if deps.StreamManager != nil {
 		sysStreams = deps.StreamManager
 	}
-	var sysLibs handlers.LibraryStatsProvider
+	var sysLibs system.LibraryStatsProvider
 	if deps.Libraries != nil {
 		sysLibs = deps.Libraries
 	}
@@ -49,11 +51,11 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 	// Host info sampler — opcional. nil providers degradan a una
 	// host section vacía así que el test rig + paths mínimos siguen
 	// funcionando.
-	var hostInfo handlers.HostInfoProvider
+	var hostInfo system.HostInfoProvider
 	if deps.HostMetrics != nil {
 		hostInfo = deps.HostMetrics
 	}
-	sysHandler := handlers.NewSystemHandler(handlers.SystemHandlerConfig{
+	sysHandler := system.NewSystemHandler(system.SystemHandlerConfig{
 		Health:         deps.DB,
 		Activity:       deps.Activity,
 		Streams:        sysStreams,
@@ -89,7 +91,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// es nil (dev build / repo no configurado) las rutas
 		// devuelven cached zero-state vía el handler.
 		if deps.Updates != nil {
-			updHandler := handlers.NewUpdatesHandler(deps.Updates, deps.Logger)
+			updHandler := system.NewUpdatesHandler(deps.Updates, deps.Logger)
 			r.Get("/updates", updHandler.Status)
 			r.Post("/updates/check", updHandler.Check)
 		}
@@ -97,7 +99,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// series rolled-up por actividad (no episodios sueltos
 		// como hacía /items/latest).
 		if deps.Libraries != nil {
-			libAdminHandler := handlers.NewLibraryHandler(
+			libAdminHandler := libhandler.NewLibraryHandler(
 				deps.Libraries, deps.Images, deps.Metadata,
 				deps.UserData, deps.Users, deps.Audit, deps.Logger,
 			)
@@ -109,7 +111,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// métodos son admin-only y quieren compartir el prefix
 		// /admin/system/* que el dashboard ya usa.
 		if deps.StreamManager != nil {
-			adminStreams := handlers.NewAdminStreamsHandler(
+			adminStreams := admin.NewAdminStreamsHandler(
 				deps.StreamManager, deps.Users, deps.Items, deps.Logger,
 			)
 			r.Get("/sessions", adminStreams.ListSessions)
@@ -121,7 +123,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// es distinta: stats cada 30s, storage cada minuto - cambia
 		// solo con scans.
 		if deps.Libraries != nil && deps.Items != nil {
-			adminStorage := handlers.NewAdminStorageHandler(
+			adminStorage := admin.NewAdminStorageHandler(
 				deps.Libraries, deps.Items, deps.Logger,
 			)
 			r.Get("/storage/disks", adminStorage.Disks)
@@ -134,7 +136,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 			// (test rig / startup mínimo) — handler trata eso como
 			// "detector no vio nada" y cae a "auto".
 			var detectedHWAccel []string
-			var streamingDefaults handlers.StreamingDefaults
+			var streamingDefaults admin.StreamingDefaults
 			if deps.StreamManager != nil {
 				for _, a := range deps.StreamManager.HWAccelInfo().Available {
 					detectedHWAccel = append(detectedHWAccel, string(a))
@@ -144,13 +146,13 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 				// reflecta lo que el server eligió para el
 				// hardware del host — no una constante YAML
 				// estática que el admin tendría que deducir.
-				streamingDefaults = handlers.StreamingDefaults{
+				streamingDefaults = admin.StreamingDefaults{
 					MaxTranscodeSessions:        deps.StreamManager.MaxTranscodeSessions(),
 					MaxTranscodeSessionsPerUser: deps.StreamManager.MaxTranscodeSessionsPerUser(),
 					TranscodePreset:             deps.StreamManager.TranscodePreset(),
 				}
 			}
-			settingsHandler := handlers.NewSettingsHandler(handlers.SettingsHandlerConfig{
+			settingsHandler := admin.NewSettingsHandler(admin.SettingsHandlerConfig{
 				Settings:          deps.Settings,
 				BaseURLDefault:    baseURL,
 				HWAccelDefault:    deps.HWAccelDefault,
@@ -177,14 +179,14 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 				r.Use(deps.Permissions.RequireOwner)
 			}
 			if deps.DB != nil {
-				backupHandler := handlers.NewAdminBackupHandler(
+				backupHandler := admin.NewAdminBackupHandler(
 					deps.DatabaseDriver, deps.DB, deps.DatabasePath, deps.Audit, deps.Logger,
 				)
 				r.Get("/backup", backupHandler.Download)
 				r.Post("/backup/restore", backupHandler.Upload)
 			}
 			if deps.SetupService != nil && deps.ConfigPath != "" {
-				dbHandler := handlers.NewAdminDBHandler(
+				dbHandler := admin.NewAdminDBHandler(
 					deps.Config,
 					deps.ConfigPath,
 					deps.DB,
@@ -207,7 +209,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 			// /admin/system para que el dashboard tenga un
 			// único hogar de "configuración del servidor".
 			if deps.CorsOriginsRepo != nil && deps.CorsRegistry != nil {
-				corsHandler := handlers.NewCorsOriginsHandler(
+				corsHandler := system.NewCorsOriginsHandler(
 					deps.CorsOriginsRepo,
 					deps.CorsRegistry,
 					ValidateCorsOrigin,
@@ -224,7 +226,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// SSE stream para el live tail. El handler short-circuita
 		// cuando LogBuffer es nil (test builds, etc.) así que los
 		// callers no reciben 500.
-		logsHandler := handlers.NewAdminLogsHandler(deps.LogBuffer, deps.SSELimiter)
+		logsHandler := admin.NewAdminLogsHandler(deps.LogBuffer, deps.SSELimiter)
 		r.Get("/logs", logsHandler.Snapshot)
 		r.Get("/logs/stream", logsHandler.Stream)
 
@@ -234,7 +236,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// devuelve true para todo). Sub-Group adicional sobre el
 		// RequireAdmin del padre.
 		if deps.AuditLog != nil {
-			auditHandler := handlers.NewAuditLogHandler(deps.AuditLog, deps.Logger)
+			auditHandler := admin.NewAuditLogHandler(deps.AuditLog, deps.Logger)
 			r.Group(func(r chi.Router) {
 				if deps.Permissions != nil {
 					r.Use(deps.Permissions.Require(authmodel.PermViewAudit))

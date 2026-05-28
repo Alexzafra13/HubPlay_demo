@@ -1,9 +1,11 @@
 package api
 
 import (
-	"github.com/go-chi/chi/v5"
+	authhandler "hubplay/internal/api/handlers/auth"
+	"hubplay/internal/api/handlers/me"
+	"hubplay/internal/api/handlers/users"
 
-	"hubplay/internal/api/handlers"
+	"github.com/go-chi/chi/v5"
 )
 
 // mountAuthProtected registra los endpoints de auth que requieren sesión
@@ -12,8 +14,8 @@ import (
 // confirmar un device code.
 func mountAuthProtected(
 	r chi.Router,
-	authHandler *handlers.AuthHandler,
-	deviceHandler *handlers.DeviceAuthHandler,
+	authHandler *authhandler.AuthHandler,
+	deviceHandler *authhandler.DeviceAuthHandler,
 ) {
 	r.Post("/auth/logout", authHandler.Logout)
 	if deviceHandler != nil {
@@ -28,13 +30,13 @@ func mountSSEEvents(r chi.Router, deps Dependencies) {
 	if deps.EventBus == nil {
 		return
 	}
-	eventHandler := handlers.NewEventHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
+	eventHandler := me.NewEventHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
 	r.Get("/events", eventHandler.Stream)
 
 	// User-scoped SSE: cross-device sync de progreso de visualizado,
 	// played, favourites. El handler filtra por claims.UserID así
 	// que otros usuarios del mismo server nunca ven estos events.
-	meEventsHandler := handlers.NewMeEventsHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
+	meEventsHandler := me.NewMeEventsHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
 	r.Get("/me/events", meEventsHandler.Stream)
 }
 
@@ -43,8 +45,8 @@ func mountSSEEvents(r chi.Router, deps Dependencies) {
 // del claim del JWT — no hay path param que manipular.
 func mountMeIdentity(
 	r chi.Router,
-	authHandler *handlers.AuthHandler,
-	userHandler *handlers.UserHandler,
+	authHandler *authhandler.AuthHandler,
+	userHandler *users.UserHandler,
 ) {
 	r.Get("/me", userHandler.Me)
 	r.Post("/me/password", authHandler.ChangeMyPassword)
@@ -67,14 +69,14 @@ func mountMeIdentity(
 // montan.
 func mountMeNotificationsAndPreferences(r chi.Router, deps Dependencies) {
 	if deps.Notifications != nil {
-		notifHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.Logger)
+		notifHandler := me.NewNotificationsHandler(deps.Notifications, deps.Logger)
 		r.Get("/me/notifications", notifHandler.List)
 		r.Post("/me/notifications/{id}/read", notifHandler.MarkRead)
 		r.Post("/me/notifications/read-all", notifHandler.MarkAllRead)
 	}
 
 	if deps.UserPreferences != nil {
-		prefsHandler := handlers.NewPreferencesHandler(deps.UserPreferences, deps.Logger)
+		prefsHandler := me.NewPreferencesHandler(deps.UserPreferences, deps.Logger)
 		r.Get("/me/preferences", prefsHandler.ListMine)
 		r.Put("/me/preferences/{key}", prefsHandler.SetMine)
 		r.Delete("/me/preferences/{key}", prefsHandler.DeleteMine)
@@ -88,7 +90,7 @@ func mountWatchProgress(r chi.Router, deps Dependencies) {
 	if deps.UserData == nil {
 		return
 	}
-	progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.EventBus, deps.Logger)
+	progressHandler := me.NewProgressHandler(deps.UserData, deps.Images, deps.EventBus, deps.Logger)
 
 	r.Get("/me/continue-watching", progressHandler.ContinueWatching)
 	r.Delete("/me/continue-watching/{itemId}", progressHandler.RemoveFromContinueWatching)
@@ -113,7 +115,7 @@ func mountHome(r chi.Router, deps Dependencies) {
 	if deps.Home == nil || deps.UserPreferences == nil || deps.LibraryRepo == nil || deps.Items == nil {
 		return
 	}
-	homeHandler := handlers.NewHomeHandler(
+	homeHandler := me.NewHomeHandler(
 		deps.Home,
 		deps.UserPreferences,
 		deps.LibraryRepo,

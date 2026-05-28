@@ -3,7 +3,8 @@ package api
 import (
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/api/handlers"
+	authhandler "hubplay/internal/api/handlers/auth"
+	"hubplay/internal/api/handlers/users"
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
 )
@@ -15,8 +16,8 @@ import (
 // que el handler enforza directamente.
 func mountUsers(
 	r chi.Router,
-	authHandler *handlers.AuthHandler,
-	userHandler *handlers.UserHandler,
+	authHandler *authhandler.AuthHandler,
+	userHandler *users.UserHandler,
 	deps Dependencies,
 ) {
 	r.Route("/users", func(r chi.Router) {
@@ -68,7 +69,7 @@ func mountUsers(
 		// genérico; el write está gated por can_manage_admins. El
 		// owner es inmutable — sin endpoint de transferencia.
 		if deps.Permissions != nil && deps.UserRepo != nil {
-			permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Audit, deps.Logger)
+			permHandler := users.NewPermissionsHandler(deps.UserRepo, deps.Audit, deps.Logger)
 			r.Get("/{id}/permissions", permHandler.GetPermissions)
 			r.With(deps.Permissions.Require(authmodel.PermManageAdmins)).
 				Put("/{id}/permissions", permHandler.PutPermissions)
