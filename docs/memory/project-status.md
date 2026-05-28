@@ -14,9 +14,10 @@
 |---|---|
 | **Audit olores altos 2026-05-14** | ✅ **6/6 cerrados** |
 | **Audit olores macro 2026-05-27** | NN ✅, PP ✅, QQ ✅, SS-3/4/5 ✅, **OO ✅, RR ✅, MM ✅**. Todos cerrados. |
+| **Audit per-package satélite SS** | **SS-1 ✅, SS-6 ✅** (sesión 2026-05-28 cleanup). Quedan SS-2, TT-5, TT-7, TT-8. |
 | **Tests backend** | 38 paquetes verdes (handlers split en 10 sub-paquetes) |
 | **Tests frontend** | **717/717** vitest verdes |
-| **PRs abiertas** | (ninguna — todo mergeado) |
+| **PRs abiertas** | [#481](https://github.com/Alexzafra13/HubPlay_demo/pull/481) (SS-6 cleanupLoop drain), una más en camino (SS-1 doc) |
 
 ---
 
