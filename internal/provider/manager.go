@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"hubplay/internal/db"
+	providermodel "hubplay/internal/provider/model"
 )
 
 // Manager orchestrates all registered providers and persists their config.
@@ -53,7 +54,7 @@ func (m *Manager) Register(ctx context.Context, p Provider) error {
 	// appears in the admin UI even when it lacks an API key).
 	if cfg == nil {
 		providerType := resolveType(p)
-		cfg = &db.ProviderConfig{
+		cfg = &providermodel.ProviderConfig{
 			Name:     name,
 			Type:     providerType,
 			Version:  "1.0",

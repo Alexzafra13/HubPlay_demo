@@ -3,9 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	providermodel "hubplay/internal/provider/model"
 	"errors"
 	"fmt"
-	"time"
 
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
@@ -14,17 +15,6 @@ import (
 // ProviderConfig represents a provider's persisted configuration.
 // Nullable columns (config_json, api_key) surface as plain strings — empty
 // means NULL in SQL. The conversion happens at the adapter boundary.
-type ProviderConfig struct {
-	Name       string
-	Type       string // metadata, image, subtitle
-	Version    string
-	Status     string // active, disabled
-	Priority   int    // lower = higher priority
-	ConfigJSON string
-	APIKey     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
 
 // ProviderRepository — Pattern A dual-dialect. Priority is INTEGER →
 // int64 in SQLite, int32 in Postgres; param cast happens at the call
@@ -49,7 +39,7 @@ func (r *ProviderRepository) useSQLite() bool { return r.sq != nil }
 // Upsert creates or updates a provider configuration. Both created_at and
 // updated_at are stamped with `now` on insert; only updated_at is touched on
 // conflict (the SQL's DO UPDATE set) — created_at of existing rows is preserved.
-func (r *ProviderRepository) Upsert(ctx context.Context, p *ProviderConfig) error {
+func (r *ProviderRepository) Upsert(ctx context.Context, p *providermodel.ProviderConfig) error {
 	now := timeNow()
 	var err error
 	if r.useSQLite() {
@@ -86,7 +76,7 @@ func (r *ProviderRepository) Upsert(ctx context.Context, p *ProviderConfig) erro
 // GetByName returns a provider config by name. Returns (nil, nil) when not
 // found — callers treat that as "no config, use defaults". Intentionally
 // different from signing_keys/sessions which surface domain.ErrNotFound.
-func (r *ProviderRepository) GetByName(ctx context.Context, name string) (*ProviderConfig, error) {
+func (r *ProviderRepository) GetByName(ctx context.Context, name string) (*providermodel.ProviderConfig, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetProvider(ctx, name)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -110,7 +100,7 @@ func (r *ProviderRepository) GetByName(ctx context.Context, name string) (*Provi
 }
 
 // ListActive returns all active providers, ordered by priority.
-func (r *ProviderRepository) ListActive(ctx context.Context) ([]*ProviderConfig, error) {
+func (r *ProviderRepository) ListActive(ctx context.Context) ([]*providermodel.ProviderConfig, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListActiveProviders(ctx)
 		if err != nil {
@@ -126,7 +116,7 @@ func (r *ProviderRepository) ListActive(ctx context.Context) ([]*ProviderConfig,
 }
 
 // ListAll returns all providers, ordered by priority.
-func (r *ProviderRepository) ListAll(ctx context.Context) ([]*ProviderConfig, error) {
+func (r *ProviderRepository) ListAll(ctx context.Context) ([]*providermodel.ProviderConfig, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListProviders(ctx)
 		if err != nil {
@@ -142,7 +132,7 @@ func (r *ProviderRepository) ListAll(ctx context.Context) ([]*ProviderConfig, er
 }
 
 // ListByType returns active providers of a specific type.
-func (r *ProviderRepository) ListByType(ctx context.Context, providerType string) ([]*ProviderConfig, error) {
+func (r *ProviderRepository) ListByType(ctx context.Context, providerType string) ([]*providermodel.ProviderConfig, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListProvidersByType(ctx, providerType)
 		if err != nil {
@@ -204,8 +194,8 @@ func (r *ProviderRepository) Delete(ctx context.Context, name string) error {
 // providerFromSqliteRow maps the sqlc-generated row to the domain shape.
 // Priority widens from int64 to int (always fits — we set it from an int
 // in the first place).
-func providerFromSqliteRow(r sqlc.Provider) ProviderConfig {
-	return ProviderConfig{
+func providerFromSqliteRow(r sqlc.Provider) providermodel.ProviderConfig {
+	return providermodel.ProviderConfig{
 		Name:       r.Name,
 		Type:       r.Type,
 		Version:    r.Version,
@@ -218,8 +208,8 @@ func providerFromSqliteRow(r sqlc.Provider) ProviderConfig {
 	}
 }
 
-func providerFromPgRow(r sqlc_pg.Provider) ProviderConfig {
-	return ProviderConfig{
+func providerFromPgRow(r sqlc_pg.Provider) providermodel.ProviderConfig {
+	return providermodel.ProviderConfig{
 		Name:       r.Name,
 		Type:       r.Type,
 		Version:    r.Version,
@@ -232,11 +222,11 @@ func providerFromPgRow(r sqlc_pg.Provider) ProviderConfig {
 	}
 }
 
-func providersFromSqliteRows(rows []sqlc.Provider) []*ProviderConfig {
+func providersFromSqliteRows(rows []sqlc.Provider) []*providermodel.ProviderConfig {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*ProviderConfig, len(rows))
+	out := make([]*providermodel.ProviderConfig, len(rows))
 	for i, row := range rows {
 		p := providerFromSqliteRow(row)
 		out[i] = &p
@@ -244,11 +234,11 @@ func providersFromSqliteRows(rows []sqlc.Provider) []*ProviderConfig {
 	return out
 }
 
-func providersFromPgRows(rows []sqlc_pg.Provider) []*ProviderConfig {
+func providersFromPgRows(rows []sqlc_pg.Provider) []*providermodel.ProviderConfig {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*ProviderConfig, len(rows))
+	out := make([]*providermodel.ProviderConfig, len(rows))
 	for i, row := range rows {
 		p := providerFromPgRow(row)
 		out[i] = &p

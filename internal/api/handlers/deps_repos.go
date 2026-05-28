@@ -26,6 +26,7 @@ import (
 	"hubplay/internal/db"
 	iptvmodel "hubplay/internal/iptv/model"
 	librarymodel "hubplay/internal/library/model"
+	providermodel "hubplay/internal/provider/model"
 )
 
 // ItemsRepo es la unión de métodos del repositorio de items que
@@ -180,13 +181,13 @@ type LibrariesRepo interface {
 // (config persistente: API keys, enabled). Distinto de
 // `ProviderManager` que es el handle del runtime.
 type ProvidersConfigRepo interface {
-	ListAll(ctx context.Context) ([]*db.ProviderConfig, error)
-	GetByName(ctx context.Context, name string) (*db.ProviderConfig, error)
-	Upsert(ctx context.Context, p *db.ProviderConfig) error
+	ListAll(ctx context.Context) ([]*providermodel.ProviderConfig, error)
+	GetByName(ctx context.Context, name string) (*providermodel.ProviderConfig, error)
+	Upsert(ctx context.Context, p *providermodel.ProviderConfig) error
 	Delete(ctx context.Context, name string) error
 	SetStatus(ctx context.Context, name, status string) error
-	ListByType(ctx context.Context, providerType string) ([]*db.ProviderConfig, error)
-	ListActive(ctx context.Context) ([]*db.ProviderConfig, error)
+	ListByType(ctx context.Context, providerType string) ([]*providermodel.ProviderConfig, error)
+	ListActive(ctx context.Context) ([]*providermodel.ProviderConfig, error)
 }
 
 // SettingsRepo expone el repo de app_settings (overlay clave/valor

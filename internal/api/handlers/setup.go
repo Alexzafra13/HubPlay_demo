@@ -9,6 +9,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/library"
+	providermodel "hubplay/internal/provider/model"
 	librarymodel "hubplay/internal/library/model"
 )
 
@@ -232,7 +233,7 @@ func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("setup: failed to get tmdb provider", "error", err)
 		}
 		if cfg == nil {
-			cfg = &db.ProviderConfig{
+			cfg = &providermodel.ProviderConfig{
 				Name:     "tmdb",
 				Type:     "metadata",
 				Version:  "1.0",

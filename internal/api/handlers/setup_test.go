@@ -13,7 +13,7 @@ import (
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/config"
-	"hubplay/internal/db"
+	providermodel "hubplay/internal/provider/model"
 	"hubplay/internal/domain"
 	"hubplay/internal/library"
 	"hubplay/internal/setup"
@@ -84,7 +84,7 @@ func newSetupTestEnv(t *testing.T) *setupTestEnv {
 		auth:      &mockAuthService{},
 		libs:      &libFakeService{},
 		users:     &userFakeService{},
-		providers: &providersFakeRepo{getByName: map[string]*db.ProviderConfig{}},
+		providers: &providersFakeRepo{getByName: map[string]*providermodel.ProviderConfig{}},
 	}
 	env.handler = NewSetupHandler(SetupHandlerConfig{
 		Setup:     env.setup,
