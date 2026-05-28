@@ -1037,6 +1037,8 @@ migren los tests al fake por sub-handler.
 
 | Olor | Estado |
 |------|--------|
+| SS-1 (notification importa db/sqlc directo) | ✅ cerrado por doc — sabor C añadido en `conventions.md` |
 | SS-3 (defer fuera de lifecycle) | ✅ cerrado |
 | SS-4 (os.Exit en run) | ✅ cerrado |
 | SS-5 (browse sin per-peer timeout) | ✅ cerrado |
+| SS-6 (cleanupLoop sin drain en Shutdown) | ✅ cerrado — `m.cleanDone` channel ([PR #481](https://github.com/Alexzafra13/HubPlay_demo/pull/481)) |

@@ -86,6 +86,43 @@ El adapter decide la correspondencia `""` ↔ `NULL`. Default aplicado en
 sessions: cadena vacía → NULL (semántica correcta, `""` y `NULL` observan
 igual en el dominio, SQLite queda limpio).
 
+### Sabor C — Sub-package owns su repo (notification, federation/storage)
+
+Excepción deliberada al patrón "todos los repos viven en `internal/db/`".
+Algunas features tienen su propia persistencia dentro del paquete de
+dominio:
+
+- `internal/federation/storage/` — wrappers sqlc dual-driver sobre las
+  queries de federation. La feature owns su persistencia.
+- `internal/notification/storage.go` — mismo patrón pero en el package
+  raíz de la feature (un solo fichero, no merece sub-package).
+
+**Cuándo aplicar**:
+- La feature ya tiene su sub-paquete (`internal/X/`) con tipos propios
+  y la persistencia es **exclusiva** de esa feature — no la consume
+  ningún otro paquete.
+- Mover el repo a `internal/db/X_repository.go` obligaría a `internal/db`
+  a importar tipos de `internal/X/` (inversión de capa).
+
+**Reglas innegociables**:
+1. El repo **expone tipos del paquete propio** (`notification.Notification`,
+   `*federation.SharedItem`), nunca `sqlc.X` ni `db.X`. La conversión
+   vive en el repo (`notificationFromSqliteRow`, etc.), no en el caller.
+2. Los imports `hubplay/internal/db/sqlc` y `db/sqlc_pg` son aceptables
+   **solo dentro del fichero del repo** del sub-package. No se propagan
+   a handlers, services ni tests externos.
+3. El paquete `internal/db` queda como **infra pura**: `Open`, `Migrate`,
+   `NewRepositories` para repos compartidos, dialect, drivers. No se
+   infla con queries feature-específicas.
+
+**Lo que NO es válido**:
+- Importar `db/sqlc` desde un fichero que no sea el repo del sub-package
+  (handler, service, otro paquete).
+- Exponer `sqlc.X` en la firma pública del repo.
+
+Cierra **SS-1** del audit per-package 2026-05-27 — el patrón no es un
+olor, es una decisión consistente entre dos features.
+
 ---
 
 ## Regeneración sqlc
