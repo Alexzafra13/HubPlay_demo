@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/api"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/stream"
 	"hubplay/internal/testutil"
 	"hubplay/internal/user"
@@ -52,16 +52,28 @@ func newStreamTestApp(t *testing.T) *streamTestApp {
 	t.Cleanup(streamMgr.Shutdown)
 
 	router := api.NewRouter(api.Dependencies{
-		Auth:          authSvc,
-		Users:         userSvc,
-		StreamManager: streamMgr,
-		Items:         repos.Items,
-		MediaStreams:   repos.MediaStreams,
-		DB:            db.NewMaintenance(testutil.Driver(), database),
-		Activity:      db.NewActivityRepository(testutil.Driver(), database),
-		Version:       "test",
-		Config:        cfg,
-		Logger:        slog.Default(),
+		Auth: api.AuthDeps{
+			Auth:  authSvc,
+			Users: userSvc,
+		},
+		Streaming: api.StreamingDeps{
+			StreamManager: streamMgr,
+		},
+		Catalog: api.CatalogDeps{
+			Items:        repos.Items,
+			MediaStreams: repos.MediaStreams,
+		},
+		Admin: api.AdminDeps{
+			DB:       db.NewMaintenance(testutil.Driver(), database),
+			Activity: db.NewActivityRepository(testutil.Driver(), database),
+		},
+		Infra: api.InfraDeps{
+			Version: "test",
+			Logger:  slog.Default(),
+		},
+		Server: api.ServerDeps{
+			Config: cfg,
+		},
 	})
 
 	server := httptest.NewServer(router)

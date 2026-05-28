@@ -44,13 +44,21 @@ func newTestApp(t *testing.T) *testApp {
 	userSvc := user.NewService(repos.Users, slog.Default(), "")
 
 	router := api.NewRouter(api.Dependencies{
-		Auth:     authSvc,
-		Users:    userSvc,
-		DB:       db.NewMaintenance(testutil.Driver(), database),
-		Activity: db.NewActivityRepository(testutil.Driver(), database),
-		Version:  "test",
-		Config:   cfg,
-		Logger:   slog.Default(),
+		Auth: api.AuthDeps{
+			Auth:  authSvc,
+			Users: userSvc,
+		},
+		Admin: api.AdminDeps{
+			DB:       db.NewMaintenance(testutil.Driver(), database),
+			Activity: db.NewActivityRepository(testutil.Driver(), database),
+		},
+		Infra: api.InfraDeps{
+			Version: "test",
+			Logger:  slog.Default(),
+		},
+		Server: api.ServerDeps{
+			Config: cfg,
+		},
 	})
 
 	server := httptest.NewServer(router)

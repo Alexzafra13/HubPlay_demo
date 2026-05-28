@@ -54,19 +54,19 @@ func mountAuthPublic(
 // SetupService no está cableado (caso típico en tests minimalistas) el
 // bloque entero se omite y todas las rutas devuelven 404.
 func mountSetupWizard(r chi.Router, deps Dependencies) {
-	if deps.SetupService == nil {
+	if deps.Setup.Service == nil {
 		return
 	}
 	setupHandler := system.NewSetupHandler(system.SetupHandlerConfig{
-		Setup:     deps.SetupService,
-		DBSaver:   deps.SetupService,
-		Auth:      deps.Auth,
-		Libraries: deps.Libraries,
-		Users:     deps.Users,
-		Providers: deps.ProviderRepo,
-		Config:    deps.Config,
-		Restart:   deps.RestartRequester,
-		Logger:    deps.Logger,
+		Setup:     deps.Setup.Service,
+		DBSaver:   deps.Setup.Service,
+		Auth:      deps.Auth.Auth,
+		Libraries: deps.Catalog.Libraries,
+		Users:     deps.Auth.Users,
+		Providers: deps.Providers.Repo,
+		Config:    deps.Server.Config,
+		Restart:   deps.Server.RestartRequester,
+		Logger:    deps.Infra.Logger,
 	})
 
 	r.Get("/setup/status", setupHandler.Status)

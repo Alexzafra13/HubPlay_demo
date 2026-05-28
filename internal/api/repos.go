@@ -1,4 +1,4 @@
-package handlers
+package api
 
 // Este fichero declara las interfaces "broad" que `api.Dependencies`
 // expone para los repositorios de DB. Cierran la fase 2 del olor H del
