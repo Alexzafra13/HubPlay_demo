@@ -26,6 +26,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"hubplay/internal/api/handlers/system"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,8 +36,6 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
-
-	"hubplay/internal/api/handlers"
 )
 
 // route is a single (method, path) pair extracted from router.go.
@@ -75,9 +74,9 @@ var outOfScopeExact = map[string]string{
 	"GET /health/ready": "k8s/LB readiness probe",
 
 	// ── User management (admin) ───────────────────────────────────────
-	"GET /users":                      "admin user management",
-	"POST /users":                     "admin user creation",
-	"DELETE /users/{id}":              "admin user deletion",
+	"GET /users":         "admin user management",
+	"POST /users":        "admin user creation",
+	"DELETE /users/{id}": "admin user deletion",
 
 	// ── Signing-key lifecycle (admin) ─────────────────────────────────
 	"GET /admin/auth/keys":         "admin key rotation",
@@ -88,14 +87,14 @@ var outOfScopeExact = map[string]string{
 	// Operator-only file transfer endpoints (octet-stream download +
 	// multipart upload). No public SDK consumes them; admin UI calls
 	// them via direct fetch with credentials.
-	"GET /admin/system/backup":           "admin DB snapshot download",
-	"POST /admin/system/backup/restore":  "admin DB restore upload",
+	"GET /admin/system/backup":          "admin DB snapshot download",
+	"POST /admin/system/backup/restore": "admin DB restore upload",
 
 	// ── Logs viewer (admin) ───────────────────────────────────────────
 	// In-process ring + SSE stream tailored to the admin viewer.
 	// No public SDK consumer.
-	"GET /admin/system/logs":         "admin log ring snapshot",
-	"GET /admin/system/logs/stream":  "admin log live SSE stream",
+	"GET /admin/system/logs":        "admin log ring snapshot",
+	"GET /admin/system/logs/stream": "admin log live SSE stream",
 
 	// ── Device-code pairing SSE (RFC 8628 §3.3.1 sibling) ─────────
 	// Server-Sent Events channel a /pair page subscribes to so the
@@ -108,142 +107,142 @@ var outOfScopeExact = map[string]string{
 	"GET /auth/device/events": "device-code SSE channel for in-app pair flow",
 
 	// ── Federation admin (admin) ──────────────────────────────────────
-	"GET /admin/peers":                    "federation pairing admin",
-	"GET /admin/peers/identity":           "federation pairing admin",
-	"PUT /admin/peers/identity":           "federation pairing admin",
-	"POST /admin/peers/identity/avatar":   "federation pairing admin",
-	"DELETE /admin/peers/identity/avatar": "federation pairing admin",
-	"GET /admin/peers/settings":           "federation toggles admin",
-	"PUT /admin/peers/settings":           "federation toggles admin",
-	"GET /admin/system/storage/disks":     "admin disk usage + per-library size",
-	"GET /admin/system/recently-added":    "admin recently-added (movies + series rolled-up)",
-	"POST /admin/peers/probe":             "federation pairing admin",
-	"POST /admin/peers/accept":            "federation pairing admin",
-	"GET /admin/peers/{id}":               "federation pairing admin",
-	"POST /admin/peers/{id}/refresh":      "federation pairing admin",
-	"DELETE /admin/peers/{id}":            "federation pairing admin",
-	"GET /admin/peers/pairing-requests":         "federation pairing-requests admin",
-	"POST /admin/peers/pairing-requests/send":   "federation pairing-requests admin",
+	"GET /admin/peers":                                "federation pairing admin",
+	"GET /admin/peers/identity":                       "federation pairing admin",
+	"PUT /admin/peers/identity":                       "federation pairing admin",
+	"POST /admin/peers/identity/avatar":               "federation pairing admin",
+	"DELETE /admin/peers/identity/avatar":             "federation pairing admin",
+	"GET /admin/peers/settings":                       "federation toggles admin",
+	"PUT /admin/peers/settings":                       "federation toggles admin",
+	"GET /admin/system/storage/disks":                 "admin disk usage + per-library size",
+	"GET /admin/system/recently-added":                "admin recently-added (movies + series rolled-up)",
+	"POST /admin/peers/probe":                         "federation pairing admin",
+	"POST /admin/peers/accept":                        "federation pairing admin",
+	"GET /admin/peers/{id}":                           "federation pairing admin",
+	"POST /admin/peers/{id}/refresh":                  "federation pairing admin",
+	"DELETE /admin/peers/{id}":                        "federation pairing admin",
+	"GET /admin/peers/pairing-requests":               "federation pairing-requests admin",
+	"POST /admin/peers/pairing-requests/send":         "federation pairing-requests admin",
 	"POST /admin/peers/pairing-requests/{id}/accept":  "federation pairing-requests admin",
 	"POST /admin/peers/pairing-requests/{id}/decline": "federation pairing-requests admin",
 	"DELETE /admin/peers/pairing-requests/{id}":       "federation pairing-requests admin",
-	"GET /admin/peers/invites":            "federation pairing admin",
-	"POST /admin/peers/invites":           "federation pairing admin",
-	"GET /admin/peers/{id}/shares":        "federation pairing admin",
-	"POST /admin/peers/{id}/shares":       "federation pairing admin",
-	"DELETE /admin/peers/{id}/shares/{shareID}": "federation pairing admin",
+	"GET /admin/peers/invites":                        "federation pairing admin",
+	"POST /admin/peers/invites":                       "federation pairing admin",
+	"GET /admin/peers/{id}/shares":                    "federation pairing admin",
+	"POST /admin/peers/{id}/shares":                   "federation pairing admin",
+	"DELETE /admin/peers/{id}/shares/{shareID}":       "federation pairing admin",
 
 	// ── User management admin ─────────────────────────────────────────
-	"POST /users/{id}/reset-password": "admin password reset",
-	"PUT /users/{id}/role":            "user role admin",
-	"PUT /users/{id}/active":          "user active toggle admin",
-	"PUT /users/{id}/access":          "user access window admin",
-	"POST /users/{id}/iptv-libraries": "admin shortcut: create livetv lib + grant for this user",
-	"POST /me/password":               "self password change",
-	"POST /me/avatar":                 "self avatar upload (multipart)",
-	"DELETE /me/avatar":               "self avatar removal",
-	"GET /me/notifications":           "notifications inbox listing",
-	"POST /me/notifications/{id}/read":  "mark notification read",
-	"POST /me/notifications/read-all": "mark all notifications read",
-	"GET /users/{id}/avatar":          "avatar serving — public per-user image",
-	"GET /me/profiles":                "profile selector listing",
-	"POST /auth/switch-profile":       "profile switch",
+	"POST /users/{id}/reset-password":  "admin password reset",
+	"PUT /users/{id}/role":             "user role admin",
+	"PUT /users/{id}/active":           "user active toggle admin",
+	"PUT /users/{id}/access":           "user access window admin",
+	"POST /users/{id}/iptv-libraries":  "admin shortcut: create livetv lib + grant for this user",
+	"POST /me/password":                "self password change",
+	"POST /me/avatar":                  "self avatar upload (multipart)",
+	"DELETE /me/avatar":                "self avatar removal",
+	"GET /me/notifications":            "notifications inbox listing",
+	"POST /me/notifications/{id}/read": "mark notification read",
+	"POST /me/notifications/read-all":  "mark all notifications read",
+	"GET /users/{id}/avatar":           "avatar serving — public per-user image",
+	"GET /me/profiles":                 "profile selector listing",
+	"POST /auth/switch-profile":        "profile switch",
 
 	// ── System / settings admin ───────────────────────────────────────
-	"GET /admin/system/stats":            "admin observability",
-	"GET /admin/system/stream-activity":  "admin observability",
-	"GET /admin/system/top-items":        "admin observability",
-	"GET /admin/system/settings":         "admin runtime config",
-	"PUT /admin/system/settings":         "admin runtime config",
+	"GET /admin/system/stats":             "admin observability",
+	"GET /admin/system/stream-activity":   "admin observability",
+	"GET /admin/system/top-items":         "admin observability",
+	"GET /admin/system/settings":          "admin runtime config",
+	"PUT /admin/system/settings":          "admin runtime config",
 	"DELETE /admin/system/settings/{key}": "admin runtime config",
-	"GET /admin/system/sessions":         "admin now-playing panel",
-	"DELETE /admin/system/sessions/{id}": "admin now-playing panel",
-	"GET /admin/system/updates":          "admin update-checker status",
-	"POST /admin/system/updates/check":   "admin update-checker force refresh",
+	"GET /admin/system/sessions":          "admin now-playing panel",
+	"DELETE /admin/system/sessions/{id}":  "admin now-playing panel",
+	"GET /admin/system/updates":           "admin update-checker status",
+	"POST /admin/system/updates/check":    "admin update-checker force refresh",
 
 	// ── Database driver management (admin) ────────────────────────────
 	// Operator-only surface that swaps SQLite ↔ Postgres without
 	// touching hubplay.yaml on disk. None of the user-facing SDKs
 	// (Kotlin TV, federation) reach for these; the web admin panel
 	// drives them directly.
-	"GET /admin/system/db":           "admin DB driver/DSN management",
-	"GET /admin/system/db/profiles":  "admin DB one-click profiles",
-	"POST /admin/system/db/test":     "admin DB connection test",
-	"PUT /admin/system/db":           "admin DB driver/DSN save",
-	"POST /admin/system/db/migrate":  "admin DB data migration (sqlite→pg)",
-	"POST /admin/system/restart":     "admin self-restart trigger",
+	"GET /admin/system/db":          "admin DB driver/DSN management",
+	"GET /admin/system/db/profiles": "admin DB one-click profiles",
+	"POST /admin/system/db/test":    "admin DB connection test",
+	"PUT /admin/system/db":          "admin DB driver/DSN save",
+	"POST /admin/system/db/migrate": "admin DB data migration (sqlite→pg)",
+	"POST /admin/system/restart":    "admin self-restart trigger",
 
 	// ── Library admin ─────────────────────────────────────────────────
-	"POST /libraries":              "admin library creation",
-	"GET /libraries/browse":        "admin filesystem picker",
-	"PUT /libraries/{id}":          "admin library update",
-	"DELETE /libraries/{id}":       "admin library deletion",
-	"POST /libraries/{id}/scan":    "admin library scan",
+	"POST /libraries":           "admin library creation",
+	"GET /libraries/browse":     "admin filesystem picker",
+	"PUT /libraries/{id}":       "admin library update",
+	"DELETE /libraries/{id}":    "admin library deletion",
+	"POST /libraries/{id}/scan": "admin library scan",
 
 	// ── Image management (admin authoring) ────────────────────────────
-	"GET /items/{id}/images":                       "image authoring (admin)",
-	"GET /items/{id}/images/available":             "image authoring (admin)",
-	"PUT /items/{id}/images/{type}/select":         "image authoring (admin)",
-	"POST /items/{id}/images/{type}/upload":        "image authoring (admin)",
-	"PUT /items/{id}/images/{imageId}/primary":     "image authoring (admin)",
-	"PUT /items/{id}/images/{imageId}/lock":        "image authoring (admin)",
-	"DELETE /items/{id}/images/{imageId}":          "image authoring (admin)",
-	"POST /libraries/{id}/images/refresh":          "image authoring (admin)",
-	"POST /channels/{channelId}/logo/upload":       "channel logo upload (admin, multipart)",
-	"POST /collections/{id}/images/{type}/upload":  "collection image upload (admin, multipart)",
-	"GET /collections/{id}/images/{type}/available": "collection image browse from provider (admin)",
-	"PUT /collections/{id}/images/{type}":          "collection image override URL (admin)",
-	"DELETE /collections/{id}/images/{type}":       "clear collection image override (admin)",
-	"GET /collections/{id}/images/{type}/file":     "serve uploaded collection image (auth)",
+	"GET /items/{id}/images":                                "image authoring (admin)",
+	"GET /items/{id}/images/available":                      "image authoring (admin)",
+	"PUT /items/{id}/images/{type}/select":                  "image authoring (admin)",
+	"POST /items/{id}/images/{type}/upload":                 "image authoring (admin)",
+	"PUT /items/{id}/images/{imageId}/primary":              "image authoring (admin)",
+	"PUT /items/{id}/images/{imageId}/lock":                 "image authoring (admin)",
+	"DELETE /items/{id}/images/{imageId}":                   "image authoring (admin)",
+	"POST /libraries/{id}/images/refresh":                   "image authoring (admin)",
+	"POST /channels/{channelId}/logo/upload":                "channel logo upload (admin, multipart)",
+	"POST /collections/{id}/images/{type}/upload":           "collection image upload (admin, multipart)",
+	"GET /collections/{id}/images/{type}/available":         "collection image browse from provider (admin)",
+	"PUT /collections/{id}/images/{type}":                   "collection image override URL (admin)",
+	"DELETE /collections/{id}/images/{type}":                "clear collection image override (admin)",
+	"GET /collections/{id}/images/{type}/file":              "serve uploaded collection image (auth)",
 	"POST /libraries/{id}/iptv/refresh-logos-from-iptv-org": "admin iptv-org logo auto-discovery",
 
 	// ── Provider config (admin) + provider search (admin authoring) ──
-	"GET /providers":            "admin provider config",
-	"PUT /providers/{name}":     "admin provider config",
-	"GET /providers/search/metadata":           "admin metadata picker",
-	"GET /providers/metadata/{externalId}":     "admin metadata picker",
-	"GET /providers/images":                    "admin metadata picker",
-	"GET /providers/search/subtitles":          "admin metadata picker",
+	"GET /providers":                       "admin provider config",
+	"PUT /providers/{name}":                "admin provider config",
+	"GET /providers/search/metadata":       "admin metadata picker",
+	"GET /providers/metadata/{externalId}": "admin metadata picker",
+	"GET /providers/images":                "admin metadata picker",
+	"GET /providers/search/subtitles":      "admin metadata picker",
 
 	// ── Setup wizard (web-only) ───────────────────────────────────────
-	"GET /setup/status":          "first-run wizard",
-	"GET /setup/capabilities":    "first-run wizard",
-	"GET /setup/browse":          "first-run wizard",
-	"POST /setup/libraries":      "first-run wizard",
-	"POST /setup/settings":       "first-run wizard",
-	"POST /setup/complete":       "first-run wizard",
-	"GET /setup/db/profiles":     "first-run wizard — DB one-click profiles",
-	"POST /setup/db/test":        "first-run wizard — DB driver test",
-	"POST /setup/db":             "first-run wizard — DB driver save",
+	"GET /setup/status":       "first-run wizard",
+	"GET /setup/capabilities": "first-run wizard",
+	"GET /setup/browse":       "first-run wizard",
+	"POST /setup/libraries":   "first-run wizard",
+	"POST /setup/settings":    "first-run wizard",
+	"POST /setup/complete":    "first-run wizard",
+	"GET /setup/db/profiles":  "first-run wizard — DB one-click profiles",
+	"POST /setup/db/test":     "first-run wizard — DB driver test",
+	"POST /setup/db":          "first-run wizard — DB driver save",
 
 	// ── Per-user IPTV personalisation (web-only) ──────────────────────
 	// Out of scope for the public SDK — these are settings UI a viewer
 	// uses to reorder / hide channels for their own account. No third-
 	// party consumer drives them; the React Live TV "Personalise" panel
 	// is the only client.
-	"PUT /me/iptv/channels/order":                   "user channel ordering",
-	"DELETE /me/iptv/channels/order":                "user channel ordering reset",
-	"PUT /me/iptv/channels/{channelId}/visibility":  "user channel hide/show",
+	"PUT /me/iptv/channels/order":                  "user channel ordering",
+	"DELETE /me/iptv/channels/order":               "user channel ordering reset",
+	"PUT /me/iptv/channels/{channelId}/visibility": "user channel hide/show",
 
 	// ── Peer-to-peer federation (server-to-server) ────────────────────
-	"GET /federation/info":                                      "p2p server info",
-	"GET /federation/identity/avatar":                            "p2p server avatar bytes",
-	"POST /peer/handshake":                                      "p2p pairing",
-	"POST /federation/pairing-requests":                         "p2p pairing-request inbox (initial)",
-	"POST /federation/pairing-requests/{id}/callback":            "p2p pairing-request callback (B -> A)",
-	"POST /federation/pairing-requests/{id}/cancel":              "p2p pairing-request cancel (A -> B)",
-	"GET /peer/ping":                                            "p2p liveness",
-	"GET /peer/libraries":                                       "p2p catalog",
-	"GET /peer/libraries/{libraryID}/items":                     "p2p catalog",
-	"GET /peer/search":                                          "p2p catalog search",
-	"GET /peer/recent":                                          "p2p recently-added rail",
-	"POST /peer/stream/{itemId}/session":                        "p2p stream session start",
-	"GET /peer/stream/session/{sessionId}/master.m3u8":          "p2p HLS master",
-	"GET /peer/stream/session/{sessionId}/{quality}/index.m3u8": "p2p HLS quality manifest",
-	"GET /peer/stream/session/{sessionId}/{quality}/{segment}":  "p2p HLS segment",
+	"GET /federation/info":                                        "p2p server info",
+	"GET /federation/identity/avatar":                             "p2p server avatar bytes",
+	"POST /peer/handshake":                                        "p2p pairing",
+	"POST /federation/pairing-requests":                           "p2p pairing-request inbox (initial)",
+	"POST /federation/pairing-requests/{id}/callback":             "p2p pairing-request callback (B -> A)",
+	"POST /federation/pairing-requests/{id}/cancel":               "p2p pairing-request cancel (A -> B)",
+	"GET /peer/ping":                                              "p2p liveness",
+	"GET /peer/libraries":                                         "p2p catalog",
+	"GET /peer/libraries/{libraryID}/items":                       "p2p catalog",
+	"GET /peer/search":                                            "p2p catalog search",
+	"GET /peer/recent":                                            "p2p recently-added rail",
+	"POST /peer/stream/{itemId}/session":                          "p2p stream session start",
+	"GET /peer/stream/session/{sessionId}/master.m3u8":            "p2p HLS master",
+	"GET /peer/stream/session/{sessionId}/{quality}/index.m3u8":   "p2p HLS quality manifest",
+	"GET /peer/stream/session/{sessionId}/{quality}/{segment}":    "p2p HLS segment",
 	"GET /peer/stream/session/{sessionId}/subtitles":              "p2p subtitle list (origin side)",
 	"GET /peer/stream/session/{sessionId}/subtitles/{trackIndex}": "p2p subtitle WebVTT (origin side)",
-	"GET /peer/items/{itemId}/poster":                           "p2p poster bytes (origin side)",
+	"GET /peer/items/{itemId}/poster":                             "p2p poster bytes (origin side)",
 
 	// ── Legacy global SSE (replaced by /me/events) ───────────────────
 	"GET /events": "legacy unscoped SSE; spec only documents /me/events",
@@ -253,33 +252,33 @@ var outOfScopeExact = map[string]string{
 	// not user-facing; the curation panel at /admin/libraries/{id}
 	// drives them. The matching per-user surface lives at
 	// /me/iptv/channels/* and is also out-of-scope above.
-	"GET /libraries/{id}/channels/admin-view":                         "admin channel curation: view with admin overlay + hidden rows",
-	"PUT /libraries/{id}/channels/order":                              "admin channel reorder + hide",
-	"DELETE /libraries/{id}/channels/order":                           "admin channel reorder reset",
-	"PUT /libraries/{id}/channels/{channelId}/admin-visibility":       "admin channel hide/show",
+	"GET /libraries/{id}/channels/admin-view":                   "admin channel curation: view with admin overlay + hidden rows",
+	"PUT /libraries/{id}/channels/order":                        "admin channel reorder + hide",
+	"DELETE /libraries/{id}/channels/order":                     "admin channel reorder reset",
+	"PUT /libraries/{id}/channels/{channelId}/admin-visibility": "admin channel hide/show",
 
 	// ── IPTV admin operations ─────────────────────────────────────────
-	"POST /iptv/preflight":                              "admin M3U preflight",
-	"POST /iptv/public/import":                          "admin public-source import",
-	"GET /iptv/public/countries":                       "admin: pick a country for the public-source library",
-	"GET /iptv/epg-catalog":                            "admin: pick an EPG catalog source",
-	"POST /libraries/{id}/iptv/refresh-m3u":            "admin: force M3U refresh",
-	"POST /libraries/{id}/iptv/refresh-epg":            "admin: force EPG refresh",
-	"POST /libraries/{id}/epg-sources":                 "admin EPG source mgmt",
-	"DELETE /libraries/{id}/epg-sources/{sourceId}":    "admin EPG source mgmt",
-	"PATCH /libraries/{id}/epg-sources/reorder":        "admin EPG source mgmt",
-	"POST /channels/{channelId}/reset-health":          "admin channel health",
-	"POST /channels/{channelId}/disable":               "admin channel mgmt",
-	"POST /channels/{channelId}/enable":                "admin channel mgmt",
-	"PATCH /channels/{channelId}":                      "admin channel mgmt",
-	"GET /libraries/{id}/schedule":                     "admin scheduled jobs panel",
-	"PUT /libraries/{id}/schedule/{kind}":              "admin scheduled jobs",
-	"DELETE /libraries/{id}/schedule/{kind}":           "admin scheduled jobs",
-	"POST /libraries/{id}/schedule/{kind}/run":         "admin scheduled jobs",
-	"GET /libraries/{id}/channels/unhealthy":           "admin channel health panel",
-	"GET /libraries/{id}/channels/without-epg":         "admin channel health panel",
-	"GET /libraries/{id}/channels/health-summary":      "admin channel health panel",
-	"GET /libraries/{id}/epg-sources":                  "admin: read of EPG source list",
+	"POST /iptv/preflight":                          "admin M3U preflight",
+	"POST /iptv/public/import":                      "admin public-source import",
+	"GET /iptv/public/countries":                    "admin: pick a country for the public-source library",
+	"GET /iptv/epg-catalog":                         "admin: pick an EPG catalog source",
+	"POST /libraries/{id}/iptv/refresh-m3u":         "admin: force M3U refresh",
+	"POST /libraries/{id}/iptv/refresh-epg":         "admin: force EPG refresh",
+	"POST /libraries/{id}/epg-sources":              "admin EPG source mgmt",
+	"DELETE /libraries/{id}/epg-sources/{sourceId}": "admin EPG source mgmt",
+	"PATCH /libraries/{id}/epg-sources/reorder":     "admin EPG source mgmt",
+	"POST /channels/{channelId}/reset-health":       "admin channel health",
+	"POST /channels/{channelId}/disable":            "admin channel mgmt",
+	"POST /channels/{channelId}/enable":             "admin channel mgmt",
+	"PATCH /channels/{channelId}":                   "admin channel mgmt",
+	"GET /libraries/{id}/schedule":                  "admin scheduled jobs panel",
+	"PUT /libraries/{id}/schedule/{kind}":           "admin scheduled jobs",
+	"DELETE /libraries/{id}/schedule/{kind}":        "admin scheduled jobs",
+	"POST /libraries/{id}/schedule/{kind}/run":      "admin scheduled jobs",
+	"GET /libraries/{id}/channels/unhealthy":        "admin channel health panel",
+	"GET /libraries/{id}/channels/without-epg":      "admin channel health panel",
+	"GET /libraries/{id}/channels/health-summary":   "admin channel health panel",
+	"GET /libraries/{id}/epg-sources":               "admin: read of EPG source list",
 
 	// ── Uploads (feature PR2) ─────────────────────────────────────────
 	// Las rutas POST/PATCH/HEAD/DELETE /uploads/* las sirve tusd vía
@@ -315,10 +314,10 @@ var outOfScopeExact = map[string]string{
 	// ── Upload folder explorer (PR6) ─────────────────────────────────
 	// File-explorer SFTP-style para que el cliente navegue carpetas
 	// dentro de la librería antes de subir. Gateado por can_upload.
-	"GET /libraries/{id}/upload-browse":  "upload UI — lista subdirs dentro de la librería",
-	"POST /libraries/{id}/folders":       "upload UI — crea carpeta nueva dentro de la librería",
-	"DELETE /libraries/{id}/files":       "upload UI — borrar fichero/carpeta dentro de la librería",
-	"POST /libraries/{id}/files/rename":  "upload UI — renombrar fichero/carpeta",
+	"GET /libraries/{id}/upload-browse": "upload UI — lista subdirs dentro de la librería",
+	"POST /libraries/{id}/folders":      "upload UI — crea carpeta nueva dentro de la librería",
+	"DELETE /libraries/{id}/files":      "upload UI — borrar fichero/carpeta dentro de la librería",
+	"POST /libraries/{id}/files/rename": "upload UI — renombrar fichero/carpeta",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate
@@ -562,7 +561,7 @@ func specPathSet(t *testing.T) map[string]struct{} {
 	var doc struct {
 		Paths map[string]map[string]any `yaml:"paths"`
 	}
-	if err := yaml.Unmarshal(handlers.OpenAPIBytes(), &doc); err != nil {
+	if err := yaml.Unmarshal(system.OpenAPIBytes(), &doc); err != nil {
 		t.Fatalf("parse openapi.yaml: %v", err)
 	}
 	out := make(map[string]struct{}, len(doc.Paths))

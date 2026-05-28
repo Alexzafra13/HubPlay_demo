@@ -1,0 +1,460 @@
+package admin
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"hubplay/internal/config"
+	"hubplay/internal/db"
+	"hubplay/internal/testutil"
+)
+
+func newQuietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// settingsRig wires the handler against a real settings repo backed by
+// the in-memory test DB. Real DB on purpose — the handler's whole job
+// is "round-trip through app_settings + return descriptors", so a fake
+// repo would test the wrong thing.
+type settingsRig struct {
+	handler *SettingsHandler
+	router  http.Handler
+}
+
+func newSettingsRig(t *testing.T, baseURLDefault string, hw config.HWAccelConfig) *settingsRig {
+	t.Helper()
+	return newSettingsRigWithDetected(t, baseURLDefault, hw, nil)
+}
+
+// newSettingsRigWithDetected is the variant that exercises the
+// HW-accel detector gating — pass the list of accelerators a host
+// would have reported at boot to drive the AllowedValues filter.
+func newSettingsRigWithDetected(t *testing.T, baseURLDefault string, hw config.HWAccelConfig, detected []string) *settingsRig {
+	t.Helper()
+	// Default streaming snapshot — small but plausible numbers so the
+	// "Default" column in descriptors is non-zero. Tests that care
+	// about specific auto-tune behaviour use the new
+	// newSettingsRigWithStreaming variant.
+	return newSettingsRigWithStreaming(t, baseURLDefault, hw, detected,
+		StreamingDefaults{MaxTranscodeSessions: 4, MaxTranscodeSessionsPerUser: 2, TranscodePreset: "veryfast"})
+}
+
+// newSettingsRigWithStreaming exposes the StreamingDefaults knob so
+// tests can verify the descriptor's "Default" column reflects what
+// the auto-tuner picked on the running host.
+func newSettingsRigWithStreaming(t *testing.T, baseURLDefault string, hw config.HWAccelConfig, detected []string, streaming StreamingDefaults) *settingsRig {
+	t.Helper()
+	database := testutil.NewTestDB(t)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
+	h := NewSettingsHandler(SettingsHandlerConfig{
+		Settings:          repo,
+		BaseURLDefault:    baseURLDefault,
+		HWAccelDefault:    hw,
+		HWAccelDetected:   detected,
+		StreamingDefaults: streaming,
+		Logger:            newQuietLogger(),
+	})
+	r := chi.NewRouter()
+	r.Get("/admin/system/settings", h.List)
+	r.Put("/admin/system/settings", h.Update)
+	r.Delete("/admin/system/settings/{key}", h.Reset)
+	return &settingsRig{handler: h, router: r}
+}
+
+func unwrapSettings(t *testing.T, body []byte) []settingDescriptor {
+	t.Helper()
+	var resp struct {
+		Data settingsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode body: %v\n%s", err, body)
+	}
+	return resp.Data.Settings
+}
+
+func TestSettings_List_DefaultsBeforeAnyOverride(t *testing.T) {
+	rig := newSettingsRig(t, "https://yaml.example/", config.HWAccelConfig{Enabled: true, Preferred: "vaapi"})
+	req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	rows := unwrapSettings(t, rr.Body.Bytes())
+	if len(rows) != 7 {
+		t.Fatalf("expected 7 settings, got %d", len(rows))
+	}
+	for _, row := range rows {
+		if row.Override {
+			t.Errorf("fresh DB should report no overrides; %s says override=true", row.Key)
+		}
+		switch row.Key {
+		case "server.base_url":
+			if row.Effective != "https://yaml.example/" {
+				t.Errorf("base_url effective: got %q want yaml default", row.Effective)
+			}
+		case "hardware_acceleration.enabled":
+			if row.Effective != "true" {
+				t.Errorf("hwaccel.enabled: got %q want true", row.Effective)
+			}
+			if !row.RestartNeeded {
+				t.Errorf("hwaccel.enabled: should advertise restart_needed=true")
+			}
+		case "playback.force_direct_play":
+			if row.Effective != "false" {
+				t.Errorf("force_direct_play default: got %q want false", row.Effective)
+			}
+			if row.RestartNeeded {
+				t.Errorf("force_direct_play should not require a restart (runtime read on every StartSession)")
+			}
+		case "hardware_acceleration.preferred":
+			if row.Effective != "vaapi" {
+				t.Errorf("hwaccel.preferred: got %q want vaapi", row.Effective)
+			}
+		}
+	}
+}
+
+func TestSettings_Update_PersistsAndReportsOverride(t *testing.T) {
+	rig := newSettingsRig(t, "https://yaml.example/", config.HWAccelConfig{Enabled: false})
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/system/settings",
+		strings.NewReader(`{"key":"server.base_url","value":"https://prod.example/"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	rows := unwrapSettings(t, rr.Body.Bytes())
+	for _, row := range rows {
+		if row.Key != "server.base_url" {
+			continue
+		}
+		if !row.Override {
+			t.Errorf("override should be true after Update")
+		}
+		if row.Effective != "https://prod.example" {
+			t.Errorf("effective after update: got %q want trailing-slash-stripped value", row.Effective)
+		}
+	}
+
+	// Settings GetOr from the repo should now return the override (the
+	// path the rest of the codebase reads through).
+	stored, err := db.NewSettingsRepository(testutil.Driver(), testutil.NewTestDB(t)).GetOr(context.Background(), "missing", "fallback")
+	if err != nil {
+		t.Fatalf("unrelated GetOr failure: %v", err)
+	}
+	if stored != "fallback" {
+		t.Errorf("fresh-DB GetOr should hit fallback path: got %q", stored)
+	}
+}
+
+// Whitelist gate — UNKNOWN_KEY for anything outside the allowed set.
+// This is the "not a generic KV store" guarantee. If it ever regresses
+// the panel could persist arbitrary keys an attacker named in a forged
+// request — even with admin auth, the gate is the second line.
+func TestSettings_Update_RejectsUnknownKey(t *testing.T) {
+	rig := newSettingsRig(t, "", config.HWAccelConfig{})
+	req := httptest.NewRequest(http.MethodPut, "/admin/system/settings",
+		strings.NewReader(`{"key":"server.bind","value":"0.0.0.0:9999"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown key; got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "UNKNOWN_KEY") {
+		t.Errorf("expected UNKNOWN_KEY in body; got %s", rr.Body.String())
+	}
+}
+
+func TestSettings_Update_ValidatesValueShape(t *testing.T) {
+	rig := newSettingsRig(t, "", config.HWAccelConfig{})
+	cases := []struct {
+		name       string
+		key, value string
+	}{
+		{"base_url not absolute", "server.base_url", "/relative/path"},
+		{"base_url not http", "server.base_url", "ftp://example.com"},
+		{"hwaccel.enabled not bool", "hardware_acceleration.enabled", "yesnomaybe"},
+		{"hwaccel.preferred unknown", "hardware_acceleration.preferred", "magick"},
+		{"max_sessions not int", "streaming.max_transcode_sessions", "many"},
+		{"max_sessions zero", "streaming.max_transcode_sessions", "0"},
+		{"max_sessions too big", "streaming.max_transcode_sessions", "999"},
+		{"max_sessions_per_user not int", "streaming.max_transcode_sessions_per_user", "two"},
+		{"max_sessions_per_user zero", "streaming.max_transcode_sessions_per_user", "0"},
+		{"max_sessions_per_user too big", "streaming.max_transcode_sessions_per_user", "999"},
+		{"transcode_preset unknown", "streaming.transcode_preset", "fastest"},
+		{"transcode_preset empty", "streaming.transcode_preset", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"key": tc.key, "value": tc.value})
+			req := httptest.NewRequest(http.MethodPut, "/admin/system/settings", strings.NewReader(string(body)))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			rig.router.ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("%s: expected 400, got %d body=%s", tc.name, rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "INVALID_VALUE") {
+				t.Errorf("%s: expected INVALID_VALUE: %s", tc.name, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestSettings_Update_NormalisesValue(t *testing.T) {
+	rig := newSettingsRig(t, "", config.HWAccelConfig{})
+	// Trailing slash stripped, trailing whitespace trimmed — store the
+	// normalised form so downstream string comparisons stay clean.
+	req := httptest.NewRequest(http.MethodPut, "/admin/system/settings",
+		strings.NewReader(`{"key":"server.base_url","value":"  https://prod.example/  "}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+		if row.Key == "server.base_url" && row.Effective != "https://prod.example" {
+			t.Errorf("normalised effective: got %q want %q", row.Effective, "https://prod.example")
+		}
+	}
+
+	// Hwaccel bool variants normalise to "true" / "false".
+	req2 := httptest.NewRequest(http.MethodPut, "/admin/system/settings",
+		strings.NewReader(`{"key":"hardware_acceleration.enabled","value":"1"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("hwaccel update status: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	for _, row := range unwrapSettings(t, rr2.Body.Bytes()) {
+		if row.Key == "hardware_acceleration.enabled" && row.Effective != "true" {
+			t.Errorf("hwaccel normalised: got %q want true", row.Effective)
+		}
+	}
+}
+
+func TestSettings_Reset_ClearsOverride(t *testing.T) {
+	rig := newSettingsRig(t, "https://yaml.example/", config.HWAccelConfig{Enabled: true, Preferred: "vaapi"})
+
+	// First set
+	put := httptest.NewRequest(http.MethodPut, "/admin/system/settings",
+		strings.NewReader(`{"key":"server.base_url","value":"https://prod.example/"}`))
+	put.Header.Set("Content-Type", "application/json")
+	rig.router.ServeHTTP(httptest.NewRecorder(), put)
+
+	// Then reset
+	del := httptest.NewRequest(http.MethodDelete, "/admin/system/settings/server.base_url", nil)
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, del)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+		if row.Key != "server.base_url" {
+			continue
+		}
+		if row.Override {
+			t.Errorf("override still true after reset")
+		}
+		if row.Effective != "https://yaml.example/" {
+			t.Errorf("after reset: got %q want yaml default", row.Effective)
+		}
+	}
+}
+
+// TestSettings_StreamingDefaults_ReflectAutoTune pins that the
+// descriptors' Default column carries the auto-tuned values handed
+// in via SettingsHandlerConfig.StreamingDefaults — not a static
+// constant. Without this, a fresh-install operator who looks at the
+// "Default" column would see "0" or "" for the streaming knobs and
+// have no idea what their server is actually using.
+func TestSettings_StreamingDefaults_ReflectAutoTune(t *testing.T) {
+	streaming := StreamingDefaults{
+		MaxTranscodeSessions:        8,
+		MaxTranscodeSessionsPerUser: 4,
+		TranscodePreset:             "fast",
+	}
+	rig := newSettingsRigWithStreaming(t, "", config.HWAccelConfig{}, nil, streaming)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	rows := unwrapSettings(t, rr.Body.Bytes())
+	seen := make(map[string]settingDescriptor, len(rows))
+	for _, r := range rows {
+		seen[r.Key] = r
+	}
+	if got := seen["streaming.max_transcode_sessions"]; got.Default != "8" || got.Effective != "8" {
+		t.Errorf("max_transcode_sessions: default=%q effective=%q, want 8/8", got.Default, got.Effective)
+	}
+	if got := seen["streaming.max_transcode_sessions_per_user"]; got.Default != "4" || got.Effective != "4" {
+		t.Errorf("max_per_user: default=%q effective=%q, want 4/4", got.Default, got.Effective)
+	}
+	if got := seen["streaming.transcode_preset"]; got.Default != "fast" || got.Effective != "fast" {
+		t.Errorf("preset: default=%q effective=%q, want fast/fast", got.Default, got.Effective)
+	}
+	// Preset must come with a multi-value AllowedValues so the panel
+	// renders a dropdown, not a free-text input.
+	if len(seen["streaming.transcode_preset"].AllowedValues) != 9 {
+		t.Errorf("preset should advertise 9 libx264 levels; got %v",
+			seen["streaming.transcode_preset"].AllowedValues)
+	}
+}
+
+// TestSettings_StreamingOverride_HappyPath rounds-trip the three new
+// keys through PUT + GET so the wire shape stays right for the
+// frontend.
+func TestSettings_StreamingOverride_HappyPath(t *testing.T) {
+	rig := newSettingsRigWithStreaming(t, "", config.HWAccelConfig{}, nil,
+		StreamingDefaults{MaxTranscodeSessions: 4, MaxTranscodeSessionsPerUser: 2, TranscodePreset: "veryfast"})
+
+	cases := []struct {
+		key, value, want string
+	}{
+		{"streaming.max_transcode_sessions", "10", "10"},
+		{"streaming.max_transcode_sessions_per_user", "3", "3"},
+		// Preset normalises to lowercase.
+		{"streaming.transcode_preset", "MEDIUM", "medium"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"key": tc.key, "value": tc.value})
+			req := httptest.NewRequest(http.MethodPut, "/admin/system/settings", strings.NewReader(string(body)))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			rig.router.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+			}
+			rows := unwrapSettings(t, rr.Body.Bytes())
+			var got settingDescriptor
+			for _, r := range rows {
+				if r.Key == tc.key {
+					got = r
+				}
+			}
+			if !got.Override || got.Effective != tc.want {
+				t.Errorf("%s: override=%v effective=%q want override=true effective=%q",
+					tc.key, got.Override, got.Effective, tc.want)
+			}
+		})
+	}
+}
+
+func TestSettings_Reset_RejectsUnknownKey(t *testing.T) {
+	rig := newSettingsRig(t, "", config.HWAccelConfig{})
+	req := httptest.NewRequest(http.MethodDelete, "/admin/system/settings/server.bind", nil)
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown key; got %d", rr.Code)
+	}
+}
+
+// The panel must only advertise accelerator backends the host actually
+// supports. Two scenarios:
+//
+//   - Detector saw vaapi+qsv on the host: AllowedValues = [auto, vaapi, qsv].
+//     A user can't accidentally select nvenc here and crash transcode.
+//   - Detector saw nothing (host has no GPU, or ffmpeg's hwaccel probe
+//     failed): AllowedValues collapses to just ["auto"], plus whatever
+//     value is currently effective so the admin can still see + reset
+//     the YAML override they have.
+//
+// Validator stays broad on purpose — see the comment on hwAccelChoices.
+// A scripted PUT can still set any whitelist value; the *panel* just
+// won't lead the operator to a broken choice.
+func TestSettings_HWAccel_AllowedValues_FilteredByDetector(t *testing.T) {
+	t.Run("detector saw vaapi+qsv", func(t *testing.T) {
+		rig := newSettingsRigWithDetected(t, "", config.HWAccelConfig{Preferred: "auto"},
+			[]string{"vaapi", "qsv"})
+		req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+		rr := httptest.NewRecorder()
+		rig.router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var got []string
+		for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+			if row.Key == "hardware_acceleration.preferred" {
+				got = row.AllowedValues
+			}
+		}
+		want := []string{"auto", "vaapi", "qsv"}
+		if !equalStringSlice(got, want) {
+			t.Errorf("AllowedValues: got %v want %v", got, want)
+		}
+	})
+
+	t.Run("detector saw nothing", func(t *testing.T) {
+		rig := newSettingsRigWithDetected(t, "", config.HWAccelConfig{Preferred: "auto"}, nil)
+		req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+		rr := httptest.NewRecorder()
+		rig.router.ServeHTTP(rr, req)
+		var got []string
+		for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+			if row.Key == "hardware_acceleration.preferred" {
+				got = row.AllowedValues
+			}
+		}
+		want := []string{"auto"}
+		if !equalStringSlice(got, want) {
+			t.Errorf("empty detector should yield [auto]; got %v", got)
+		}
+	})
+
+	t.Run("effective value not in detected list still surfaces", func(t *testing.T) {
+		// Admin had nvenc set in YAML but moved the binary to a host with
+		// no NVIDIA GPU. The current effective is "nvenc"; the detector
+		// reports vaapi only. The panel must still include nvenc so the
+		// admin can see the bad state and either reset or pick auto —
+		// hiding it would leave them with no path to fix from the UI.
+		rig := newSettingsRigWithDetected(t, "", config.HWAccelConfig{Preferred: "nvenc"},
+			[]string{"vaapi"})
+		req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+		rr := httptest.NewRecorder()
+		rig.router.ServeHTTP(rr, req)
+		var got []string
+		for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+			if row.Key == "hardware_acceleration.preferred" {
+				got = row.AllowedValues
+			}
+		}
+		want := []string{"auto", "vaapi", "nvenc"}
+		if !equalStringSlice(got, want) {
+			t.Errorf("effective preserved: got %v want %v", got, want)
+		}
+	})
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

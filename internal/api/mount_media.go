@@ -5,7 +5,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/api/handlers"
+	iptvhandler "hubplay/internal/api/handlers/iptv"
+	libhandler "hubplay/internal/api/handlers/library"
+	"hubplay/internal/api/handlers/media"
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
 )
@@ -17,7 +19,7 @@ func mountStreaming(r chi.Router, deps Dependencies) {
 	if deps.StreamManager == nil {
 		return
 	}
-	streamHandler := handlers.NewStreamHandler(
+	streamHandler := media.NewStreamHandler(
 		deps.StreamManager, deps.Items, deps.MediaStreams,
 		deps.ExternalIDs, deps.Providers,
 		deps.Settings, deps.ServerBaseURL, deps.Logger,
@@ -51,7 +53,7 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 	if deps.Libraries == nil {
 		return
 	}
-	libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Audit, deps.Logger)
+	libHandler := libhandler.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Audit, deps.Logger)
 	// Trickplay sprites aterrizan bajo <imageDir>/trickplay/ —
 	// reusar el image-storage root mantiene el on-disk layout
 	// clustered (un solo tree que el operador puede backup,
@@ -61,11 +63,11 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 	// el handler sólo necesita la pequeña interfaz MetadataIdentifier.
 	// Pasarlo como nil cuando no esté wired hace que los endpoints
 	// /identify devuelvan 503 sin tumbar el resto del handler.
-	var identifier handlers.MetadataIdentifier
+	var identifier media.MetadataIdentifier
 	if deps.Scanner != nil {
 		identifier = deps.Scanner
 	}
-	itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Audit, deps.Logger)
+	itemHandler := media.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Audit, deps.Logger)
 
 	// Libraries
 	r.Get("/libraries", libHandler.List)
@@ -172,7 +174,7 @@ func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
 	// Pass deps.IPTVTransmux as-is — cuando es nil el handler cae
 	// al raw passthrough proxy, que es el comportamiento correcto
 	// degraded-pero-funcional para deployments HLS-only sin ffmpeg.
-	iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.EventBus, deps.Logger)
+	iptvHandler := iptvhandler.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.EventBus, deps.Logger)
 
 	r.Route("/libraries/{id}/channels", func(r chi.Router) {
 		r.Get("/", iptvHandler.ListChannels)
@@ -248,9 +250,9 @@ func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
 	// Read: cualquier user con library ACL (para que el livetv
 	// panel muestre el status del schedule). Mutations:
 	// admin-only, en el group abajo.
-	var iptvScheduleHandler *handlers.IPTVScheduleHandler
+	var iptvScheduleHandler *iptvhandler.IPTVScheduleHandler
 	if deps.IPTVSchedules != nil && deps.IPTVScheduler != nil {
-		iptvScheduleHandler = handlers.NewIPTVScheduleHandler(
+		iptvScheduleHandler = iptvhandler.NewIPTVScheduleHandler(
 			deps.IPTVSchedules, deps.IPTVScheduler, deps.Libraries, deps.Logger)
 		r.Get("/libraries/{id}/schedule", iptvScheduleHandler.List)
 	}
@@ -309,7 +311,7 @@ func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
 // browse, y colecciones (sagas Jellyfin-style). Reusa el fedImgSrv
 // compartido con el peer poster proxy para que ambos vean la misma
 // path-mapping store + thumbnail cache.
-func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImgSrv *handlers.ImageHandler, fedImageDir string) {
+func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImgSrv *media.ImageHandler, fedImageDir string) {
 	if deps.Images == nil || deps.Providers == nil || deps.ExternalIDs == nil || fedImgSrv == nil {
 		return
 	}
@@ -336,7 +338,7 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// el resolved on-disk path se queda dentro de imageDir
 	// antes de servir.
 	if deps.People != nil {
-		peopleHandler := handlers.NewPeopleHandler(deps.People, imageDir, deps.Logger)
+		peopleHandler := media.NewPeopleHandler(deps.People, imageDir, deps.Logger)
 		r.Get("/people/{id}", peopleHandler.Get)
 		r.Get("/people/{id}/thumb", peopleHandler.Thumb)
 	}
@@ -347,7 +349,7 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// plus cada item de este catálogo linked a él, sorted
 	// year-desc.
 	if deps.Studios != nil {
-		studioHandler := handlers.NewStudioHandler(deps.Studios, deps.Logger)
+		studioHandler := media.NewStudioHandler(deps.Studios, deps.Logger)
 		r.Get("/studios", studioHandler.List)
 		r.Get("/studios/{slug}", studioHandler.Get)
 	}
@@ -358,15 +360,15 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// release order bajo un hero pulled del propio poster +
 	// backdrop de la collection.
 	if deps.Collections != nil {
-		var collectionOverrides handlers.CollectionImageOverrideRepo
+		var collectionOverrides media.CollectionImageOverrideRepo
 		if deps.CollectionImageOverrides != nil {
 			collectionOverrides = deps.CollectionImageOverrides
 		}
-		var collectionImages handlers.CollectionImageProvider
+		var collectionImages media.CollectionImageProvider
 		if deps.Providers != nil {
 			collectionImages = deps.Providers
 		}
-		collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Audit, deps.Logger)
+		collectionHandler := media.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Audit, deps.Logger)
 		r.Get("/collections", collectionHandler.List)
 		r.Get("/collections/{id}", collectionHandler.Get)
 		// Cualquier usuario autenticado puede GET el archivo
@@ -410,7 +412,7 @@ func mountProviders(r chi.Router, deps Dependencies) {
 	if deps.Providers == nil {
 		return
 	}
-	providerHandler := handlers.NewProviderHandler(deps.Providers, deps.ProviderRepo, deps.Logger)
+	providerHandler := media.NewProviderHandler(deps.Providers, deps.ProviderRepo, deps.Logger)
 
 	r.Get("/providers/search/metadata", providerHandler.SearchMetadata)
 	r.Get("/providers/metadata/{externalId}", providerHandler.GetMetadata)

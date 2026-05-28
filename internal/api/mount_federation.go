@@ -4,6 +4,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/api/handlers"
+	"hubplay/internal/api/handlers/admin"
+	fedhandler "hubplay/internal/api/handlers/federation"
+	"hubplay/internal/api/handlers/me"
+	"hubplay/internal/api/handlers/media"
 	"hubplay/internal/auth"
 	"hubplay/internal/federation"
 )
@@ -20,11 +24,11 @@ import (
 //     middleware RequirePeerJWT (Ed25519 firmado por el peer, audience
 //     = nuestro server_uuid). El mismo middleware aplica el rate-limit
 //     per-peer y registra todo en el audit log.
-func mountFederationPublic(r chi.Router, deps Dependencies, fedImgSrv *handlers.ImageHandler) {
+func mountFederationPublic(r chi.Router, deps Dependencies, fedImgSrv *media.ImageHandler) {
 	if deps.Federation == nil {
 		return
 	}
-	pubFed := handlers.NewFederationPublicHandler(deps.Federation, deps.Logger)
+	pubFed := fedhandler.NewFederationPublicHandler(deps.Federation, deps.Logger)
 	r.Get("/federation/info", pubFed.ServerInfo)
 	// Foto del servidor — público a propósito: los peers la consumen
 	// sin firmar JWT desde el avatar_image_url que reciben en
@@ -69,7 +73,7 @@ func mountFederationPublic(r chi.Router, deps Dependencies, fedImgSrv *handlers.
 		// resultante. Ambas ACL gated por share.CanPlay -- el
 		// session UUID solo no es suficiente.
 		if deps.StreamManager != nil && deps.Items != nil {
-			fedStream := handlers.NewFederationStreamHandler(deps.Federation, deps.StreamManager, deps.Items, deps.MediaStreams, deps.Logger)
+			fedStream := fedhandler.NewFederationStreamHandler(deps.Federation, deps.StreamManager, deps.Items, deps.MediaStreams, deps.Logger)
 			r.Post("/peer/stream/{itemId}/session", fedStream.StartSession)
 			r.Get("/peer/stream/session/{sessionId}/master.m3u8", fedStream.MasterPlaylist)
 			// Subtitles ANTES de las wildcard {quality}/* para que
@@ -90,7 +94,7 @@ func mountFederationPublic(r chi.Router, deps Dependencies, fedImgSrv *handlers.
 		// (un peer que perdió un share desde el último cache local
 		// no puede seguir pulling artwork).
 		if deps.Items != nil && deps.Images != nil && fedImgSrv != nil {
-			fedImg := handlers.NewFederationImageHandler(deps.Federation, deps.Items, deps.Images, fedImgSrv, deps.Logger)
+			fedImg := fedhandler.NewFederationImageHandler(deps.Federation, deps.Items, deps.Images, fedImgSrv, deps.Logger)
 			r.Get("/peer/items/{itemId}/poster", fedImg.ItemPoster)
 		}
 	})
@@ -116,7 +120,7 @@ func mountAdminAuthAndFederation(r chi.Router, deps Dependencies) {
 			deps.Metrics.AuthKeyRotations.WithLabelValues(outcome).Inc()
 		}
 	}
-	adminAuth := handlers.NewAdminAuthHandler(ks, nil, observe, deps.Logger)
+	adminAuth := admin.NewAdminAuthHandler(ks, nil, observe, deps.Logger)
 
 	r.Route("/admin/auth/keys", func(r chi.Router) {
 		// Owner-only (migración 055): JWT signing keys protegen la
@@ -140,7 +144,7 @@ func mountAdminAuthAndFederation(r chi.Router, deps Dependencies) {
 	// puede explorar lo que el admin compartió con peers (Phase 4).
 	// El server usa peer JWTs internamente; el usuario sólo lleva su
 	// session token normal.
-	mePeers := handlers.NewMePeersHandler(deps.Federation, deps.Logger)
+	mePeers := me.NewMePeersHandler(deps.Federation, deps.Logger)
 	r.Route("/me/peers", func(r chi.Router) {
 		r.Get("/", mePeers.ListMyPeers)
 		// Vista unificada: todas las libraries de todos los peers
@@ -187,7 +191,7 @@ func mountAdminAuthAndFederation(r chi.Router, deps Dependencies) {
 
 	// Federation admin surface — invite generation, peer pairing,
 	// peer listing, peer revocation.
-	adminFed := handlers.NewFederationAdminHandler(deps.Federation, deps.Logger)
+	adminFed := fedhandler.NewFederationAdminHandler(deps.Federation, deps.Logger)
 	r.Route("/admin/peers", func(r chi.Router) {
 		// Owner-only (migración 055): pairing con peers remotos
 		// abre superficie de salida de datos (catálogo, posters

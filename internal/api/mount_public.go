@@ -1,9 +1,10 @@
 package api
 
 import (
-	"github.com/go-chi/chi/v5"
+	authhandler "hubplay/internal/api/handlers/auth"
+	"hubplay/internal/api/handlers/system"
 
-	"hubplay/internal/api/handlers"
+	"github.com/go-chi/chi/v5"
 )
 
 // mountHealthAndOpenAPI registra los endpoints de salud (sin auth) y el
@@ -11,12 +12,12 @@ import (
 // + `/health` ping a la DB y devuelven 503 cuando algo está down (load
 // balancers drenan tráfico). El OpenAPI es ETag-aware para clientes que
 // polling.
-func mountHealthAndOpenAPI(r chi.Router, healthHandler *handlers.HealthHandler) {
+func mountHealthAndOpenAPI(r chi.Router, healthHandler *system.HealthHandler) {
 	r.Get("/health", healthHandler.Health)
 	r.Get("/health/live", healthHandler.Live)
 	r.Get("/health/ready", healthHandler.Ready)
 
-	openapiHandler := handlers.NewOpenAPIHandler()
+	openapiHandler := system.NewOpenAPIHandler()
 	r.Get("/openapi.yaml", openapiHandler.ServeYAML)
 	r.Head("/openapi.yaml", openapiHandler.ServeYAML)
 }
@@ -28,8 +29,8 @@ func mountHealthAndOpenAPI(r chi.Router, healthHandler *handlers.HealthHandler) 
 // requiere sesión.
 func mountAuthPublic(
 	r chi.Router,
-	authHandler *handlers.AuthHandler,
-	deviceHandler *handlers.DeviceAuthHandler,
+	authHandler *authhandler.AuthHandler,
+	deviceHandler *authhandler.DeviceAuthHandler,
 ) {
 	r.Post("/auth/login", authHandler.Login)
 	r.Post("/auth/refresh", authHandler.Refresh)
@@ -56,7 +57,7 @@ func mountSetupWizard(r chi.Router, deps Dependencies) {
 	if deps.SetupService == nil {
 		return
 	}
-	setupHandler := handlers.NewSetupHandler(handlers.SetupHandlerConfig{
+	setupHandler := system.NewSetupHandler(system.SetupHandlerConfig{
 		Setup:     deps.SetupService,
 		DBSaver:   deps.SetupService,
 		Auth:      deps.Auth,

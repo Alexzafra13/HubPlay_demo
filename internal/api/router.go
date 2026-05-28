@@ -13,6 +13,10 @@ import (
 	"github.com/go-chi/cors"
 
 	"hubplay/internal/api/handlers"
+	authhandler "hubplay/internal/api/handlers/auth"
+	"hubplay/internal/api/handlers/media"
+	"hubplay/internal/api/handlers/system"
+	"hubplay/internal/api/handlers/users"
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
@@ -33,33 +37,33 @@ import (
 )
 
 type Dependencies struct {
-	Auth           *auth.Service
-	DeviceCode     *auth.DeviceCodeService
-	Users          *user.Service
-	Libraries      *library.Service
-	StreamManager  *stream.Manager
-	IPTV           *iptv.Service
-	IPTVProxy      *iptv.StreamProxy
-	IPTVTransmux   *iptv.TransmuxManager
-	IPTVLogoCache  *iptv.LogoCache
-	IPTVScheduler  *iptv.Scheduler
+	Auth          *auth.Service
+	DeviceCode    *auth.DeviceCodeService
+	Users         *user.Service
+	Libraries     *library.Service
+	StreamManager *stream.Manager
+	IPTV          *iptv.Service
+	IPTVProxy     *iptv.StreamProxy
+	IPTVTransmux  *iptv.TransmuxManager
+	IPTVLogoCache *iptv.LogoCache
+	IPTVScheduler *iptv.Scheduler
 	// Repos expuestos como interfaces (olor H fase 2 del audit
 	// 2026-05-14): los handlers ya consumían contratos estrechos
 	// localmente, así que el `*db.XRepository` concreto sólo añadía
 	// "doble expresión" del contrato. Los repos concretos siguen
 	// satisfaciendo estas interfaces — composition root pasa
 	// `repos.X` sin cambios.
-	IPTVSchedules            handlers.IPTVSchedulesRepo
-	Items                    handlers.ItemsRepo
-	MediaStreams             handlers.MediaStreamsRepo
-	Images                   handlers.ImagesRepo
-	Metadata                 handlers.MetadataRepo
-	UserData                 handlers.UserDataRepo
-	Chapters                 handlers.ChaptersRepo
-	EpisodeSegments          handlers.EpisodeSegmentsRepo
-	People                   handlers.PeopleRepo
-	Studios                  handlers.StudiosRepo
-	Collections              handlers.CollectionsRepo
+	IPTVSchedules   handlers.IPTVSchedulesRepo
+	Items           handlers.ItemsRepo
+	MediaStreams    handlers.MediaStreamsRepo
+	Images          handlers.ImagesRepo
+	Metadata        handlers.MetadataRepo
+	UserData        handlers.UserDataRepo
+	Chapters        handlers.ChaptersRepo
+	EpisodeSegments handlers.EpisodeSegmentsRepo
+	People          handlers.PeopleRepo
+	Studios         handlers.StudiosRepo
+	Collections     handlers.CollectionsRepo
 	// CollectionImageOverrides es opcional. nil deshabilita los
 	// endpoints de edición de carátula/fondo de colección con 503;
 	// el listado y el detail siguen funcionando con la imagen TMDb
@@ -79,32 +83,32 @@ type Dependencies struct {
 	LibraryRepo  handlers.LibrariesRepo
 	ProviderRepo handlers.ProvidersConfigRepo
 	Settings     handlers.SettingsRepo
-	SetupService   *setup.Service
-	EventBus       *event.Bus
-	Federation     *federation.Manager
+	SetupService *setup.Service
+	EventBus     *event.Bus
+	Federation   *federation.Manager
 	// Notifications es el inbox por usuario (migration 049). Cualquier
 	// feature emite con svc.Create / FanOutToAdmins; los handlers
 	// /me/notifications + el SSE de /me/events consumen. Opcional:
 	// si nil, los endpoints devuelven 503 — tests que no quieren
 	// notif lo pasan asi.
-	Notifications  *notification.Service
+	Notifications *notification.Service
 	// DB es el wrapper *db.Maintenance con las capacidades estrechas
 	// que necesitan los handlers admin: PingContext (HealthChecker),
 	// Stats (PoolStatsReporter), VacuumInto (BackupOperator) y
 	// MigrationSource() (solo para el migrator sqlite→pg). Sustituye
 	// al antiguo `Database *sql.DB`; cierra los olores K + T (handlers
 	// no reciben raw `*sql.DB`).
-	DB             *db.Maintenance
+	DB *db.Maintenance
 	// Activity expone DailyWatchActivity + TopItems para el admin
 	// SystemHandler. Sustituye las queries raw inline en system.go.
-	Activity       handlers.ActivityRepo
-	Version        string
+	Activity handlers.ActivityRepo
+	Version  string
 	// Commit es el short SHA inyectado por el linker. Se renderiza en
 	// el panel system → server.commit. Vacío en dev builds.
-	Commit         string
+	Commit string
 	// BuildDate es la fecha de compilación (RFC3339). Vacío en dev.
-	BuildDate      string
-	WebAssets      fs.FS
+	BuildDate string
+	WebAssets fs.FS
 	// Config es el live `*config.Config`. **Sólo** lo consumen los dos
 	// handlers que mutan el fichero on-the-fly: setup wizard
 	// (`SetupHandler.Config`) y panel admin DB (`AdminDBHandler`); ambos
@@ -113,7 +117,7 @@ type Dependencies struct {
 	// `Config.X.Y` directo — se cablea por los campos primitivos
 	// inmediatamente abajo (`DataDir`, `ServerBaseURL`, etc.). Cierra el
 	// olor V del audit 2026-05-14 ("router lee deps.Config.* directo").
-	Config         *config.Config
+	Config *config.Config
 	// Valores primitivos derivados de Config, materializados una vez en
 	// composition root (`main.go`). Si `Config != nil` y un primitivo
 	// está a zero, `NewRouter` los rellena desde Config como
@@ -155,18 +159,18 @@ type Dependencies struct {
 	// tails. Optional — tests pass nil and the admin /logs
 	// endpoint short-circuits to "logs not available" rather than
 	// 500. Production builds wire it up via logging.NewWithBuffer.
-	LogBuffer      *logging.Buffer
+	LogBuffer *logging.Buffer
 	// SSELimiter bounds concurrent Server-Sent Events connections
 	// across all SSE surfaces (events, me_events, admin_logs). Optional
 	// — tests pass nil and handlers skip enforcement; production wires
 	// a single shared instance so global + per-user counts are unified.
-	SSELimiter     *handlers.SSELimiter
+	SSELimiter *handlers.SSELimiter
 	// HostMetrics samples host-level introspection (CPU%, RAM, GPU
 	// model). Optional — tests pass nil and the admin /system/stats
 	// response carries a zero-value host section, which the panel
 	// renders as dashes. Production wires a single instance, started
 	// at boot, lifetime bound to the process context.
-	HostMetrics    *sysmetrics.Sampler
+	HostMetrics *sysmetrics.Sampler
 	// ConfigPath is the absolute path to hubplay.yaml. Used by the
 	// admin Database panel to persist driver / DSN changes via
 	// config.Save without making the handler re-derive the path
@@ -180,22 +184,22 @@ type Dependencies struct {
 	// (PR2 feature upload). nil-safe: si está apagado en config, el
 	// binario arranca sin él y las rutas /api/v1/uploads* simplemente
 	// no se montan (cliente recibe 404).
-	Uploads        http.Handler
-	UploadsAudit   handlers.UploadAuditLister
+	Uploads      http.Handler
+	UploadsAudit handlers.UploadAuditLister
 	// Permissions enforza los flags granulares de admin (migración 055).
 	// nil = router cae al gate de RequireAdmin para todo (comportamiento
 	// pre-migración); en producción se pasa siempre y los endpoints
 	// owner-only + can_manage_admins lo aprovechan.
-	Permissions    *auth.PermissionChecker
+	Permissions *auth.PermissionChecker
 	// UserRepo expone GetByID + SetPermission + TransferOwnership al
 	// PermissionsHandler. Interface estrecha definida en el paquete
 	// handlers; el *db.UserRepository concreto la satisface.
-	UserRepo       handlers.PermissionsStore
+	UserRepo handlers.PermissionsStore
 	// CorsRegistry — combinador atómico statics(YAML) + dynamics(DB)
 	// que el middleware CORS consulta en cada preflight. nil = router
 	// cae al handler estático de chi-cors con la lista del YAML
 	// (comportamiento pre-PR4).
-	CorsRegistry   *CorsRegistry
+	CorsRegistry *CorsRegistry
 	// CorsOriginsRepo expone List/Insert/Delete/ListOrigins al handler
 	// del panel admin de CORS. nil = los endpoints /admin/cors-origins
 	// no se montan.
@@ -203,14 +207,14 @@ type Dependencies struct {
 	// AuditLog expone Query + DistinctEventTypes al panel admin de
 	// auditoría (PR5). nil = los endpoints /admin/audit-log no se
 	// montan (tests minimalistas).
-	AuditLog        handlers.AuditLogStore
+	AuditLog handlers.AuditLogStore
 	// Audit es el productor de eventos al audit log unificado (PR5).
 	// nil-safe en los handlers (caen a un sink no-op).
-	Audit           handlers.AuditEmitter
+	Audit handlers.AuditEmitter
 	// Updates expone el estado del update checker al panel admin. nil
 	// deja los endpoints /admin/system/updates devolviendo "feature
 	// no disponible" en lugar de 500. Esperado en dev builds.
-	Updates         handlers.UpdatesProvider
+	Updates handlers.UpdatesProvider
 }
 
 // NewRouter compone el chi.Router de toda la API. La función mantiene
@@ -251,23 +255,23 @@ func NewRouter(deps Dependencies) http.Handler {
 	mountMetricsEndpoint(r, deps)
 
 	// Handlers compartidos por varios mountXxx — construidos una vez.
-	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.AuthConfig, deps.Audit, deps.Logger)
-	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Audit, deps.Logger)
+	authHandler := authhandler.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.AuthConfig, deps.Audit, deps.Logger)
+	userHandler := users.NewUserHandler(deps.Users, deps.Libraries, deps.Audit, deps.Logger)
 
 	// Avoid wrapping a nil concrete pointer in a non-nil interface.
 	var streamSvc handlers.StreamManagerService
 	if deps.StreamManager != nil {
 		streamSvc = deps.StreamManager
 	}
-	healthHandler := handlers.NewHealthHandler(deps.DB, streamSvc, deps.Version, deps.DatabasePath)
+	healthHandler := system.NewHealthHandler(deps.DB, streamSvc, deps.Version, deps.DatabasePath)
 
 	// Device auth handler: construido aquí porque vive en dos mounts
 	// distintos — start/poll/events públicos (mountAuthPublic) y
 	// approve auth-gated (mountAuthProtected). Stateless internamente
 	// — la sesión y los códigos viven en deps.DeviceCode.
-	var deviceHandler *handlers.DeviceAuthHandler
+	var deviceHandler *authhandler.DeviceAuthHandler
 	if deps.DeviceCode != nil {
-		deviceHandler = handlers.NewDeviceAuthHandler(
+		deviceHandler = authhandler.NewDeviceAuthHandler(
 			deps.DeviceCode, nil, deps.AuthConfig, deps.EventBus, deps.SSELimiter, deps.Logger)
 	}
 
@@ -277,12 +281,12 @@ func NewRouter(deps Dependencies) http.Handler {
 	// cache as the local /images/file/{id} endpoint. Both share one
 	// instance and stay perfectly cache-coherent.
 	var (
-		fedImgSrv   *handlers.ImageHandler
+		fedImgSrv   *media.ImageHandler
 		fedImageDir string
 	)
 	if deps.DB != nil && deps.DataDir != "" && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
 		fedImageDir = filepath.Join(deps.DataDir, "images")
-		fedImgSrv = handlers.NewImageHandler(
+		fedImgSrv = media.NewImageHandler(
 			deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
 			library.NewImageRefresher(
 				deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
