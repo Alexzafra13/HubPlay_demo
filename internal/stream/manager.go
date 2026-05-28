@@ -53,6 +53,7 @@ type Manager struct {
 	cfg        config.StreamingConfig
 	logger     *slog.Logger
 	stopClean  chan struct{}
+	cleanDone  chan struct{}
 	metrics    MetricsSink
 	bus        *event.Bus // opcional; nil-safe
 	clock      clock.Clock
@@ -177,6 +178,7 @@ func NewManager(deps Deps) *Manager {
 		cfg:       cfg,
 		logger:    logger.With("module", "stream-manager"),
 		stopClean: make(chan struct{}),
+		cleanDone: make(chan struct{}),
 		metrics:   noopSink{},
 		hwAccel:   hwResult,
 		clock:     clk,
@@ -759,7 +761,12 @@ func (m *Manager) CacheDir() string {
 
 // Shutdown detiene todas las sesiones y el loop de limpieza.
 func (m *Manager) Shutdown() {
-	close(m.stopClean)
+	if m.stopClean != nil {
+		close(m.stopClean)
+	}
+	if m.cleanDone != nil {
+		<-m.cleanDone
+	}
 
 	m.mu.Lock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
@@ -778,6 +785,8 @@ func (m *Manager) Shutdown() {
 
 // cleanupLoop elimina periódicamente sesiones idle.
 func (m *Manager) cleanupLoop() {
+	defer close(m.cleanDone)
+
 	idleTimeout := m.cfg.IdleTimeout
 	if idleTimeout <= 0 {
 		idleTimeout = 5 * time.Minute
