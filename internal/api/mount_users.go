@@ -30,8 +30,8 @@ func mountUsers(
 		// El GET / (List) también pasa este gate; admins sin
 		// can_manage_users no pueden listar — preferimos eso a
 		// leaks de info entre admins parcialmente trusted.
-		if deps.Permissions != nil {
-			r.Use(deps.Permissions.Require(authmodel.PermManageUsers))
+		if deps.Auth.Permissions != nil {
+			r.Use(deps.Auth.Permissions.Require(authmodel.PermManageUsers))
 		} else {
 			r.Use(auth.RequireAdmin)
 		}
@@ -43,8 +43,8 @@ func mountUsers(
 		// SetRole es owner-only (migración 055): sólo el owner
 		// promueve a admin o degrada uno. can_manage_admins
 		// gestiona FLAGS de admins ya existentes, no el role.
-		if deps.Permissions != nil {
-			r.With(deps.Permissions.RequireOwner).Put("/{id}/role", userHandler.SetRole)
+		if deps.Auth.Permissions != nil {
+			r.With(deps.Auth.Permissions.RequireOwner).Put("/{id}/role", userHandler.SetRole)
 		} else {
 			r.Put("/{id}/role", userHandler.SetRole)
 		}
@@ -68,10 +68,10 @@ func mountUsers(
 		// Permission flags (migración 055). El read es admin-only
 		// genérico; el write está gated por can_manage_admins. El
 		// owner es inmutable — sin endpoint de transferencia.
-		if deps.Permissions != nil && deps.UserRepo != nil {
-			permHandler := users.NewPermissionsHandler(deps.UserRepo, deps.Audit, deps.Logger)
+		if deps.Auth.Permissions != nil && deps.Auth.UserRepo != nil {
+			permHandler := users.NewPermissionsHandler(deps.Auth.UserRepo, deps.Infra.Audit, deps.Infra.Logger)
 			r.Get("/{id}/permissions", permHandler.GetPermissions)
-			r.With(deps.Permissions.Require(authmodel.PermManageAdmins)).
+			r.With(deps.Auth.Permissions.Require(authmodel.PermManageAdmins)).
 				Put("/{id}/permissions", permHandler.PutPermissions)
 		}
 	})

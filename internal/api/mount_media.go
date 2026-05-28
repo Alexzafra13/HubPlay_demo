@@ -16,13 +16,13 @@ import (
 // per-quality playlist + segmento, direct play, stop session,
 // subtitles (internos + external providers tipo OpenSubtitles).
 func mountStreaming(r chi.Router, deps Dependencies) {
-	if deps.StreamManager == nil {
+	if deps.Streaming.StreamManager == nil {
 		return
 	}
 	streamHandler := media.NewStreamHandler(
-		deps.StreamManager, deps.Items, deps.MediaStreams,
-		deps.ExternalIDs, deps.Providers,
-		deps.Settings, deps.ServerBaseURL, deps.Logger,
+		deps.Streaming.StreamManager, deps.Catalog.Items, deps.Catalog.MediaStreams,
+		deps.Catalog.ExternalIDs, deps.Providers.Manager,
+		deps.Admin.Settings, deps.Server.ServerBaseURL, deps.Infra.Logger,
 	)
 
 	r.Route("/stream/{itemId}", func(r chi.Router) {
@@ -50,24 +50,25 @@ func mountStreaming(r chi.Router, deps Dependencies) {
 // libHandler para que pre-construir el handler una vez y reusarlo
 // downstream sea posible.
 func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir string) {
-	if deps.Libraries == nil {
+	if deps.Catalog.Libraries == nil {
 		return
 	}
-	libHandler := libhandler.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Audit, deps.Logger)
+	libHandler := libhandler.NewLibraryHandler(deps.Catalog.Libraries, deps.Catalog.Images, deps.Catalog.Metadata, deps.Catalog.UserData, deps.Auth.Users, deps.Infra.Audit, deps.Infra.Logger)
 	// Trickplay sprites aterrizan bajo <imageDir>/trickplay/ —
 	// reusar el image-storage root mantiene el on-disk layout
 	// clustered (un solo tree que el operador puede backup,
 	// rsync, o `du` para sizearle el cache).
-	trickplayDir := filepath.Join(deps.DataDir, "images", "trickplay")
-	// scanner ↔ MetadataIdentifier: deps.Scanner es *scanner.Scanner;
-	// el handler sólo necesita la pequeña interfaz MetadataIdentifier.
-	// Pasarlo como nil cuando no esté wired hace que los endpoints
-	// /identify devuelvan 503 sin tumbar el resto del handler.
+	trickplayDir := filepath.Join(deps.Server.DataDir, "images", "trickplay")
+	// scanner ↔ MetadataIdentifier: deps.Catalog.Scanner es
+	// *scanner.Scanner; el handler sólo necesita la pequeña interfaz
+	// MetadataIdentifier. Pasarlo como nil cuando no esté wired hace
+	// que los endpoints /identify devuelvan 503 sin tumbar el resto
+	// del handler.
 	var identifier media.MetadataIdentifier
-	if deps.Scanner != nil {
-		identifier = deps.Scanner
+	if deps.Catalog.Scanner != nil {
+		identifier = deps.Catalog.Scanner
 	}
-	itemHandler := media.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Audit, deps.Logger)
+	itemHandler := media.NewItemHandler(deps.Catalog.Libraries, deps.Catalog.Images, deps.Catalog.Metadata, deps.Catalog.UserData, deps.Auth.Users, deps.Catalog.Chapters, deps.Catalog.EpisodeSegments, deps.Catalog.ExternalIDs, deps.Catalog.People, deps.Catalog.Collections, deps.Providers.Manager, identifier, trickplayDir, deps.Infra.Audit, deps.Infra.Logger)
 
 	// Libraries
 	r.Get("/libraries", libHandler.List)
@@ -77,8 +78,8 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 
 		// Library mutations (migración 055): can_manage_libraries.
 		r.Group(func(r chi.Router) {
-			if deps.Permissions != nil {
-				r.Use(deps.Permissions.Require(authmodel.PermManageLibraries))
+			if deps.Auth.Permissions != nil {
+				r.Use(deps.Auth.Permissions.Require(authmodel.PermManageLibraries))
 			} else {
 				r.Use(auth.RequireAdmin)
 			}
@@ -89,8 +90,8 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 	})
 	r.Group(func(r chi.Router) {
 		// Library create / browse (migración 055): can_manage_libraries.
-		if deps.Permissions != nil {
-			r.Use(deps.Permissions.Require(authmodel.PermManageLibraries))
+		if deps.Auth.Permissions != nil {
+			r.Use(deps.Auth.Permissions.Require(authmodel.PermManageLibraries))
 		} else {
 			r.Use(auth.RequireAdmin)
 		}
@@ -99,7 +100,7 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 	})
 
 	// IPTV channels (within library routes)
-	if deps.IPTV != nil {
+	if deps.IPTV.Service != nil {
 		mountIPTVChannels(r, deps, fedImageDir)
 	}
 
@@ -141,8 +142,8 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 		// can_edit_metadata. Cubre el flujo Plex-style de
 		// rematch contra TMDb + el editor manual.
 		r.Group(func(r chi.Router) {
-			if deps.Permissions != nil {
-				r.Use(deps.Permissions.Require(authmodel.PermEditMetadata))
+			if deps.Auth.Permissions != nil {
+				r.Use(deps.Auth.Permissions.Require(authmodel.PermEditMetadata))
 			} else {
 				r.Use(auth.RequireAdmin)
 			}
@@ -168,13 +169,13 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 // mountIPTVChannels es la parte "Live TV" de mountLibrariesItemsAndIPTV.
 // Se extrajo en función propia para que el bloque IPTV (~120 LoC) no
 // ahogue la lectura del flow principal libraries/items. Se llama desde
-// dentro del scope de libraries y comparte deps.IPTV* + fedImageDir
+// dentro del scope de libraries y comparte deps.IPTV.* + fedImageDir
 // con el itemHandler/libHandler hermanos.
 func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
-	// Pass deps.IPTVTransmux as-is — cuando es nil el handler cae
+	// Pass deps.IPTV.Transmux as-is — cuando es nil el handler cae
 	// al raw passthrough proxy, que es el comportamiento correcto
 	// degraded-pero-funcional para deployments HLS-only sin ffmpeg.
-	iptvHandler := iptvhandler.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.EventBus, deps.Logger)
+	iptvHandler := iptvhandler.NewIPTVHandler(deps.IPTV.Service, deps.IPTV.Proxy, deps.IPTV.Transmux, deps.IPTV.LogoCache, fedImageDir, deps.Catalog.LibraryRepo, deps.Catalog.Libraries, deps.Infra.Audit, deps.Infra.EventBus, deps.Infra.Logger)
 
 	r.Route("/libraries/{id}/channels", func(r chi.Router) {
 		r.Get("/", iptvHandler.ListChannels)
@@ -251,16 +252,16 @@ func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
 	// panel muestre el status del schedule). Mutations:
 	// admin-only, en el group abajo.
 	var iptvScheduleHandler *iptvhandler.IPTVScheduleHandler
-	if deps.IPTVSchedules != nil && deps.IPTVScheduler != nil {
+	if deps.IPTV.Schedules != nil && deps.IPTV.Scheduler != nil {
 		iptvScheduleHandler = iptvhandler.NewIPTVScheduleHandler(
-			deps.IPTVSchedules, deps.IPTVScheduler, deps.Libraries, deps.Logger)
+			deps.IPTV.Schedules, deps.IPTV.Scheduler, deps.Catalog.Libraries, deps.Infra.Logger)
 		r.Get("/libraries/{id}/schedule", iptvScheduleHandler.List)
 	}
 
 	// Admin IPTV operations (migración 055): can_manage_iptv.
 	r.Group(func(r chi.Router) {
-		if deps.Permissions != nil {
-			r.Use(deps.Permissions.Require(authmodel.PermManageIPTV))
+		if deps.Auth.Permissions != nil {
+			r.Use(deps.Auth.Permissions.Require(authmodel.PermManageIPTV))
 		} else {
 			r.Use(auth.RequireAdmin)
 		}
@@ -312,7 +313,7 @@ func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
 // compartido con el peer poster proxy para que ambos vean la misma
 // path-mapping store + thumbnail cache.
 func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImgSrv *media.ImageHandler, fedImageDir string) {
-	if deps.Images == nil || deps.Providers == nil || deps.ExternalIDs == nil || fedImgSrv == nil {
+	if deps.Catalog.Images == nil || deps.Providers.Manager == nil || deps.Catalog.ExternalIDs == nil || fedImgSrv == nil {
 		return
 	}
 	imageDir := fedImageDir
@@ -337,8 +338,8 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// exacto. Los People IDs son uuids; el handler valida que
 	// el resolved on-disk path se queda dentro de imageDir
 	// antes de servir.
-	if deps.People != nil {
-		peopleHandler := media.NewPeopleHandler(deps.People, imageDir, deps.Logger)
+	if deps.Catalog.People != nil {
+		peopleHandler := media.NewPeopleHandler(deps.Catalog.People, imageDir, deps.Infra.Logger)
 		r.Get("/people/{id}", peopleHandler.Get)
 		r.Get("/people/{id}/thumb", peopleHandler.Thumb)
 	}
@@ -348,8 +349,8 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// /studios/{slug} devuelve el studio header (logo, name)
 	// plus cada item de este catálogo linked a él, sorted
 	// year-desc.
-	if deps.Studios != nil {
-		studioHandler := media.NewStudioHandler(deps.Studios, deps.Logger)
+	if deps.Catalog.Studios != nil {
+		studioHandler := media.NewStudioHandler(deps.Catalog.Studios, deps.Infra.Logger)
 		r.Get("/studios", studioHandler.List)
 		r.Get("/studios/{slug}", studioHandler.Get)
 	}
@@ -359,16 +360,16 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// /collections/{id} rendea los miembros de la saga en
 	// release order bajo un hero pulled del propio poster +
 	// backdrop de la collection.
-	if deps.Collections != nil {
+	if deps.Catalog.Collections != nil {
 		var collectionOverrides media.CollectionImageOverrideRepo
-		if deps.CollectionImageOverrides != nil {
-			collectionOverrides = deps.CollectionImageOverrides
+		if deps.Catalog.CollectionImageOverrides != nil {
+			collectionOverrides = deps.Catalog.CollectionImageOverrides
 		}
 		var collectionImages media.CollectionImageProvider
-		if deps.Providers != nil {
-			collectionImages = deps.Providers
+		if deps.Providers.Manager != nil {
+			collectionImages = deps.Providers.Manager
 		}
-		collectionHandler := media.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Audit, deps.Logger)
+		collectionHandler := media.NewCollectionHandler(deps.Catalog.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Infra.Audit, deps.Infra.Logger)
 		r.Get("/collections", collectionHandler.List)
 		r.Get("/collections/{id}", collectionHandler.Get)
 		// Cualquier usuario autenticado puede GET el archivo
@@ -376,8 +377,8 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 		r.Get("/collections/{id}/images/{type}/file", collectionHandler.ServeCollectionImage)
 		// Override de carátula/fondo (migración 055): can_change_artwork.
 		r.Group(func(r chi.Router) {
-			if deps.Permissions != nil {
-				r.Use(deps.Permissions.Require(authmodel.PermChangeArtwork))
+			if deps.Auth.Permissions != nil {
+				r.Use(deps.Auth.Permissions.Require(authmodel.PermChangeArtwork))
 			} else {
 				r.Use(auth.RequireAdmin)
 			}
@@ -394,8 +395,8 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 	// TMDb/Fanart — cae en "cambiar artwork" pese a tocar
 	// varios items a la vez.
 	r.Group(func(r chi.Router) {
-		if deps.Permissions != nil {
-			r.Use(deps.Permissions.Require(authmodel.PermChangeArtwork))
+		if deps.Auth.Permissions != nil {
+			r.Use(deps.Auth.Permissions.Require(authmodel.PermChangeArtwork))
 		} else {
 			r.Use(auth.RequireAdmin)
 		}
@@ -409,10 +410,10 @@ func mountImagesPeopleStudiosCollections(r chi.Router, deps Dependencies, fedImg
 // can_manage_libraries — el sourcing de metadatos es config de
 // instalación de librerías.
 func mountProviders(r chi.Router, deps Dependencies) {
-	if deps.Providers == nil {
+	if deps.Providers.Manager == nil {
 		return
 	}
-	providerHandler := media.NewProviderHandler(deps.Providers, deps.ProviderRepo, deps.Logger)
+	providerHandler := media.NewProviderHandler(deps.Providers.Manager, deps.Providers.Repo, deps.Infra.Logger)
 
 	r.Get("/providers/search/metadata", providerHandler.SearchMetadata)
 	r.Get("/providers/metadata/{externalId}", providerHandler.GetMetadata)
@@ -425,8 +426,8 @@ func mountProviders(r chi.Router, deps Dependencies) {
 	// que cae bajo la misma capability que crear y editar
 	// librerías.
 	r.Group(func(r chi.Router) {
-		if deps.Permissions != nil {
-			r.Use(deps.Permissions.Require(authmodel.PermManageLibraries))
+		if deps.Auth.Permissions != nil {
+			r.Use(deps.Auth.Permissions.Require(authmodel.PermManageLibraries))
 		} else {
 			r.Use(auth.RequireAdmin)
 		}

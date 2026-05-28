@@ -2,7 +2,6 @@ package api
 
 import (
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"net/netip"
 	"path/filepath"
@@ -17,204 +16,32 @@ import (
 	"hubplay/internal/api/handlers/media"
 	"hubplay/internal/api/handlers/system"
 	"hubplay/internal/api/handlers/users"
-	"hubplay/internal/auth"
 	"hubplay/internal/config"
-	"hubplay/internal/db"
-	"hubplay/internal/event"
-	"hubplay/internal/federation"
 	"hubplay/internal/imaging/pathmap"
-	"hubplay/internal/iptv"
 	"hubplay/internal/library"
-	"hubplay/internal/logging"
-	"hubplay/internal/notification"
-	"hubplay/internal/observability"
-	"hubplay/internal/provider"
-	"hubplay/internal/scanner"
-	"hubplay/internal/setup"
-	"hubplay/internal/stream"
-	"hubplay/internal/sysmetrics"
-	"hubplay/internal/user"
 )
 
+// Dependencies es el grafo completo de dependencias que NewRouter
+// necesita para montar el router. Los campos están agrupados en
+// sub-structs por dominio (definidos en deps.go) — `gopls find-references`
+// sobre un sub-struct devuelve exactamente quién depende de él.
+//
+// Cierra el olor MM del audit 2026-05-14 ("Dependencies tiene 70+
+// campos planos y es ilegible"). El composition root construye cada
+// sub-struct explícitamente; el router y los mountXxx leen siempre via
+// path anidado: `deps.Infra.Logger`, `deps.IPTV.Service`, etc.
 type Dependencies struct {
-	Auth          *auth.Service
-	DeviceCode    *auth.DeviceCodeService
-	Users         *user.Service
-	Libraries     *library.Service
-	StreamManager *stream.Manager
-	IPTV          *iptv.Service
-	IPTVProxy     *iptv.StreamProxy
-	IPTVTransmux  *iptv.TransmuxManager
-	IPTVLogoCache *iptv.LogoCache
-	IPTVScheduler *iptv.Scheduler
-	// Repos expuestos como interfaces (olor H fase 2 del audit
-	// 2026-05-14): los handlers ya consumían contratos estrechos
-	// localmente, así que el `*db.XRepository` concreto sólo añadía
-	// "doble expresión" del contrato. Los repos concretos siguen
-	// satisfaciendo estas interfaces — composition root pasa
-	// `repos.X` sin cambios.
-	IPTVSchedules   IPTVSchedulesRepo
-	Items           ItemsRepo
-	MediaStreams    MediaStreamsRepo
-	Images          ImagesRepo
-	Metadata        MetadataRepo
-	UserData        UserDataRepo
-	Chapters        ChaptersRepo
-	EpisodeSegments EpisodeSegmentsRepo
-	People          PeopleRepo
-	Studios         StudiosRepo
-	Collections     CollectionsRepo
-	// CollectionImageOverrides es opcional. nil deshabilita los
-	// endpoints de edición de carátula/fondo de colección con 503;
-	// el listado y el detail siguen funcionando con la imagen TMDb
-	// original.
-	CollectionImageOverrides CollectionImageOverridesRepo
-	UserPreferences          UserPreferencesRepoForDeps
-	Home                     HomeRepo
-	Providers                *provider.Manager
-	// Scanner expone SearchCandidates + IdentifyAndApply para el flujo
-	// admin de "Identify" (rematch manual contra TMDb). Opcional — si
-	// nil los endpoints /items/{id}/identify devuelven 503 y el resto
-	// del item handler sigue funcionando. Comparte instancia con la
-	// que dispara los scans periódicos: una sola fuente de verdad para
-	// la aplicación de metadatos en disco.
-	Scanner      *scanner.Scanner
-	ExternalIDs  ExternalIDsRepo
-	LibraryRepo  LibrariesRepo
-	ProviderRepo ProvidersConfigRepo
-	Settings     SettingsRepo
-	SetupService *setup.Service
-	EventBus     *event.Bus
-	Federation   *federation.Manager
-	// Notifications es el inbox por usuario (migration 049). Cualquier
-	// feature emite con svc.Create / FanOutToAdmins; los handlers
-	// /me/notifications + el SSE de /me/events consumen. Opcional:
-	// si nil, los endpoints devuelven 503 — tests que no quieren
-	// notif lo pasan asi.
-	Notifications *notification.Service
-	// DB es el wrapper *db.Maintenance con las capacidades estrechas
-	// que necesitan los handlers admin: PingContext (HealthChecker),
-	// Stats (PoolStatsReporter), VacuumInto (BackupOperator) y
-	// MigrationSource() (solo para el migrator sqlite→pg). Sustituye
-	// al antiguo `Database *sql.DB`; cierra los olores K + T (handlers
-	// no reciben raw `*sql.DB`).
-	DB *db.Maintenance
-	// Activity expone DailyWatchActivity + TopItems para el admin
-	// SystemHandler. Sustituye las queries raw inline en system.go.
-	Activity ActivityRepo
-	Version  string
-	// Commit es el short SHA inyectado por el linker. Se renderiza en
-	// el panel system → server.commit. Vacío en dev builds.
-	Commit string
-	// BuildDate es la fecha de compilación (RFC3339). Vacío en dev.
-	BuildDate string
-	WebAssets fs.FS
-	// Config es el live `*config.Config`. **Sólo** lo consumen los dos
-	// handlers que mutan el fichero on-the-fly: setup wizard
-	// (`SetupHandler.Config`) y panel admin DB (`AdminDBHandler`); ambos
-	// llaman a `config.Save` tras editar campos del struct, así que
-	// necesitan la referencia viva. El resto del router NO lee
-	// `Config.X.Y` directo — se cablea por los campos primitivos
-	// inmediatamente abajo (`DataDir`, `ServerBaseURL`, etc.). Cierra el
-	// olor V del audit 2026-05-14 ("router lee deps.Config.* directo").
-	Config *config.Config
-	// Valores primitivos derivados de Config, materializados una vez en
-	// composition root (`main.go`). Si `Config != nil` y un primitivo
-	// está a zero, `NewRouter` los rellena desde Config como
-	// retro-compat (tests minimalistas que sólo pasan `Config: cfg`).
-	MetricsEnabled bool
-	MetricsPath    string
-	AuthConfig     config.AuthConfig
-	// DataDir es el directorio padre de la DB. Source of truth para
-	// imageDir + fedImageDir + trickplayDir, que se derivan colgando
-	// "images" / "images/trickplay" debajo.
-	DataDir        string
-	DatabasePath   string
-	DatabaseDriver string
-	ServerAddr     string
-	ServerBaseURL  string
-	ServerPort     int
-	MDNSEnabled    bool
-	MDNSHostname   string
-	HWAccelDefault config.HWAccelConfig
-	// AllowedOrigins es la lista estática CORS desde el YAML. Sólo se
-	// usa cuando `CorsRegistry == nil` (tests minimalistas o flag de
-	// compatibilidad); en producción el middleware dynamic lo consulta
-	// con statics+dynamics combinados.
-	AllowedOrigins []string
-	// TrustedProxies es la lista de CIDRs que pertenecen a proxies de
-	// confianza delante del server. Wirea el client-IP middleware:
-	//   - lista vacía ⇒ no se honra X-Forwarded-For (client IP =
-	//     RemoteAddr de la conexión TCP; seguro si el server está
-	//     expuesto directo a Internet).
-	//   - 1+ CIDRs ⇒ ClientIPFromXFF camina XFF saltándose entradas
-	//     dentro de esos prefixes; la primera no-trusted es el cliente.
-	// Cierra la migración de middleware.RealIP (deprecated en chi
-	// v5.3.0 por 3 advisories de IP spoofing — GHSA-3fxj-6jh8-hvhx,
-	// GHSA-rjr7-jggh-pgcp, GHSA-9g5q-2w5x-hmxf).
-	TrustedProxies []string
-	Logger         *slog.Logger
-	Metrics        *observability.Metrics
-	// LogBuffer is the in-memory ring the admin "Logs" surface
-	// tails. Optional — tests pass nil and the admin /logs
-	// endpoint short-circuits to "logs not available" rather than
-	// 500. Production builds wire it up via logging.NewWithBuffer.
-	LogBuffer *logging.Buffer
-	// SSELimiter bounds concurrent Server-Sent Events connections
-	// across all SSE surfaces (events, me_events, admin_logs). Optional
-	// — tests pass nil and handlers skip enforcement; production wires
-	// a single shared instance so global + per-user counts are unified.
-	SSELimiter *handlers.SSELimiter
-	// HostMetrics samples host-level introspection (CPU%, RAM, GPU
-	// model). Optional — tests pass nil and the admin /system/stats
-	// response carries a zero-value host section, which the panel
-	// renders as dashes. Production wires a single instance, started
-	// at boot, lifetime bound to the process context.
-	HostMetrics *sysmetrics.Sampler
-	// ConfigPath is the absolute path to hubplay.yaml. Used by the
-	// admin Database panel to persist driver / DSN changes via
-	// config.Save without making the handler re-derive the path
-	// from the binary args. Empty in tests; production sets it.
-	ConfigPath string
-	// RestartRequester triggers a graceful self-shutdown when the
-	// admin DB panel or wizard saves a new driver. nil-safe — the
-	// handlers degrade to "saved, restart manually" when missing.
-	RestartRequester *config.RestartRequester
-	// Uploads sirve el protocolo tus + endpoints custom de uploads
-	// (PR2 feature upload). nil-safe: si está apagado en config, el
-	// binario arranca sin él y las rutas /api/v1/uploads* simplemente
-	// no se montan (cliente recibe 404).
-	Uploads      http.Handler
-	UploadsAudit handlers.UploadAuditLister
-	// Permissions enforza los flags granulares de admin (migración 055).
-	// nil = router cae al gate de RequireAdmin para todo (comportamiento
-	// pre-migración); en producción se pasa siempre y los endpoints
-	// owner-only + can_manage_admins lo aprovechan.
-	Permissions *auth.PermissionChecker
-	// UserRepo expone GetByID + SetPermission + TransferOwnership al
-	// PermissionsHandler. Interface estrecha definida en el paquete
-	// handlers; el *db.UserRepository concreto la satisface.
-	UserRepo handlers.PermissionsStore
-	// CorsRegistry — combinador atómico statics(YAML) + dynamics(DB)
-	// que el middleware CORS consulta en cada preflight. nil = router
-	// cae al handler estático de chi-cors con la lista del YAML
-	// (comportamiento pre-PR4).
-	CorsRegistry *CorsRegistry
-	// CorsOriginsRepo expone List/Insert/Delete/ListOrigins al handler
-	// del panel admin de CORS. nil = los endpoints /admin/cors-origins
-	// no se montan.
-	CorsOriginsRepo handlers.CorsOriginStore
-	// AuditLog expone Query + DistinctEventTypes al panel admin de
-	// auditoría (PR5). nil = los endpoints /admin/audit-log no se
-	// montan (tests minimalistas).
-	AuditLog handlers.AuditLogStore
-	// Audit es el productor de eventos al audit log unificado (PR5).
-	// nil-safe en los handlers (caen a un sink no-op).
-	Audit handlers.AuditEmitter
-	// Updates expone el estado del update checker al panel admin. nil
-	// deja los endpoints /admin/system/updates devolviendo "feature
-	// no disponible" en lugar de 500. Esperado en dev builds.
-	Updates handlers.UpdatesProvider
+	Infra      InfraDeps
+	Server     ServerDeps
+	Auth       AuthDeps
+	Catalog    CatalogDeps
+	Streaming  StreamingDeps
+	IPTV       IPTVDeps
+	Federation FederationDeps
+	Providers  ProvidersDeps
+	Admin      AdminDeps
+	Setup      SetupDeps
+	Uploads    UploadsDeps
 }
 
 // NewRouter compone el chi.Router de toda la API. La función mantiene
@@ -232,12 +59,13 @@ type Dependencies struct {
 // feature (olor H del audit 2026-05-14) deja NewRouter en ~80 LoC y
 // cada mount con un solo motivo de cambio.
 func NewRouter(deps Dependencies) http.Handler {
-	// Retro-compat con tests minimalistas que sólo pasan `Config: cfg`
+	// Retro-compat con tests minimalistas que sólo pasan `Server.Config: cfg`
 	// — si los campos primitivos no llegan rellenados, los derivamos
 	// aquí desde Config. main.go los pasa siempre explícitos (path
 	// idiomático). Una vez derivados, ningún sitio downstream lee
-	// `deps.Config.X.Y` excepto los dos handlers que mutan el fichero
-	// (setup wizard + admin DB). Cierra olor V del audit 2026-05-14.
+	// `deps.Server.Config.X.Y` excepto los dos handlers que mutan el
+	// fichero (setup wizard + admin DB). Cierra olor V del audit
+	// 2026-05-14.
 	deps.fillFromConfig()
 
 	r := chi.NewRouter()
@@ -245,9 +73,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	// Wire the observability hook into the handlers package so every
 	// rendered AppError gets counted. Kept out of NewRouter's return
 	// path so tests that never pass Metrics stay on the no-op recorder.
-	if deps.Metrics != nil {
+	if deps.Infra.Metrics != nil {
 		handlers.SetErrorRecorder(func(code string) {
-			deps.Metrics.HTTPErrors.WithLabelValues(code).Inc()
+			deps.Infra.Metrics.HTTPErrors.WithLabelValues(code).Inc()
 		})
 	}
 
@@ -255,24 +83,33 @@ func NewRouter(deps Dependencies) http.Handler {
 	mountMetricsEndpoint(r, deps)
 
 	// Handlers compartidos por varios mountXxx — construidos una vez.
-	authHandler := authhandler.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.AuthConfig, deps.Audit, deps.Logger)
-	userHandler := users.NewUserHandler(deps.Users, deps.Libraries, deps.Audit, deps.Logger)
+	authHandler := authhandler.NewAuthHandler(
+		deps.Auth.Auth, deps.Auth.Users, deps.Catalog.Libraries,
+		deps.Server.AuthConfig, deps.Infra.Audit, deps.Infra.Logger,
+	)
+	userHandler := users.NewUserHandler(
+		deps.Auth.Users, deps.Catalog.Libraries, deps.Infra.Audit, deps.Infra.Logger,
+	)
 
 	// Avoid wrapping a nil concrete pointer in a non-nil interface.
 	var streamSvc handlers.StreamManagerService
-	if deps.StreamManager != nil {
-		streamSvc = deps.StreamManager
+	if deps.Streaming.StreamManager != nil {
+		streamSvc = deps.Streaming.StreamManager
 	}
-	healthHandler := system.NewHealthHandler(deps.DB, streamSvc, deps.Version, deps.DatabasePath)
+	healthHandler := system.NewHealthHandler(
+		deps.Admin.DB, streamSvc, deps.Infra.Version, deps.Server.DatabasePath,
+	)
 
 	// Device auth handler: construido aquí porque vive en dos mounts
 	// distintos — start/poll/events públicos (mountAuthPublic) y
 	// approve auth-gated (mountAuthProtected). Stateless internamente
-	// — la sesión y los códigos viven en deps.DeviceCode.
+	// — la sesión y los códigos viven en deps.Auth.DeviceCode.
 	var deviceHandler *authhandler.DeviceAuthHandler
-	if deps.DeviceCode != nil {
+	if deps.Auth.DeviceCode != nil {
 		deviceHandler = authhandler.NewDeviceAuthHandler(
-			deps.DeviceCode, nil, deps.AuthConfig, deps.EventBus, deps.SSELimiter, deps.Logger)
+			deps.Auth.DeviceCode, nil, deps.Server.AuthConfig,
+			deps.Infra.EventBus, deps.Infra.SSELimiter, deps.Infra.Logger,
+		)
 	}
 
 	// Image handler is constructed early so the federation peer surface
@@ -284,15 +121,17 @@ func NewRouter(deps Dependencies) http.Handler {
 		fedImgSrv   *media.ImageHandler
 		fedImageDir string
 	)
-	if deps.DB != nil && deps.DataDir != "" && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
-		fedImageDir = filepath.Join(deps.DataDir, "images")
+	if deps.Admin.DB != nil && deps.Server.DataDir != "" &&
+		deps.Catalog.Images != nil && deps.Catalog.ExternalIDs != nil &&
+		deps.Catalog.Items != nil && deps.Providers.Manager != nil {
+		fedImageDir = filepath.Join(deps.Server.DataDir, "images")
 		fedImgSrv = media.NewImageHandler(
-			deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
+			deps.Catalog.Images, deps.Catalog.ExternalIDs, deps.Catalog.Items, deps.Providers.Manager,
 			library.NewImageRefresher(
-				deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
-				pathmap.New(fedImageDir), fedImageDir, deps.Logger,
+				deps.Catalog.Items, deps.Catalog.ExternalIDs, deps.Catalog.Images, deps.Providers.Manager,
+				pathmap.New(fedImageDir), fedImageDir, deps.Infra.Logger,
 			),
-			fedImageDir, deps.Audit, deps.Logger,
+			fedImageDir, deps.Infra.Audit, deps.Infra.Logger,
 		)
 	}
 
@@ -303,9 +142,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		mountSetupWizard(r, deps)
 		mountFederationPublic(r, deps, fedImgSrv)
 
-		// Protected routes (deps.Auth.Middleware enforza sesión).
+		// Protected routes (deps.Auth.Auth.Middleware enforza sesión).
 		r.Group(func(r chi.Router) {
-			r.Use(deps.Auth.Middleware)
+			r.Use(deps.Auth.Auth.Middleware)
 
 			mountAuthProtected(r, authHandler, deviceHandler)
 			mountSSEEvents(r, deps)
@@ -325,8 +164,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 
 	// Serve embedded web frontend (SPA fallback).
-	if deps.WebAssets != nil {
-		mountSPAFallback(r, deps.WebAssets)
+	if deps.Infra.WebAssets != nil {
+		mountSPAFallback(r, deps.Infra.WebAssets)
 	}
 
 	return r
@@ -339,7 +178,7 @@ func NewRouter(deps Dependencies) http.Handler {
 // que un panic que devuelva 500 sigue cargando headers; antes de CORS
 // así que la misma capa aplica a preflights.
 //
-// Client-IP middleware: usa `ClientIPFromXFF(deps.TrustedProxies...)`
+// Client-IP middleware: usa `ClientIPFromXFF(deps.Server.TrustedProxies...)`
 // si el operador ha declarado proxies de confianza, sino
 // `ClientIPFromRemoteAddr`. Reemplaza `middleware.RealIP` que se
 // deprecó en chi v5.3.0 por IP spoofing (3 CVE incl. Critical 9.3).
@@ -347,19 +186,19 @@ func NewRouter(deps Dependencies) http.Handler {
 // handlers lo leen con `handlers.ClientIP(r)` (helper local que cae
 // a r.RemoteAddr si el middleware no lo dejó set).
 func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
-	if len(deps.TrustedProxies) > 0 {
-		r.Use(middleware.ClientIPFromXFF(normalizeCIDRs(deps.TrustedProxies)...))
+	if len(deps.Server.TrustedProxies) > 0 {
+		r.Use(middleware.ClientIPFromXFF(normalizeCIDRs(deps.Server.TrustedProxies)...))
 	} else {
 		r.Use(middleware.ClientIPFromRemoteAddr)
 	}
 	r.Use(middleware.RequestID)
-	r.Use(RequestLogger(deps.Logger))
+	r.Use(RequestLogger(deps.Infra.Logger))
 	r.Use(middleware.Recoverer)
 	r.Use(SecurityHeaders())
-	if deps.Metrics != nil {
-		r.Use(deps.Metrics.MetricsMiddleware)
+	if deps.Infra.Metrics != nil {
+		r.Use(deps.Infra.Metrics.MetricsMiddleware)
 	}
-	// CORS middleware. Si deps.CorsRegistry está cableado (caso
+	// CORS middleware. Si deps.Server.CorsRegistry está cableado (caso
 	// default post-PR4-CORS-dynamic), usamos el middleware custom
 	// que combina statics del YAML + dynamics del DB con un
 	// atomic.Pointer; el panel admin puede añadir/quitar orígenes
@@ -378,11 +217,11 @@ func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
 		"Location", "Tus-Resumable", "Tus-Version", "Tus-Extension",
 		"Tus-Max-Size", "Upload-Offset", "Upload-Length",
 	}
-	if deps.CorsRegistry != nil {
-		r.Use(CorsMiddleware(deps.CorsRegistry, corsMethods, corsAllowedHeaders, corsExposedHeaders, true, 300))
+	if deps.Server.CorsRegistry != nil {
+		r.Use(CorsMiddleware(deps.Server.CorsRegistry, corsMethods, corsAllowedHeaders, corsExposedHeaders, true, 300))
 	} else {
 		r.Use(cors.Handler(cors.Options{
-			AllowedOrigins:   deps.AllowedOrigins,
+			AllowedOrigins:   deps.Server.AllowedOrigins,
 			AllowedMethods:   corsMethods,
 			AllowedHeaders:   corsAllowedHeaders,
 			ExposedHeaders:   corsExposedHeaders,
@@ -398,14 +237,14 @@ func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
 // convención es dejarlo sin auth para que el operador lo proteja en su
 // reverse proxy si desea.
 func mountMetricsEndpoint(r chi.Router, deps Dependencies) {
-	if deps.Metrics == nil || !deps.MetricsEnabled {
+	if deps.Infra.Metrics == nil || !deps.Server.MetricsEnabled {
 		return
 	}
-	path := deps.MetricsPath
+	path := deps.Server.MetricsPath
 	if path == "" {
 		path = "/metrics"
 	}
-	r.Handle(path, deps.Metrics.Handler())
+	r.Handle(path, deps.Infra.Metrics.Handler())
 }
 
 // mountSPAFallback sirve el frontend embebido. Intenta servir el path
@@ -430,55 +269,55 @@ func mountSPAFallback(r chi.Router, assets fs.FS) {
 	})
 }
 
-// fillFromConfig rellena los campos primitivos de Dependencies desde el
+// fillFromConfig rellena los campos primitivos de Server desde el
 // `*config.Config` cuando vienen a zero — pensado para tests que sólo
-// pasan `Config: cfg`. main.go los pasa siempre explícitos. Si `Config`
-// es nil, deja todo como está (los tests que ni siquiera pasan Config
-// ya no tocan ninguna ruta config-dependiente). Cierra olor V del
-// audit 2026-05-14.
+// pasan `Server.Config: cfg`. main.go los pasa siempre explícitos. Si
+// `Config` es nil, deja todo como está (los tests que ni siquiera pasan
+// Config ya no tocan ninguna ruta config-dependiente). Cierra olor V
+// del audit 2026-05-14.
 func (deps *Dependencies) fillFromConfig() {
-	cfg := deps.Config
+	cfg := deps.Server.Config
 	if cfg == nil {
 		return
 	}
-	if !deps.MetricsEnabled {
-		deps.MetricsEnabled = cfg.Observability.MetricsEnabled
+	if !deps.Server.MetricsEnabled {
+		deps.Server.MetricsEnabled = cfg.Observability.MetricsEnabled
 	}
-	if deps.MetricsPath == "" {
-		deps.MetricsPath = cfg.Observability.MetricsPath
+	if deps.Server.MetricsPath == "" {
+		deps.Server.MetricsPath = cfg.Observability.MetricsPath
 	}
-	if deps.AuthConfig == (config.AuthConfig{}) {
-		deps.AuthConfig = cfg.Auth
+	if deps.Server.AuthConfig == (config.AuthConfig{}) {
+		deps.Server.AuthConfig = cfg.Auth
 	}
-	if deps.DatabasePath == "" {
-		deps.DatabasePath = cfg.Database.Path
+	if deps.Server.DatabasePath == "" {
+		deps.Server.DatabasePath = cfg.Database.Path
 	}
-	if deps.DataDir == "" && cfg.Database.Path != "" {
-		deps.DataDir = filepath.Dir(cfg.Database.Path)
+	if deps.Server.DataDir == "" && cfg.Database.Path != "" {
+		deps.Server.DataDir = filepath.Dir(cfg.Database.Path)
 	}
-	if deps.DatabaseDriver == "" {
-		deps.DatabaseDriver = cfg.Database.Driver
+	if deps.Server.DatabaseDriver == "" {
+		deps.Server.DatabaseDriver = cfg.Database.Driver
 	}
-	if deps.ServerAddr == "" {
-		deps.ServerAddr = cfg.Server.Addr()
+	if deps.Server.ServerAddr == "" {
+		deps.Server.ServerAddr = cfg.Server.Addr()
 	}
-	if deps.ServerBaseURL == "" {
-		deps.ServerBaseURL = cfg.Server.BaseURL
+	if deps.Server.ServerBaseURL == "" {
+		deps.Server.ServerBaseURL = cfg.Server.BaseURL
 	}
-	if deps.ServerPort == 0 {
-		deps.ServerPort = cfg.Server.Port
+	if deps.Server.ServerPort == 0 {
+		deps.Server.ServerPort = cfg.Server.Port
 	}
-	if !deps.MDNSEnabled {
-		deps.MDNSEnabled = cfg.MDNS.Enabled
+	if !deps.Server.MDNSEnabled {
+		deps.Server.MDNSEnabled = cfg.MDNS.Enabled
 	}
-	if deps.MDNSHostname == "" {
-		deps.MDNSHostname = cfg.MDNS.Hostname
+	if deps.Server.MDNSHostname == "" {
+		deps.Server.MDNSHostname = cfg.MDNS.Hostname
 	}
-	if deps.HWAccelDefault == (config.HWAccelConfig{}) {
-		deps.HWAccelDefault = cfg.Streaming.HWAccel
+	if deps.Server.HWAccelDefault == (config.HWAccelConfig{}) {
+		deps.Server.HWAccelDefault = cfg.Streaming.HWAccel
 	}
-	if deps.AllowedOrigins == nil {
-		deps.AllowedOrigins = allowedOrigins(cfg)
+	if deps.Server.AllowedOrigins == nil {
+		deps.Server.AllowedOrigins = allowedOrigins(cfg)
 	}
 }
 

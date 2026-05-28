@@ -26,51 +26,51 @@ import (
 // CSRF.
 func mountAdminSystem(r chi.Router, deps Dependencies) {
 	var sysStreams system.SystemStatsProvider
-	if deps.StreamManager != nil {
-		sysStreams = deps.StreamManager
+	if deps.Streaming.StreamManager != nil {
+		sysStreams = deps.Streaming.StreamManager
 	}
 	var sysLibs system.LibraryStatsProvider
-	if deps.Libraries != nil {
-		sysLibs = deps.Libraries
+	if deps.Catalog.Libraries != nil {
+		sysLibs = deps.Catalog.Libraries
 	}
-	dbPath := deps.DatabasePath
+	dbPath := deps.Server.DatabasePath
 	imageDir := ""
-	if deps.DataDir != "" {
-		imageDir = filepath.Join(deps.DataDir, "images")
+	if deps.Server.DataDir != "" {
+		imageDir = filepath.Join(deps.Server.DataDir, "images")
 	}
-	bindAddress := deps.ServerAddr
-	baseURL := deps.ServerBaseURL
+	bindAddress := deps.Server.ServerAddr
+	baseURL := deps.Server.ServerBaseURL
 	mdnsURL := ""
-	if deps.MDNSEnabled {
-		host := deps.MDNSHostname
+	if deps.Server.MDNSEnabled {
+		host := deps.Server.MDNSHostname
 		if host == "" {
 			host = "hubplay"
 		}
-		mdnsURL = fmt.Sprintf("http://%s.local:%d", host, deps.ServerPort)
+		mdnsURL = fmt.Sprintf("http://%s.local:%d", host, deps.Server.ServerPort)
 	}
 	// Host info sampler — opcional. nil providers degradan a una
 	// host section vacía así que el test rig + paths mínimos siguen
 	// funcionando.
 	var hostInfo system.HostInfoProvider
-	if deps.HostMetrics != nil {
-		hostInfo = deps.HostMetrics
+	if deps.Infra.HostMetrics != nil {
+		hostInfo = deps.Infra.HostMetrics
 	}
 	sysHandler := system.NewSystemHandler(system.SystemHandlerConfig{
-		Health:         deps.DB,
-		Activity:       deps.Activity,
+		Health:         deps.Admin.DB,
+		Activity:       deps.Admin.Activity,
 		Streams:        sysStreams,
 		Libraries:      sysLibs,
-		Settings:       deps.Settings,
+		Settings:       deps.Admin.Settings,
 		Host:           hostInfo,
 		ImageDir:       imageDir,
 		DBPath:         dbPath,
 		BindAddress:    bindAddress,
 		BaseURLDefault: baseURL,
 		MDNSURL:        mdnsURL,
-		Version:        deps.Version,
-		Commit:         deps.Commit,
-		BuildDate:      deps.BuildDate,
-		Logger:         deps.Logger,
+		Version:        deps.Infra.Version,
+		Commit:         deps.Infra.Commit,
+		BuildDate:      deps.Infra.BuildDate,
+		Logger:         deps.Infra.Logger,
 	})
 
 	r.Route("/admin/system", func(r chi.Router) {
@@ -87,21 +87,21 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		r.Get("/stats", sysHandler.Stats)
 		r.Get("/stream-activity", sysHandler.StreamActivity)
 		r.Get("/top-items", sysHandler.TopItems)
-		// Update checker (PR2 update-notifier). Si deps.Updates
+		// Update checker (PR2 update-notifier). Si deps.Admin.Updates
 		// es nil (dev build / repo no configurado) las rutas
 		// devuelven cached zero-state vía el handler.
-		if deps.Updates != nil {
-			updHandler := system.NewUpdatesHandler(deps.Updates, deps.Logger)
+		if deps.Admin.Updates != nil {
+			updHandler := system.NewUpdatesHandler(deps.Admin.Updates, deps.Infra.Logger)
 			r.Get("/updates", updHandler.Status)
 			r.Post("/updates/check", updHandler.Check)
 		}
 		// "Recientemente añadido" del dashboard. Mezcla movies +
 		// series rolled-up por actividad (no episodios sueltos
 		// como hacía /items/latest).
-		if deps.Libraries != nil {
+		if deps.Catalog.Libraries != nil {
 			libAdminHandler := libhandler.NewLibraryHandler(
-				deps.Libraries, deps.Images, deps.Metadata,
-				deps.UserData, deps.Users, deps.Audit, deps.Logger,
+				deps.Catalog.Libraries, deps.Catalog.Images, deps.Catalog.Metadata,
+				deps.Catalog.UserData, deps.Auth.Users, deps.Infra.Audit, deps.Infra.Logger,
 			)
 			r.Get("/recently-added", libAdminHandler.AdminRecentlyAdded)
 		}
@@ -110,9 +110,9 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// aquí (no junto al player streaming) porque ambos
 		// métodos son admin-only y quieren compartir el prefix
 		// /admin/system/* que el dashboard ya usa.
-		if deps.StreamManager != nil {
+		if deps.Streaming.StreamManager != nil {
 			adminStreams := admin.NewAdminStreamsHandler(
-				deps.StreamManager, deps.Users, deps.Items, deps.Logger,
+				deps.Streaming.StreamManager, deps.Auth.Users, deps.Catalog.Items, deps.Infra.Logger,
 			)
 			r.Get("/sessions", adminStreams.ListSessions)
 			r.Delete("/sessions/{id}", adminStreams.KillSession)
@@ -122,13 +122,13 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// Endpoint dedicado (no parte de /stats) porque la cadencia
 		// es distinta: stats cada 30s, storage cada minuto - cambia
 		// solo con scans.
-		if deps.Libraries != nil && deps.Items != nil {
+		if deps.Catalog.Libraries != nil && deps.Catalog.Items != nil {
 			adminStorage := admin.NewAdminStorageHandler(
-				deps.Libraries, deps.Items, deps.Logger,
+				deps.Catalog.Libraries, deps.Catalog.Items, deps.Infra.Logger,
 			)
 			r.Get("/storage/disks", adminStorage.Disks)
 		}
-		if deps.Settings != nil {
+		if deps.Admin.Settings != nil {
 			// Surfacea los accelerators realmente detectados del
 			// host al settings handler así que el panel sólo
 			// ofrece choices que tengan alguna chance de funcionar.
@@ -137,8 +137,8 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 			// "detector no vio nada" y cae a "auto".
 			var detectedHWAccel []string
 			var streamingDefaults admin.StreamingDefaults
-			if deps.StreamManager != nil {
-				for _, a := range deps.StreamManager.HWAccelInfo().Available {
+			if deps.Streaming.StreamManager != nil {
+				for _, a := range deps.Streaming.StreamManager.HWAccelInfo().Available {
 					detectedHWAccel = append(detectedHWAccel, string(a))
 				}
 				// Snapshot de los knobs streaming auto-tuneados
@@ -147,18 +147,18 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 				// hardware del host — no una constante YAML
 				// estática que el admin tendría que deducir.
 				streamingDefaults = admin.StreamingDefaults{
-					MaxTranscodeSessions:        deps.StreamManager.MaxTranscodeSessions(),
-					MaxTranscodeSessionsPerUser: deps.StreamManager.MaxTranscodeSessionsPerUser(),
-					TranscodePreset:             deps.StreamManager.TranscodePreset(),
+					MaxTranscodeSessions:        deps.Streaming.StreamManager.MaxTranscodeSessions(),
+					MaxTranscodeSessionsPerUser: deps.Streaming.StreamManager.MaxTranscodeSessionsPerUser(),
+					TranscodePreset:             deps.Streaming.StreamManager.TranscodePreset(),
 				}
 			}
 			settingsHandler := admin.NewSettingsHandler(admin.SettingsHandlerConfig{
-				Settings:          deps.Settings,
+				Settings:          deps.Admin.Settings,
 				BaseURLDefault:    baseURL,
-				HWAccelDefault:    deps.HWAccelDefault,
+				HWAccelDefault:    deps.Server.HWAccelDefault,
 				HWAccelDetected:   detectedHWAccel,
 				StreamingDefaults: streamingDefaults,
-				Logger:            deps.Logger,
+				Logger:            deps.Infra.Logger,
 			})
 			r.Get("/settings", settingsHandler.List)
 			r.Put("/settings", settingsHandler.Update)
@@ -175,25 +175,25 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// Las metemos en un sub-Group con permCheck.RequireOwner
 		// encima del RequireAdmin del padre.
 		r.Group(func(r chi.Router) {
-			if deps.Permissions != nil {
-				r.Use(deps.Permissions.RequireOwner)
+			if deps.Auth.Permissions != nil {
+				r.Use(deps.Auth.Permissions.RequireOwner)
 			}
-			if deps.DB != nil {
+			if deps.Admin.DB != nil {
 				backupHandler := admin.NewAdminBackupHandler(
-					deps.DatabaseDriver, deps.DB, deps.DatabasePath, deps.Audit, deps.Logger,
+					deps.Server.DatabaseDriver, deps.Admin.DB, deps.Server.DatabasePath, deps.Infra.Audit, deps.Infra.Logger,
 				)
 				r.Get("/backup", backupHandler.Download)
 				r.Post("/backup/restore", backupHandler.Upload)
 			}
-			if deps.SetupService != nil && deps.ConfigPath != "" {
+			if deps.Setup.Service != nil && deps.Server.ConfigPath != "" {
 				dbHandler := admin.NewAdminDBHandler(
-					deps.Config,
-					deps.ConfigPath,
-					deps.DB,
-					deps.SetupService.SaveDatabaseConfig,
-					deps.RestartRequester,
-					deps.Audit,
-					deps.Logger,
+					deps.Server.Config,
+					deps.Server.ConfigPath,
+					deps.Admin.DB,
+					deps.Setup.Service.SaveDatabaseConfig,
+					deps.Server.RestartRequester,
+					deps.Infra.Audit,
+					deps.Infra.Logger,
 				)
 				r.Get("/db", dbHandler.Status)
 				r.Get("/db/profiles", dbHandler.Profiles)
@@ -208,13 +208,13 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 			// superficie de CSRF cross-origin. Va dentro de
 			// /admin/system para que el dashboard tenga un
 			// único hogar de "configuración del servidor".
-			if deps.CorsOriginsRepo != nil && deps.CorsRegistry != nil {
+			if deps.Server.CorsOriginsRepo != nil && deps.Server.CorsRegistry != nil {
 				corsHandler := system.NewCorsOriginsHandler(
-					deps.CorsOriginsRepo,
-					deps.CorsRegistry,
+					deps.Server.CorsOriginsRepo,
+					deps.Server.CorsRegistry,
 					ValidateCorsOrigin,
-					deps.Audit,
-					deps.Logger,
+					deps.Infra.Audit,
+					deps.Infra.Logger,
 				)
 				r.Get("/cors-origins", corsHandler.List)
 				r.Post("/cors-origins", corsHandler.Add)
@@ -226,7 +226,7 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// SSE stream para el live tail. El handler short-circuita
 		// cuando LogBuffer es nil (test builds, etc.) así que los
 		// callers no reciben 500.
-		logsHandler := admin.NewAdminLogsHandler(deps.LogBuffer, deps.SSELimiter)
+		logsHandler := admin.NewAdminLogsHandler(deps.Infra.LogBuffer, deps.Infra.SSELimiter)
 		r.Get("/logs", logsHandler.Snapshot)
 		r.Get("/logs/stream", logsHandler.Stream)
 
@@ -235,11 +235,11 @@ func mountAdminSystem(r chi.Router, deps Dependencies) {
 		// sin tocar nada. El owner también pasa (User.Can()
 		// devuelve true para todo). Sub-Group adicional sobre el
 		// RequireAdmin del padre.
-		if deps.AuditLog != nil {
-			auditHandler := admin.NewAuditLogHandler(deps.AuditLog, deps.Logger)
+		if deps.Infra.AuditLog != nil {
+			auditHandler := admin.NewAuditLogHandler(deps.Infra.AuditLog, deps.Infra.Logger)
 			r.Group(func(r chi.Router) {
-				if deps.Permissions != nil {
-					r.Use(deps.Permissions.Require(authmodel.PermViewAudit))
+				if deps.Auth.Permissions != nil {
+					r.Use(deps.Auth.Permissions.Require(authmodel.PermViewAudit))
 				}
 				r.Get("/audit-log", auditHandler.Query)
 				r.Get("/audit-log/types", auditHandler.EventTypes)

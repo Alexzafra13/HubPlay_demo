@@ -18,27 +18,27 @@ import (
 // el id como param. Bajo el mismo bloque registra el upload-folder
 // explorer (PR6) gateado por can_upload.
 func mountUploads(r chi.Router, deps Dependencies) {
-	if deps.Uploads == nil || deps.UploadsAudit == nil || deps.EventBus == nil {
+	if deps.Uploads.Handler == nil || deps.Uploads.Audit == nil || deps.Infra.EventBus == nil {
 		return
 	}
-	uploadsAPI := uploads.NewUploadsHandler(deps.UploadsAudit, deps.EventBus, deps.SSELimiter, deps.Logger)
+	uploadsAPI := uploads.NewUploadsHandler(deps.Uploads.Audit, deps.Infra.EventBus, deps.Infra.SSELimiter, deps.Infra.Logger)
 	r.Get("/uploads/mine", uploadsAPI.ListMine)
 	r.Get("/uploads/events", uploadsAPI.Stream)
 	// tus handler. Importante: bajo /api/v1/uploads/ con el slash
 	// final — tusd compone Location: /api/v1/uploads/<id> tras el
 	// POST de creación, y el cliente PATCH-ea ahí mismo.
-	r.Mount("/uploads/", deps.Uploads)
+	r.Mount("/uploads/", deps.Uploads.Handler)
 
 	// Upload folder explorer (PR6 file explorer). Gateado por
 	// can_upload — un user sin permiso de subir no necesita el
 	// browser. Owner pasa automático via User.Can().
-	if deps.Libraries == nil {
+	if deps.Catalog.Libraries == nil {
 		return
 	}
-	browseHandler := uploads.NewUploadBrowseHandler(deps.Libraries, deps.Logger)
+	browseHandler := uploads.NewUploadBrowseHandler(deps.Catalog.Libraries, deps.Infra.Logger)
 	r.Group(func(r chi.Router) {
-		if deps.Permissions != nil {
-			r.Use(deps.Permissions.Require(authmodel.PermUpload))
+		if deps.Auth.Permissions != nil {
+			r.Use(deps.Auth.Permissions.Require(authmodel.PermUpload))
 		}
 		r.Get("/libraries/{id}/upload-browse", browseHandler.Browse)
 		r.Post("/libraries/{id}/folders", browseHandler.CreateFolder)

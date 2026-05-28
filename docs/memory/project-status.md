@@ -13,7 +13,7 @@
 | Área | Estado |
 |---|---|
 | **Audit olores altos 2026-05-14** | ✅ **6/6 cerrados** |
-| **Audit olores macro 2026-05-27** | NN ✅, PP ✅, QQ ✅, SS-3/4/5 ✅, **OO ✅, RR ✅**. Queda **MM** (split Dependencies) |
+| **Audit olores macro 2026-05-27** | NN ✅, PP ✅, QQ ✅, SS-3/4/5 ✅, **OO ✅, RR ✅, MM ✅**. Todos cerrados. |
 | **Tests backend** | 38 paquetes verdes (handlers split en 10 sub-paquetes) |
 | **Tests frontend** | **717/717** vitest verdes |
 | **PRs abiertas** | (ninguna — todo mergeado) |
@@ -50,6 +50,37 @@ Rama: `claude/project-review-97WBR`.
 - Packages con conflicto de nombre con `internal/auth`, `internal/iptv`, etc. usan sufijo `handler` (`authhandler`, `iptvhandler`, etc.)
 
 **Métricas:** 126 ficheros tocados, +3187 / -2293 LoC. 0 regresiones de API HTTP.
+
+### MM — Split de `api.Dependencies` en 11 sub-structs por dominio
+
+`api.Dependencies` tenía 71 campos planos que cualquier mount file veía
+enteros. Split en 11 sub-structs por dominio en `internal/api/deps.go`:
+
+```go
+type Dependencies struct {
+    Infra      InfraDeps      // Logger, Metrics, EventBus, Audit, SSELimiter, ...
+    Server     ServerDeps     // Config, AuthConfig, CORS, TrustedProxies, ...
+    Auth       AuthDeps       // Auth, DeviceCode, Users, UserRepo, Permissions
+    Catalog    CatalogDeps    // Libraries, Items, Images, Metadata, ...
+    Streaming  StreamingDeps  // StreamManager
+    IPTV       IPTVDeps       // Service, Proxy, Transmux, LogoCache, ...
+    Federation FederationDeps // Manager
+    Providers  ProvidersDeps  // Manager, Repo
+    Admin      AdminDeps      // DB, Activity, Settings, Updates
+    Setup      SetupDeps      // Service
+    Uploads    UploadsDeps    // Handler, Audit
+}
+```
+
+Cambios:
+- `internal/api/deps.go` (176 LoC, nuevo) — define los 11 sub-structs
+- `internal/api/router.go` 581→362 LoC (-38%) — accesos via `deps.Group.Field`
+- `cmd/hubplay/main.go` — composition root construye sub-structs explícitos
+- 7 mount files actualizados a accesos anidados
+- Tests de integración actualizados
+
+Cada `mountXxx` ya solo "ve" los campos de los grupos que necesita
+(via `deps.Group.X`). No hay forma accidental de tocar otros dominios.
 
 ### RR — Eliminado `deps_repos.go`
 
