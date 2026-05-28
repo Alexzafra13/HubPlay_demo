@@ -53,24 +53,24 @@ type Dependencies struct {
 	// "doble expresión" del contrato. Los repos concretos siguen
 	// satisfaciendo estas interfaces — composition root pasa
 	// `repos.X` sin cambios.
-	IPTVSchedules   handlers.IPTVSchedulesRepo
-	Items           handlers.ItemsRepo
-	MediaStreams    handlers.MediaStreamsRepo
-	Images          handlers.ImagesRepo
-	Metadata        handlers.MetadataRepo
-	UserData        handlers.UserDataRepo
-	Chapters        handlers.ChaptersRepo
-	EpisodeSegments handlers.EpisodeSegmentsRepo
-	People          handlers.PeopleRepo
-	Studios         handlers.StudiosRepo
-	Collections     handlers.CollectionsRepo
+	IPTVSchedules   IPTVSchedulesRepo
+	Items           ItemsRepo
+	MediaStreams    MediaStreamsRepo
+	Images          ImagesRepo
+	Metadata        MetadataRepo
+	UserData        UserDataRepo
+	Chapters        ChaptersRepo
+	EpisodeSegments EpisodeSegmentsRepo
+	People          PeopleRepo
+	Studios         StudiosRepo
+	Collections     CollectionsRepo
 	// CollectionImageOverrides es opcional. nil deshabilita los
 	// endpoints de edición de carátula/fondo de colección con 503;
 	// el listado y el detail siguen funcionando con la imagen TMDb
 	// original.
-	CollectionImageOverrides handlers.CollectionImageOverridesRepo
-	UserPreferences          handlers.UserPreferencesRepoForDeps
-	Home                     handlers.HomeRepo
+	CollectionImageOverrides CollectionImageOverridesRepo
+	UserPreferences          UserPreferencesRepoForDeps
+	Home                     HomeRepo
 	Providers                *provider.Manager
 	// Scanner expone SearchCandidates + IdentifyAndApply para el flujo
 	// admin de "Identify" (rematch manual contra TMDb). Opcional — si
@@ -79,10 +79,10 @@ type Dependencies struct {
 	// que dispara los scans periódicos: una sola fuente de verdad para
 	// la aplicación de metadatos en disco.
 	Scanner      *scanner.Scanner
-	ExternalIDs  handlers.ExternalIDsRepo
-	LibraryRepo  handlers.LibrariesRepo
-	ProviderRepo handlers.ProvidersConfigRepo
-	Settings     handlers.SettingsRepo
+	ExternalIDs  ExternalIDsRepo
+	LibraryRepo  LibrariesRepo
+	ProviderRepo ProvidersConfigRepo
+	Settings     SettingsRepo
 	SetupService *setup.Service
 	EventBus     *event.Bus
 	Federation   *federation.Manager
@@ -101,7 +101,7 @@ type Dependencies struct {
 	DB *db.Maintenance
 	// Activity expone DailyWatchActivity + TopItems para el admin
 	// SystemHandler. Sustituye las queries raw inline en system.go.
-	Activity handlers.ActivityRepo
+	Activity ActivityRepo
 	Version  string
 	// Commit es el short SHA inyectado por el linker. Se renderiza en
 	// el panel system → server.commit. Vacío en dev builds.
