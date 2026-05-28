@@ -6,24 +6,78 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-27)
+## 🔭 Estado actual (2026-05-28)
 
 **Salud del proyecto**: MVP funcional, cerca de early-production.
 
 | Área | Estado |
 |---|---|
-| **Audit olores altos** | ✅ **6/6 cerrados** (A+M, B+J, CC, P, W, F14-2-a, G, H, LL) |
-| **Audit olores medios** | ✅ Núcleo cerrado. Queda **F15-5** (integration tests library, sesión propia) |
-| **F16 (handlers)** | ✅ 100% cerrado (8/8 medium + 10/10 bajas) |
-| **F15 (tests)** | ✅ F15-1/2/3/4/6/7/8/9 cerrados. **F15-5** pendiente. F15-10/11/12 polish opcional |
-| **Tests backend** | 191 `_test.go` files, race-clean (verificado con LLVM-MinGW UCRT en Windows) |
+| **Audit olores altos 2026-05-14** | ✅ **6/6 cerrados** |
+| **Audit olores macro 2026-05-27** | NN ✅, PP ✅, QQ ✅, SS-3/4/5 ✅. Quedan **OO, MM, RR** (organización física) |
+| **Tests backend** | 191 `_test.go` files, 28 paquetes verdes |
 | **Tests frontend** | **717/717** vitest verdes |
-| **CI** | Todos los jobs verdes: Lint, Test Backend, Postgres, Frontend, knip, govulncheck, goleak, React Doctor |
-| **PRs abiertas** | [#471](https://github.com/Alexzafra13/HubPlay_demo/pull/471) F15-6 error coverage (recién abierta, esperando CI) |
+| **PRs abiertas** | [#477](https://github.com/Alexzafra13/HubPlay_demo/pull/477) audit arch review — **conflicto de merge, pendiente resolución manual** |
 
-**Distribución**: HubPlay ya distribuible "descargar y usar" en los 3 targets (desktop / Linux server / NAS Docker). Installer Windows existente sin firma; SignPath integration **lista en CI pero opt-in** — pendiente que Alejandro aplique a SignPath Foundation y configure secrets.
+### PR #477 — estado y cómo continuar
 
-**Próximo trabajo arquitectónico**: nuevo audit macro [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) identifica **6 olores estructurales** que emergieron por agregación tras cerrar el audit 2026-05-14 (MM Dependencies 77 campos, NN interfaces de servicio gigantes, OO mega-paquete handlers, PP tipos db fugan, QQ main.run 630 LoC, RR duplicación). Cola de revisión por paquete (8 ítems) en §6 del audit; empezar por `internal/api` + `handlers`.
+Rama: `claude/go-backend-arch-review-UDzqB` (21 commits, 28 paquetes verdes).
+
+**Problema**: la rama divergió de main porque una PR anterior (#475)
+mergeó parte de los primeros commits. GitHub no puede auto-merge.
+
+**Para resolver**: rebase interactivo sobre main descartando los commits
+que #475 ya incorporó, o crear rama nueva desde main y aplicar los
+cambios como un solo commit squash. Los archivos clave son:
+
+- `internal/api/handlers/` — micro-interfaces + IPTV sub-handler split
+- `cmd/hubplay/` — 5 builders extraídos de run()
+- `internal/library/model/` — home.go, userdata.go, admin.go (tipos migrados)
+- `internal/provider/model/` — ProviderConfig migrado
+- `internal/db/` — tipos eliminados, repos actualizados
+- `internal/federation/manager_browse.go` — per-peer timeout
+- `docs/memory/audit-2026-05-27-per-package-review.md` — documento de análisis
+
+---
+
+## 🏛 Sesión 2026-05-28 — Audit arquitectónico profundo + implementación
+
+Rama: `claude/go-backend-arch-review-UDzqB`. PR: [#477](https://github.com/Alexzafra13/HubPlay_demo/pull/477).
+21 commits, 28 paquetes verdes, 0 regresiones.
+
+### Olores cerrados en esta sesión
+
+| Olor | Antes | Después |
+|------|-------|---------|
+| **NN** (interfaces gigantes) | `LibraryService` 25m, `IPTVService` ~50m en interfaces.go | 20+ micro-interfaces locales (1-12m c/u). `interfaces.go` 449→279 LoC (-38%) |
+| **TT-6** (IPTVHandler god-handler) | 1 struct, 10 deps, 12 ficheros | Facade puro, 9 sub-handlers embebidos |
+| **SS-3** (defer fuera de lifecycle) | 4 defer tras database.Close() | Migrados a lc.AddWorker |
+| **SS-4** (os.Exit en run) | os.Exit(1) sin defers | return fmt.Errorf |
+| **SS-5** (browse sin timeout) | BrowseAllPeerLibraries se cuelga si un peer no responde | 10s per-peer timeout |
+| **QQ** (main.run monolítico) | 780 LoC | 581 LoC (-25%). 5 builders: foundation, database, streaming, uploads, federation |
+| **PP** (tipos db fugan) | 35 db imports en handlers, tipos sql.Null* cruzando capas | 15 imports (-57%). 14 tipos → library/model + provider/model con tipos Go puros |
+
+### Ficheros nuevos creados
+
+- `cmd/hubplay/build_foundation.go` — config + logger + clock + PATH
+- `cmd/hubplay/build_database.go` — open + migrate + repos
+- `cmd/hubplay/build_streaming.go` — applyStreamingOverrides
+- `cmd/hubplay/build_uploads.go` — tusd + GC
+- `cmd/hubplay/build_federation.go` — identity + manager + lifecycle hooks
+- `internal/library/model/home.go` — HomeTrendingItem, HomeRecommendation, HomeBecauseSeed, HomeBecauseResult, HomeLiveNowChannel
+- `internal/library/model/userdata.go` — UserData, ContinueWatchingItem, FavoriteItem, NextUpItem, UserPreference
+- `internal/library/model/admin.go` — DailyWatchBucket, TopItemRow, LibrarySizeRow
+- `internal/provider/model/types.go` — ProviderConfig
+- `docs/memory/audit-2026-05-27-per-package-review.md` — análisis completo
+
+### Documentación del análisis
+
+[`audit-2026-05-27-per-package-review.md`](audit-2026-05-27-per-package-review.md):
+- Estructura de 29 paquetes, grafo de dependencias verificado
+- Flujo de bootstrap (7 fases), shutdown (3 fases con diagrama)
+- Concurrencia: stream.Manager, iptv.TransmuxManager, federation.Manager
+- Revisión profunda paquete 1 (internal/api + handlers): 8 hallazgos TT-1..TT-8
+- 6 hallazgos transversales SS-1..SS-6
+- Plan de ataque en 6 pasos con tabla de prioridades
 
 ---
 
@@ -177,13 +231,15 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 
 | # | Tarea | Coste | Severidad |
 |---|---|---|---|
-| **0** | **Audit macro 2026-05-27 — paquete 1: `internal/api` + `handlers`**. Cerrar olor NN (interfaces de servicio gigantes → micro en consumer). Desbloquea F15-5, OO (split sub-packages) y refactors downstream. Ver [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) §6. | ~1 sesión grande | Alta (arquitectónica) |
-| **1** | **F15-5** — Integration tests con DB real para handlers de library. **Recomendable hacerlo DESPUÉS de NN** porque las interfaces estrechas en consumer simplifican el setup. library.Service tiene 7+ deps; con micro-interfaces los fakes pasan de 25 métodos a 3-5. | ~4-6 h | Media |
-| **2** | **F15-10 / F15-11 / F15-12** — Polish: fakes compartidos en `testutil/fakes/`, naming canónico `TestX_When_Then`, concurrency tests para `provider.Manager.Register` y `stream.Manager.StartSession`. | Baja | Baja |
-| **3** | **Distribución avanzada** — auto-update del binario en producción, TLS LAN automático (mDNS + Let's Encrypt local), macOS notarized (DMG firmado), AppImage Linux. | Sesión grande | Producto |
-| **4** | **(Manual) Alejandro: SignPath Foundation** — aplicar, esperar aprobación, configurar dashboard + secrets/vars de GitHub. Doc: [`windows-installer-signing.md`](../architecture/windows-installer-signing.md). | 10 min + 1-2 sem espera | Distribución |
+| **0** | **Resolver merge de PR #477** — rebase o squash sobre main. La rama tiene todo el trabajo de la sesión 2026-05-28 (NN, PP, QQ, SS cerrados). | ~30 min | Bloqueante |
+| **1** | **OO — sub-paquetes por dominio en `handlers/`**. Mover 72 ficheros a sub-dirs (auth/, iptv/, federation/, admin/, me/, items/, system/). Cada sub-paquete define SUS micro-interfaces. `interfaces.go` y `deps_repos.go` desaparecen. | 1 sesión grande | Media (estructura) |
+| **2** | **MM — split Dependencies** (77 campos → sub-structs por mount). Se simplifica mucho tras OO porque cada sub-paquete handler define su propio deps struct con 3-7 campos. | 1 sesión mediana | Media |
+| **3** | **RR — eliminar `deps_repos.go`** (216 LoC). Se resuelve automáticamente al cerrar OO — cada sub-paquete define sus propios contratos de repo. | Automático con OO | Baja |
+| **4** | **F15-5** — Integration tests con DB real para handlers de library. Con micro-interfaces cerradas (NN ✅), los fakes son de 2-7 métodos en vez de 25. | ~4-6 h | Media |
+| **5** | **F15-10/11/12** — Polish: fakes compartidos, naming, concurrency tests. | Baja | Baja |
+| **6** | **Distribución avanzada** — auto-update, TLS LAN, macOS notarized, AppImage. | Sesión grande | Producto |
 
-**Sin olores altos pendientes del audit 2026-05-14** (6/6 cerrados). **Audit 2026-05-27 abre 2 nuevos olores altos (MM, NN)** que son estructurales — el código funciona, pero la API es ancha y sufre presión a la baja con cada feature.
+**Olores del audit 2026-05-27**: NN ✅ PP ✅ QQ ✅ cerrados. Quedan **OO** (sub-paquetes), **MM** (Dependencies), **RR** (deps_repos.go) — todos son refactors de organización física, no de lógica.
 
 ---
 
@@ -191,7 +247,8 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 
 - [`architecture-decisions.md`](architecture-decisions.md) — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter, ADR-026 logs).
 - [`conventions.md`](conventions.md) — patrones del codebase, reglas de test, anti-ciclo, comentarios en español, regeneración sqlc.
-- [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) — **audit vivo nuevo**. Olores estructurales que emergieron por agregación (MM/NN/OO/PP/QQ/RR). Cola de revisión por paquete en §6.
+- [`audit-2026-05-27-architecture-macro.md`](audit-2026-05-27-architecture-macro.md) — Olores estructurales. NN ✅ PP ✅ QQ ✅ cerrados. Quedan OO, MM, RR (organización física).
+- [`audit-2026-05-27-per-package-review.md`](audit-2026-05-27-per-package-review.md) — **Análisis profundo sesión 2026-05-28**. Estructura, dependencias, flujo, revisión paquete 1 (handlers). Hallazgos TT-1..TT-8 + SS-1..SS-6. Estado de cierre con tablas de micro-interfaces.
 - [`audit-2026-05-14-go-backend-review.md`](audit-2026-05-14-go-backend-review.md) — referencia del audit original. La mayoría cerrada; ver tabla "items audit" abajo.
 - [`intervention-2026-05-14.md`](intervention-2026-05-14.md) — review arquitectónico vivo.
 - [`perf-benchmarks-2026-05-17.md`](perf-benchmarks-2026-05-17.md) — baseline benchmarks dual-backend.

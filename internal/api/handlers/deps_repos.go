@@ -23,9 +23,9 @@ import (
 	"context"
 	"time"
 
-	"hubplay/internal/db"
 	iptvmodel "hubplay/internal/iptv/model"
 	librarymodel "hubplay/internal/library/model"
+	providermodel "hubplay/internal/provider/model"
 )
 
 // ItemsRepo es la unión de métodos del repositorio de items que
@@ -40,7 +40,7 @@ type ItemsRepo interface {
 	LatestItems(ctx context.Context, libraryID string, itemType string, limit int, allowedRatings ...string) ([]*librarymodel.Item, error)
 	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error)
 	CountByLibrary(ctx context.Context, libraryID string) (int, error)
-	SumItemSizesByLibrary(ctx context.Context) (map[string]db.LibrarySizeRow, error)
+	SumItemSizesByLibrary(ctx context.Context) (map[string]librarymodel.LibrarySizeRow, error)
 	Update(ctx context.Context, item *librarymodel.Item) error
 }
 
@@ -136,8 +136,8 @@ type CollectionImageOverridesRepo interface {
 // Sufijo "ForDeps" para no chocar con la interface handler-side
 // `UserPreferencesRepo`.
 type UserPreferencesRepoForDeps interface {
-	ListByUser(ctx context.Context, userID string) ([]db.UserPreference, error)
-	Set(ctx context.Context, userID, key, value string) (*db.UserPreference, error)
+	ListByUser(ctx context.Context, userID string) ([]librarymodel.UserPreference, error)
+	Set(ctx context.Context, userID, key, value string) (*librarymodel.UserPreference, error)
 	Delete(ctx context.Context, userID, key string) error
 }
 
@@ -180,13 +180,13 @@ type LibrariesRepo interface {
 // (config persistente: API keys, enabled). Distinto de
 // `ProviderManager` que es el handle del runtime.
 type ProvidersConfigRepo interface {
-	ListAll(ctx context.Context) ([]*db.ProviderConfig, error)
-	GetByName(ctx context.Context, name string) (*db.ProviderConfig, error)
-	Upsert(ctx context.Context, p *db.ProviderConfig) error
+	ListAll(ctx context.Context) ([]*providermodel.ProviderConfig, error)
+	GetByName(ctx context.Context, name string) (*providermodel.ProviderConfig, error)
+	Upsert(ctx context.Context, p *providermodel.ProviderConfig) error
 	Delete(ctx context.Context, name string) error
 	SetStatus(ctx context.Context, name, status string) error
-	ListByType(ctx context.Context, providerType string) ([]*db.ProviderConfig, error)
-	ListActive(ctx context.Context) ([]*db.ProviderConfig, error)
+	ListByType(ctx context.Context, providerType string) ([]*providermodel.ProviderConfig, error)
+	ListActive(ctx context.Context) ([]*providermodel.ProviderConfig, error)
 }
 
 // SettingsRepo expone el repo de app_settings (overlay clave/valor
@@ -202,8 +202,8 @@ type SettingsRepo interface {
 // ActivityRepo expone el repo de activity (TopItems +
 // DailyWatchActivity).
 type ActivityRepo interface {
-	DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]db.DailyWatchBucket, error)
-	TopItems(ctx context.Context, cutoff time.Time, limit int) ([]db.TopItemRow, error)
+	DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]librarymodel.DailyWatchBucket, error)
+	TopItems(ctx context.Context, cutoff time.Time, limit int) ([]librarymodel.TopItemRow, error)
 }
 
 // IPTVSchedulesRepo expone el repo de IPTV schedules (cron jobs).

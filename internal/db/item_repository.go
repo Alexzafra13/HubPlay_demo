@@ -162,11 +162,6 @@ func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*librarymo
 // (bytes) + numero de ficheros para una library_id. Util para el
 // admin Dashboard / Libraries page sin tener que walkear el
 // filesystem.
-type LibrarySizeRow struct {
-	LibraryID  string
-	TotalBytes int64
-	FileCount  int64
-}
 
 // SumItemSizesByLibrary devuelve un map library_id -> { bytes, files }
 // con el peso ya agregado en la DB. Devuelve solo bibliotecas que
@@ -175,15 +170,15 @@ type LibrarySizeRow struct {
 //
 // Una unica query indexed por idx_items_library; coste ~ms incluso
 // con cientos de miles de items. Cero filesystem I/O.
-func (r *ItemRepository) SumItemSizesByLibrary(ctx context.Context) (map[string]LibrarySizeRow, error) {
-	out := make(map[string]LibrarySizeRow)
+func (r *ItemRepository) SumItemSizesByLibrary(ctx context.Context) (map[string]librarymodel.LibrarySizeRow, error) {
+	out := make(map[string]librarymodel.LibrarySizeRow)
 	if r.useSQLite() {
 		rows, err := r.sq.SumItemSizesByLibrary(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("sum item sizes by library: %w", err)
 		}
 		for _, row := range rows {
-			out[row.LibraryID] = LibrarySizeRow{
+			out[row.LibraryID] = librarymodel.LibrarySizeRow{
 				LibraryID:  row.LibraryID,
 				TotalBytes: row.TotalBytes,
 				FileCount:  row.FileCount,
@@ -196,7 +191,7 @@ func (r *ItemRepository) SumItemSizesByLibrary(ctx context.Context) (map[string]
 		return nil, fmt.Errorf("sum item sizes by library: %w", err)
 	}
 	for _, row := range rows {
-		out[row.LibraryID] = LibrarySizeRow{
+		out[row.LibraryID] = librarymodel.LibrarySizeRow{
 			LibraryID:  row.LibraryID,
 			TotalBytes: row.TotalBytes,
 			FileCount:  row.FileCount,

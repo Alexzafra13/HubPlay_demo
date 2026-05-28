@@ -12,6 +12,7 @@ import (
 	"hubplay/internal/event"
 	"hubplay/internal/iptv"
 	"hubplay/internal/provider"
+	providermodel "hubplay/internal/provider/model"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 )
@@ -259,9 +260,9 @@ type ProviderManager interface {
 
 // ProviderRepository defines provider config data access.
 type ProviderRepository interface {
-	ListAll(ctx context.Context) ([]*db.ProviderConfig, error)
-	GetByName(ctx context.Context, name string) (*db.ProviderConfig, error)
-	Upsert(ctx context.Context, p *db.ProviderConfig) error
+	ListAll(ctx context.Context) ([]*providermodel.ProviderConfig, error)
+	GetByName(ctx context.Context, name string) (*providermodel.ProviderConfig, error)
+	Upsert(ctx context.Context, p *providermodel.ProviderConfig) error
 }
 
 // LibraryRepository defines library data access for handlers that need direct repo access.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	providermodel "hubplay/internal/provider/model"
 	"hubplay/internal/domain"
 	"hubplay/internal/provider"
 	"hubplay/internal/testutil"
@@ -20,27 +20,27 @@ import (
 // ─── Fake ProviderRepository ────────────────────────────────────────────────
 
 type providersFakeRepo struct {
-	listFn    func(ctx context.Context) ([]*db.ProviderConfig, error)
-	getByName map[string]*db.ProviderConfig
-	upserted  []*db.ProviderConfig
+	listFn    func(ctx context.Context) ([]*providermodel.ProviderConfig, error)
+	getByName map[string]*providermodel.ProviderConfig
+	upserted  []*providermodel.ProviderConfig
 	upsertErr error
 }
 
-func (r *providersFakeRepo) ListAll(ctx context.Context) ([]*db.ProviderConfig, error) {
+func (r *providersFakeRepo) ListAll(ctx context.Context) ([]*providermodel.ProviderConfig, error) {
 	if r.listFn != nil {
 		return r.listFn(ctx)
 	}
 	return nil, nil
 }
 
-func (r *providersFakeRepo) GetByName(_ context.Context, name string) (*db.ProviderConfig, error) {
+func (r *providersFakeRepo) GetByName(_ context.Context, name string) (*providermodel.ProviderConfig, error) {
 	if c, ok := r.getByName[name]; ok {
 		return c, nil
 	}
 	return nil, nil // handler treats nil + nil error as "not found" (404)
 }
 
-func (r *providersFakeRepo) Upsert(_ context.Context, cfg *db.ProviderConfig) error {
+func (r *providersFakeRepo) Upsert(_ context.Context, cfg *providermodel.ProviderConfig) error {
 	if r.upsertErr != nil {
 		return r.upsertErr
 	}
@@ -68,7 +68,7 @@ func newProviderTestEnv(t *testing.T) *providerTestEnv {
 	env := &providerTestEnv{
 		t:    t,
 		mgr:  &fakeProviderManager{},
-		repo: &providersFakeRepo{getByName: map[string]*db.ProviderConfig{}},
+		repo: &providersFakeRepo{getByName: map[string]*providermodel.ProviderConfig{}},
 	}
 	env.handler = NewProviderHandler(env.mgr, env.repo, testutil.NopLogger())
 
@@ -124,8 +124,8 @@ func TestProviderHandler_List_Empty(t *testing.T) {
 
 func TestProviderHandler_List_MasksAPIKey(t *testing.T) {
 	env := newProviderTestEnv(t)
-	env.repo.listFn = func(_ context.Context) ([]*db.ProviderConfig, error) {
-		return []*db.ProviderConfig{
+	env.repo.listFn = func(_ context.Context) ([]*providermodel.ProviderConfig, error) {
+		return []*providermodel.ProviderConfig{
 			{Name: "tmdb", Type: "metadata", Status: "active", Priority: 1, APIKey: "abcd1234efgh5678"},
 			{Name: "fanart", Type: "image", Status: "active", Priority: 2, APIKey: ""},
 		}, nil
@@ -173,7 +173,7 @@ func TestProviderHandler_Update_NotFound_404(t *testing.T) {
 
 func TestProviderHandler_Update_AppliesPartialPatch(t *testing.T) {
 	env := newProviderTestEnv(t)
-	env.repo.getByName["tmdb"] = &db.ProviderConfig{
+	env.repo.getByName["tmdb"] = &providermodel.ProviderConfig{
 		Name: "tmdb", Status: "active", Priority: 1,
 		APIKey: "old-key", ConfigJSON: `{"lang":"en"}`,
 	}
@@ -197,7 +197,7 @@ func TestProviderHandler_Update_AppliesPartialPatch(t *testing.T) {
 
 func TestProviderHandler_Update_UpsertError_500(t *testing.T) {
 	env := newProviderTestEnv(t)
-	env.repo.getByName["tmdb"] = &db.ProviderConfig{Name: "tmdb"}
+	env.repo.getByName["tmdb"] = &providermodel.ProviderConfig{Name: "tmdb"}
 	env.repo.upsertErr = errors.New("locked")
 	rr := env.do(http.MethodPut, "/api/v1/providers/tmdb", `{"status":"active"}`)
 	if rr.Code != http.StatusInternalServerError {

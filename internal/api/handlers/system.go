@@ -84,8 +84,8 @@ type SystemHandler struct {
 // local (en lugar del `*db.ActivityRepository` concreto) para cerrar
 // la "doble expresión" del contrato — olor H fase 2 del audit.
 type activityRepo interface {
-	DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]db.DailyWatchBucket, error)
-	TopItems(ctx context.Context, cutoff time.Time, limit int) ([]db.TopItemRow, error)
+	DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]librarymodel.DailyWatchBucket, error)
+	TopItems(ctx context.Context, cutoff time.Time, limit int) ([]librarymodel.TopItemRow, error)
 }
 
 // SettingsReader is the slice of the settings repository system + other

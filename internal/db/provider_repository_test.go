@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hubplay/internal/db"
+	providermodel "hubplay/internal/provider/model"
 	"hubplay/internal/testutil"
 )
 
@@ -19,7 +20,7 @@ func TestProvider_UpsertAndGet(t *testing.T) {
 	repo := setupProviderTest(t)
 	ctx := context.Background()
 
-	cfg := &db.ProviderConfig{
+	cfg := &providermodel.ProviderConfig{
 		Name:     "tmdb",
 		Type:     "metadata",
 		Version:  "1.0",
@@ -84,9 +85,9 @@ func TestProvider_ListActive(t *testing.T) {
 	repo := setupProviderTest(t)
 	ctx := context.Background()
 
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "fanart", Type: "image", Version: "1.0", Status: "active", Priority: 100})
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "disabled-one", Type: "metadata", Version: "1.0", Status: "disabled", Priority: 10})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "fanart", Type: "image", Version: "1.0", Status: "active", Priority: 100})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "disabled-one", Type: "metadata", Version: "1.0", Status: "disabled", Priority: 10})
 
 	active, err := repo.ListActive(ctx)
 	if err != nil {
@@ -108,9 +109,9 @@ func TestProvider_ListByType(t *testing.T) {
 	repo := setupProviderTest(t)
 	ctx := context.Background()
 
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "fanart", Type: "image", Version: "1.0", Status: "active", Priority: 100})
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "opensubs", Type: "subtitle", Version: "1.0", Status: "active", Priority: 100})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "fanart", Type: "image", Version: "1.0", Status: "active", Priority: 100})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "opensubs", Type: "subtitle", Version: "1.0", Status: "active", Priority: 100})
 
 	metadata, err := repo.ListByType(ctx, "metadata")
 	if err != nil {
@@ -130,7 +131,7 @@ func TestProvider_SetStatus(t *testing.T) {
 	repo := setupProviderTest(t)
 	ctx := context.Background()
 
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
 
 	if err := repo.SetStatus(ctx, "tmdb", "disabled"); err != nil {
 		t.Fatal(err)
@@ -152,7 +153,7 @@ func TestProvider_Delete(t *testing.T) {
 	repo := setupProviderTest(t)
 	ctx := context.Background()
 
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 50})
 	_ = repo.Delete(ctx, "tmdb")
 
 	got, _ := repo.GetByName(ctx, "tmdb")
@@ -165,8 +166,8 @@ func TestProvider_ListAll(t *testing.T) {
 	repo := setupProviderTest(t)
 	ctx := context.Background()
 
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 100})
-	_ = repo.Upsert(ctx, &db.ProviderConfig{Name: "disabled", Type: "metadata", Version: "1.0", Status: "disabled", Priority: 50})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "tmdb", Type: "metadata", Version: "1.0", Status: "active", Priority: 100})
+	_ = repo.Upsert(ctx, &providermodel.ProviderConfig{Name: "disabled", Type: "metadata", Version: "1.0", Status: "disabled", Priority: 50})
 
 	all, err := repo.ListAll(ctx)
 	if err != nil {

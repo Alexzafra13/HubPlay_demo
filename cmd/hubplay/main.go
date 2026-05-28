@@ -22,8 +22,6 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
-	"hubplay/internal/federation"
-	federationstorage "hubplay/internal/federation/storage"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
@@ -316,59 +314,15 @@ func run(configPath string) error {
 	// docker swarm / k8s) is expected to do the same.
 	restartRequester := config.NewRestartRequester(cancel, logger)
 
-	// Federation: load-or-create this server's Ed25519 identity and wire
-	// the manager. Failures here are non-fatal — federation is opt-in;
-	// if init fails we run with Federation=nil and the routes are skipped
-	// (the router checks deps.Federation != nil). The admin sees the
-	// federation surface unavailable; everything else keeps working.
-	federationRepo := federationstorage.NewRepository(cfg.Database.Driver, database)
-	federationCfg := federation.DefaultConfig()
-	federationCfg.AdvertisedURL = cfg.Server.BaseURL
-	federationCfg.Version = version
-	// Comparte el avatarsDir con users: namespace disjunto (los
-	// nombres del servidor llevan prefijo "server-", los de usuario
-	// son UUIDs), pero el mismo volumen docker. Vacío = uploads
-	// del servidor deshabilitados (handler 503).
-	federationCfg.AvatarsDir = avatarsDir
-	if _, err := federation.LoadOrCreate(ctx, federationRepo, clk, "HubPlay Server"); err != nil {
-		logger.Error("federation: identity load/create failed; federation disabled", "err", err)
-	}
-	federationManager, err := federation.NewManager(ctx, federationCfg, federationRepo, clk, logger, eventBus)
-	if err != nil {
-		logger.Error("federation: manager init failed; federation disabled", "err", err)
-		federationManager = nil
-	} else {
-		// Inyectar el reader de settings persistentes para que el
-		// manager pueda leer/escribir el toggle
-		// federation.accept_pairing_requests sin tocar SQL crudo.
-		federationManager.SetSettings(repos.Settings)
-		logger.Info("federation: manager initialised",
-			"server_uuid", federationManager.PublicServerInfo().ServerUUID,
-			"fingerprint", federationManager.PublicServerInfo().PubkeyFingerprint)
-		// Wire Prometheus observability: counter+histogram via sink,
-		// live gauges via GaugeFunc reading the manager's in-memory
-		// state at scrape time.
-		federationManager.SetMetricsSink(observability.NewFederationSink(metrics))
-		if err := observability.RegisterFederationGauges(metrics, federationManager); err != nil {
-			logger.Error("federation: register gauges failed", "err", err)
-		}
-		// Drenar la cola de audit federation en shutdown (fase 1,
-		// antes de HTTP drain y antes de cerrar la DB). Cierra SS-3.
-		lc.AddWorker("federation close", func(context.Context) error {
-			federationManager.Close()
-			return nil
-		})
-
-		registerFederationNotifications(ctx, eventBus, notificationService, logger)
-
-		// Job periódico: cada 1h expira las pairing requests cuyo
-		// TTL ha pasado.
-		stopPendingSweeper := federation.StartPendingRequestSweeper(ctx, federationManager, logger, time.Hour)
-		lc.AddWorker("pending request sweeper", func(context.Context) error {
-			stopPendingSweeper()
-			return nil
-		})
-	}
+	fedResult := initFederation(ctx, lc, federationInitConfig{
+		DBDriver:        cfg.Database.Driver,
+		BaseURL:         cfg.Server.BaseURL,
+		AvatarsDir:      avatarsDir,
+		Settings:        repos.Settings,
+		SweeperInterval: time.Hour,
+	}, database, clk, eventBus, metrics, notificationService, logger)
+	federationManager := fedResult.Manager
+	federationRepo := fedResult.Repo
 
 	// Job periódico: cada 24h purga notificaciones leídas con >30d.
 	stopNotifSweeper := notification.StartReadCleanupSweeper(ctx, notificationRepo, clk, logger, 24*time.Hour, notification.DefaultReadRetention)

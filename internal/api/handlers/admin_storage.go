@@ -9,7 +9,6 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 
-	"hubplay/internal/db"
 	librarymodel "hubplay/internal/library/model"
 )
 
@@ -41,10 +40,10 @@ type StorageLibraryService interface {
 
 // StorageItemReader expone solo la suma por biblioteca. Mismo
 // patron - interface estrecha local. La shape devuelta es la del
-// repo (db.LibrarySizeRow), reusada por simplicidad - cero
+// repo (librarymodel.LibrarySizeRow), reusada por simplicidad - cero
 // conversion en el wiring.
 type StorageItemReader interface {
-	SumItemSizesByLibrary(ctx context.Context) (map[string]db.LibrarySizeRow, error)
+	SumItemSizesByLibrary(ctx context.Context) (map[string]librarymodel.LibrarySizeRow, error)
 }
 
 func NewAdminStorageHandler(libraries StorageLibraryService, items StorageItemReader, logger *slog.Logger) *AdminStorageHandler {
