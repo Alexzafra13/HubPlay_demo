@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // PreferencesHandler exposes the per-user key/value preference store
@@ -28,8 +28,8 @@ type PreferencesHandler struct {
 // local so tests can pass a fake without pulling in the real db
 // package, matching every other handler in this package.
 type UserPreferencesRepo interface {
-	ListByUser(ctx context.Context, userID string) ([]db.UserPreference, error)
-	Set(ctx context.Context, userID, key, value string) (*db.UserPreference, error)
+	ListByUser(ctx context.Context, userID string) ([]librarymodel.UserPreference, error)
+	Set(ctx context.Context, userID, key, value string) (*librarymodel.UserPreference, error)
 	Delete(ctx context.Context, userID, key string) error
 }
 

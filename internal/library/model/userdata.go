@@ -55,3 +55,12 @@ type NextUpItem struct {
 	SeriesTitle   string
 	SeriesID      string
 }
+
+// UserPreference es una preferencia clave/valor per-usuario (layout
+// del home, idioma preferido, etc.).
+type UserPreference struct {
+	UserID    string
+	Key       string
+	Value     string
+	UpdatedAt time.Time
+}

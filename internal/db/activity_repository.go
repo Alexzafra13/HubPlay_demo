@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	librarymodel "hubplay/internal/library/model"
 	"fmt"
 	"time"
 )
@@ -37,21 +39,10 @@ type ActivityRepository struct {
 // WatchMinutes approximates engagement by integrating duration_ticks *
 // progress over user_data rows updated within the bucket. SessionCount
 // is distinct (user_id, item_id) pairs touched that day.
-type DailyWatchBucket struct {
-	Date         string
-	WatchMinutes int
-	SessionCount int
-}
 
 // TopItemRow is one row of the "most-watched in trailing window"
 // admin rail. PlayCount = distinct users who touched a rollup item
 // in the window (episode plays fold up to their series).
-type TopItemRow struct {
-	ID        string
-	Type      string
-	Title     string
-	PlayCount int
-}
 
 // NewActivityRepository pre-rewrites the dialect-divergent queries
 // once at construction. The day-extraction grammar diverges across
@@ -136,16 +127,16 @@ func NewActivityRepository(driver string, database *sql.DB) *ActivityRepository 
 // last_played_at was written (UTC, no monotonic suffix because
 // repos.UserData normalises). String pre-formatting rejected rows
 // that the rest of the code happily matches.
-func (r *ActivityRepository) DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]DailyWatchBucket, error) {
+func (r *ActivityRepository) DailyWatchActivity(ctx context.Context, cutoff time.Time) ([]librarymodel.DailyWatchBucket, error) {
 	rows, err := r.db.QueryContext(ctx, r.dailyWatchSQL, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("daily watch activity: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
 
-	out := []DailyWatchBucket{}
+	out := []librarymodel.DailyWatchBucket{}
 	for rows.Next() {
-		var b DailyWatchBucket
+		var b librarymodel.DailyWatchBucket
 		// modernc.org/sqlite + the DATETIME affinity used by user_data
 		// produce result sets where the strftime() output and SUM()
 		// can come back as either string-encoded numbers or native
@@ -191,16 +182,16 @@ func (r *ActivityRepository) DailyWatchActivity(ctx context.Context, cutoff time
 // since `cutoff`. Episodes are rolled up to their series so the
 // list reads like "Mr Robot · 12 plays" instead of polluting with
 // individual episodes.
-func (r *ActivityRepository) TopItems(ctx context.Context, cutoff time.Time, limit int) ([]TopItemRow, error) {
+func (r *ActivityRepository) TopItems(ctx context.Context, cutoff time.Time, limit int) ([]librarymodel.TopItemRow, error) {
 	rows, err := r.db.QueryContext(ctx, r.topItemsSQL, cutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("top items: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
 
-	out := make([]TopItemRow, 0, limit)
+	out := make([]librarymodel.TopItemRow, 0, limit)
 	for rows.Next() {
-		var it TopItemRow
+		var it librarymodel.TopItemRow
 		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.PlayCount); err != nil {
 			return nil, fmt.Errorf("scan top item: %w", err)
 		}
