@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -37,20 +38,30 @@ type Payload struct {
 	RequestID string         `json:"request_id,omitempty"`
 }
 
-// recorder is the observability hook fired after every rendered error.
-// Defaults to a no-op so tests and packages that don't wire metrics
-// don't pay an import-cycle cost on the observability package.
-var recorder = func(code string) {}
+// recorder es el hook de observabilidad que se dispara tras renderizar
+// cada error. Se guarda en un atomic.Pointer para que SetRecorder (init
+// del proceso, o tests en paralelo con sus propios fakes) y la lectura
+// en Write nunca compitan: antes era un `var recorder func(...)` plano
+// que un t.Parallel podía pisar a mitad de un Write (data race). Por
+// defecto es un no-op para que tests y paquetes sin métricas no paguen
+// el coste de un ciclo de import contra observability.
+var recorder atomic.Pointer[func(code string)]
 
-// SetRecorder installs the per-error observability hook. Pass nil to
-// reset to the no-op. The recorder runs after the response is written
-// so a slow metrics backend never adds latency to the client.
+func init() {
+	noop := func(string) {}
+	recorder.Store(&noop)
+}
+
+// SetRecorder instala el hook de observabilidad por-error. Pasa nil para
+// volver al no-op. El recorder corre DESPUÉS de escribir la respuesta,
+// así un backend de métricas lento nunca añade latencia al cliente.
 func SetRecorder(fn func(code string)) {
 	if fn == nil {
-		recorder = func(string) {}
+		noop := func(string) {}
+		recorder.Store(&noop)
 		return
 	}
-	recorder = fn
+	recorder.Store(&fn)
 }
 
 // Write renders an AppError as the canonical JSON envelope and fires
@@ -80,5 +91,5 @@ func Write(w http.ResponseWriter, ctx context.Context, appErr *domain.AppError) 
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Error("apperror: encode response failed", "error", err)
 	}
-	recorder(appErr.Code)
+	(*recorder.Load())(appErr.Code)
 }

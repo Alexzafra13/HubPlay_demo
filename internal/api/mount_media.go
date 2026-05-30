@@ -68,7 +68,23 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 	if deps.Catalog.Scanner != nil {
 		identifier = deps.Catalog.Scanner
 	}
-	itemHandler := media.NewItemHandler(deps.Catalog.Libraries, deps.Catalog.Images, deps.Catalog.Metadata, deps.Catalog.UserData, deps.Auth.Users, deps.Catalog.Chapters, deps.Catalog.EpisodeSegments, deps.Catalog.ExternalIDs, deps.Catalog.People, deps.Catalog.Collections, deps.Providers.Manager, identifier, trickplayDir, deps.Infra.Audit, deps.Infra.Logger)
+	itemHandler := media.NewItemHandler(media.ItemHandlerDeps{
+		Lib:          deps.Catalog.Libraries,
+		Images:       deps.Catalog.Images,
+		Metadata:     deps.Catalog.Metadata,
+		UserData:     deps.Catalog.UserData,
+		Users:        deps.Auth.Users,
+		Chapters:     deps.Catalog.Chapters,
+		Segments:     deps.Catalog.EpisodeSegments,
+		ExternalIDs:  deps.Catalog.ExternalIDs,
+		People:       deps.Catalog.People,
+		Collections:  deps.Catalog.Collections,
+		Providers:    deps.Providers.Manager,
+		Identifier:   identifier,
+		TrickplayDir: trickplayDir,
+		Audit:        deps.Infra.Audit,
+		Logger:       deps.Infra.Logger,
+	})
 
 	// Libraries
 	r.Get("/libraries", libHandler.List)

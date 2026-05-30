@@ -111,7 +111,16 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 	// Recommendations endpoint is opt-in; tests that need it pass a
 	// fakeProviderManager instance instead of nil. Default `nil` keeps
 	// the existing assertions on Get/Search/Children unaffected.
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, nil, env.chapters, nil, env.extIDs, env.people, nil, nil, nil, "", nil, testutil.NopLogger())
+	env.handler = NewItemHandler(ItemHandlerDeps{
+		Lib:         env.svc,
+		Images:      env.images,
+		Metadata:    env.meta,
+		UserData:    env.userData,
+		Chapters:    env.chapters,
+		ExternalIDs: env.extIDs,
+		People:      env.people,
+		Logger:      testutil.NopLogger(),
+	})
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
@@ -485,7 +494,17 @@ func trickplayEnv(t *testing.T) (*itemTestEnv, string) {
 	t.Helper()
 	dir := t.TempDir()
 	env := newItemTestEnv(t)
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, nil, env.chapters, nil, env.extIDs, env.people, nil, nil, nil, dir, nil, testutil.NopLogger())
+	env.handler = NewItemHandler(ItemHandlerDeps{
+		Lib:          env.svc,
+		Images:       env.images,
+		Metadata:     env.meta,
+		UserData:     env.userData,
+		Chapters:     env.chapters,
+		ExternalIDs:  env.extIDs,
+		People:       env.people,
+		TrickplayDir: dir,
+		Logger:       testutil.NopLogger(),
+	})
 	r := chi.NewRouter()
 	r.Route("/api/v1/items/{id}", func(r chi.Router) {
 		r.Get("/trickplay.json", env.handler.TrickplayManifest)
