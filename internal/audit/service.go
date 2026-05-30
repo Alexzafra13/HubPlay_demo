@@ -33,13 +33,32 @@ import (
 	"time"
 
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 )
+
+// LogRow es la representación que el service emite al store. Es un
+// struct espejo propio del paquete (cierre del olor SS-2): antes la
+// interface tomaba db.AuditLogRow, lo que obligaba a importar
+// internal/db sólo para construir el parámetro. Con el tipo propio el
+// paquete audit ya no depende de la capa de persistencia (DIP) — el
+// adapter del composition root convierte LogRow → db.AuditLogRow en la
+// frontera. Sólo lleva los campos que el INSERT persiste (actor/target
+// username se resuelven en read vía join).
+type LogRow struct {
+	ID          string
+	ActorUserID string
+	EventType   string
+	TargetType  string
+	TargetID    string
+	Payload     string // JSON o cadena vacía
+	IPAddress   string
+	UserAgent   string
+	CreatedAt   time.Time
+}
 
 // Store es la mínima superficie del repo que el service necesita.
 // Definida como interface para que tests pasen un fake sin DB.
 type Store interface {
-	Insert(ctx context.Context, row db.AuditLogRow) error
+	Insert(ctx context.Context, row LogRow) error
 }
 
 type Service struct {
@@ -133,7 +152,7 @@ func (s *Service) emit(ctx context.Context, r *http.Request, eventType, targetTy
 		}
 	}
 
-	row := db.AuditLogRow{
+	row := LogRow{
 		ID:          randomID(),
 		ActorUserID: actor,
 		EventType:   eventType,

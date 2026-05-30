@@ -363,7 +363,7 @@ func run(configPath string) error {
 	// Audit service (PR5). Cableado antes que los handlers para que
 	// el router lo reciba. Sink fire-and-forget — un INSERT lento o
 	// fallido NO bloquea el flujo principal.
-	auditService := audit.NewService(repos.AuditLog, logger)
+	auditService := audit.NewService(auditLogStore{repos.AuditLog}, logger)
 
 	// Update checker (PR2 update-notifier): goroutine en background que
 	// sondea GitHub Releases cada 24h con ETag para detectar versiones

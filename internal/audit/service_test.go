@@ -11,16 +11,15 @@ import (
 
 	"hubplay/internal/audit"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 )
 
 type fakeStore struct {
 	mu        sync.Mutex
-	rows      []db.AuditLogRow
+	rows      []audit.LogRow
 	insertErr error
 }
 
-func (f *fakeStore) Insert(_ context.Context, row db.AuditLogRow) error {
+func (f *fakeStore) Insert(_ context.Context, row audit.LogRow) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.insertErr != nil {
@@ -30,11 +29,11 @@ func (f *fakeStore) Insert(_ context.Context, row db.AuditLogRow) error {
 	return nil
 }
 
-func (f *fakeStore) last() db.AuditLogRow {
+func (f *fakeStore) last() audit.LogRow {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.rows) == 0 {
-		return db.AuditLogRow{}
+		return audit.LogRow{}
 	}
 	return f.rows[len(f.rows)-1]
 }

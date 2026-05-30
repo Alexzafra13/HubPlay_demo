@@ -35,7 +35,7 @@ func buildUploads(ctx context.Context, cfg config.UploadConfig, repos *db.Reposi
 		},
 		stagingDir,
 		repos.Users,
-		repos.UploadAudit,
+		uploadAuditStore{repos.UploadAudit},
 		eventBus,
 		upload.NewLibraryPicker(repos.Libraries),
 		prober,

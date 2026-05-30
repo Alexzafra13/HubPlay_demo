@@ -13,7 +13,6 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/event"
 	librarymodel "hubplay/internal/library/model"
@@ -59,10 +58,10 @@ func (f *fakeUserStore) ReleaseUploadBytes(_ context.Context, _ string, delta in
 
 type fakeAuditStore struct {
 	mu   sync.Mutex
-	rows []db.UploadAuditRow
+	rows []upload.AuditRow
 }
 
-func (f *fakeAuditStore) Insert(_ context.Context, row db.UploadAuditRow) error {
+func (f *fakeAuditStore) Insert(_ context.Context, row upload.AuditRow) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rows = append(f.rows, row)
