@@ -76,7 +76,7 @@ type identifyEnv struct {
 
 func newIdentifyEnv(t *testing.T, id *fakeIdentifier) identifyEnv {
 	t.Helper()
-	handler := NewItemHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, id, "", nil, testutil.NopLogger())
+	handler := NewItemHandler(ItemHandlerDeps{Identifier: id, Logger: testutil.NopLogger()})
 	r := chi.NewRouter()
 	r.Route("/api/v1/items/{id}", func(r chi.Router) {
 		r.Get("/identify/candidates", handler.IdentifyCandidates)
@@ -126,7 +126,7 @@ func TestIdentifyCandidates_Success(t *testing.T) {
 
 func TestIdentifyCandidates_NoProviderConfigured(t *testing.T) {
 	// identifier=nil → 503, sin tocar nada más.
-	handler := NewItemHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, testutil.NopLogger())
+	handler := NewItemHandler(ItemHandlerDeps{Logger: testutil.NopLogger()})
 	r := chi.NewRouter()
 	r.Get("/api/v1/items/{id}/identify/candidates", handler.IdentifyCandidates)
 

@@ -52,14 +52,39 @@ type itemLibrary interface {
 	trickplayItemLookup
 }
 
+// ItemHandlerDeps agrupa las dependencias del facade del item con
+// campos nombrados. Antes NewItemHandler tomaba 15 parámetros
+// posicionales (cierre del olor TT-7 del audit 2026-05-27): dos
+// interfaces del mismo tipo subyacente reordenadas compilaban pero
+// rompían el handler en runtime. Con campos nombrados el constructor
+// es a prueba de reordenado. Sigue el precedente de stream.Deps,
+// library.Deps e iptv.Deps.
+type ItemHandlerDeps struct {
+	Lib          itemLibrary
+	Images       handlers.ImageRepository
+	Metadata     handlers.MetadataRepository
+	UserData     handlers.UserDataRepository
+	Users        userProfileLookup
+	Chapters     handlers.ChapterRepository
+	Segments     handlers.EpisodeSegmentRepository
+	ExternalIDs  handlers.ExternalIDsRepository
+	People       handlers.PeopleRepoForItems
+	Collections  handlers.CollectionRepoForItems
+	Providers    handlers.ProviderManager
+	Identifier   MetadataIdentifier
+	TrickplayDir string
+	Audit        handlers.AuditEmitter
+	Logger       *slog.Logger
+}
+
 // NewItemHandler construye el facade + cada uno de los 5 sub-handlers.
-func NewItemHandler(lib itemLibrary, images handlers.ImageRepository, metadata handlers.MetadataRepository, userData handlers.UserDataRepository, users userProfileLookup, chapters handlers.ChapterRepository, segments handlers.EpisodeSegmentRepository, externalIDs handlers.ExternalIDsRepository, people handlers.PeopleRepoForItems, collections handlers.CollectionRepoForItems, providers handlers.ProviderManager, identifier MetadataIdentifier, trickplayDir string, audit handlers.AuditEmitter, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(deps ItemHandlerDeps) *ItemHandler {
 	return &ItemHandler{
-		ItemDetailHandler:      newItemDetailHandler(lib, images, metadata, userData, users, chapters, segments, externalIDs, people, collections, identifier, logger),
-		TrickplayHandler:       newTrickplayHandler(lib, trickplayDir, logger),
-		SearchHandler:          newSearchHandler(lib, images, userData, users, logger),
-		RecommendationsHandler: newRecommendationsHandler(lib, externalIDs, providers, logger),
-		MetadataHandler:        newMetadataHandler(identifier, audit, logger),
+		ItemDetailHandler:      newItemDetailHandler(deps.Lib, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.Segments, deps.ExternalIDs, deps.People, deps.Collections, deps.Identifier, deps.Logger),
+		TrickplayHandler:       newTrickplayHandler(deps.Lib, deps.TrickplayDir, deps.Logger),
+		SearchHandler:          newSearchHandler(deps.Lib, deps.Images, deps.UserData, deps.Users, deps.Logger),
+		RecommendationsHandler: newRecommendationsHandler(deps.Lib, deps.ExternalIDs, deps.Providers, deps.Logger),
+		MetadataHandler:        newMetadataHandler(deps.Identifier, deps.Audit, deps.Logger),
 	}
 }
 

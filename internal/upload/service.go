@@ -16,7 +16,6 @@ import (
 
 	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/clock"
-	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/probe"
 )
@@ -38,9 +37,32 @@ type UserStore interface {
 	ReleaseUploadBytes(ctx context.Context, id string, delta int64) error
 }
 
+// AuditRow es la fila de upload_audit que el pipeline emite, como
+// struct espejo propio del paquete (cierre del olor SS-2): antes la
+// interface tomaba db.UploadAuditRow, lo que forzaba importar
+// internal/db sólo para construir el parámetro. Con el tipo propio el
+// paquete upload deja de depender de la capa de persistencia (DIP) —
+// el adapter del composition root convierte AuditRow → db.UploadAuditRow
+// en la frontera. Mapea 1-a-1 con la migración 054.
+type AuditRow struct {
+	ID           string
+	UserID       string
+	LibraryID    string // empty when the upload never landed
+	OriginalName string
+	FinalPath    string // empty when the upload never landed
+	Bytes        int64
+	SHA256       string
+	MimeDetected string
+	Outcome      string // accepted | rejected | aborted | error
+	ErrorMessage string
+	StartedAt    time.Time
+	FinishedAt   time.Time
+	DurationMs   int64
+}
+
 // AuditStore es la mínima superficie del repo de auditoría.
 type AuditStore interface {
-	Insert(ctx context.Context, row db.UploadAuditRow) error
+	Insert(ctx context.Context, row AuditRow) error
 }
 
 // EventPublisher es el lado de "publish" del bus interno. Coincide
@@ -292,7 +314,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 		res.LibraryID = libraryID
 		res.FinalPath = finalPath
 		now := s.clock.Now().UTC()
-		_ = s.audit.Insert(ctx, db.UploadAuditRow{
+		_ = s.audit.Insert(ctx, AuditRow{
 			ID:           RandomID(),
 			UserID:       in.UserID,
 			LibraryID:    libraryID,
@@ -441,7 +463,7 @@ func (s *Service) Aborted(ctx context.Context, in FinishInput) {
 		started = s.clock.Now().UTC()
 	}
 	now := s.clock.Now().UTC()
-	_ = s.audit.Insert(ctx, db.UploadAuditRow{
+	_ = s.audit.Insert(ctx, AuditRow{
 		ID:           RandomID(),
 		UserID:       in.UserID,
 		OriginalName: in.OriginalName,

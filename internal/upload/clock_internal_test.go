@@ -8,7 +8,6 @@ import (
 
 	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/clock"
-	"hubplay/internal/db"
 	"hubplay/internal/event"
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/probe"
@@ -88,7 +87,7 @@ func (dummyUserStore) ReleaseUploadBytes(_ context.Context, _ string, _ int64) e
 
 type dummyAuditStore struct{}
 
-func (dummyAuditStore) Insert(_ context.Context, _ db.UploadAuditRow) error { return nil }
+func (dummyAuditStore) Insert(_ context.Context, _ AuditRow) error { return nil }
 
 type dummyBus struct{}
 
