@@ -572,7 +572,7 @@ const TrackButton: FC<TrackButtonProps> = ({
     <div ref={wrapperRef} className="relative">
       {Btn}
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 z-30 min-w-[200px]">
+        <div className="absolute bottom-full right-0 mb-2 z-30 min-w-[200px] max-w-[calc(100vw-1.5rem)]">
           <div className="bg-bg-card/95 backdrop-blur-md border border-border rounded-[--radius-md] shadow-xl py-1">
             <div className="px-3 py-1.5 text-xs font-medium text-text-muted uppercase tracking-wide">
               {label}
@@ -795,7 +795,7 @@ const SettingsButton: FC<SettingsButtonProps> = ({
     <div ref={wrapperRef} className="relative">
       {Btn}
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 z-30 min-w-[240px]">
+        <div className="absolute bottom-full right-0 mb-2 z-30 min-w-[240px] max-w-[calc(100vw-1.5rem)]">
           <div className="bg-bg-card/95 backdrop-blur-md border border-border rounded-[--radius-md] shadow-xl py-2 px-1">
             {methodLabel && (
               <div

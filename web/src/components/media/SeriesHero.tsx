@@ -351,7 +351,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 <button
                   type="button"
                   onClick={onToggleFavorite}
-                  className="flex size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+                  className="flex size-11 sm:size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
                   aria-label={
                     isFavorite
                       ? t("itemDetail.removeFromFavorites")
@@ -413,7 +413,7 @@ const SeriesHeroKebab: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+        className="flex size-11 sm:size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
         aria-label={t("common.moreOptions")}
         aria-expanded={open}
       >
