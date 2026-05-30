@@ -6,7 +6,7 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-28)
+## 🔭 Estado actual (2026-05-30)
 
 **Salud del proyecto**: MVP funcional, cerca de early-production.
 
@@ -14,10 +14,60 @@
 |---|---|
 | **Audit olores altos 2026-05-14** | ✅ **6/6 cerrados** |
 | **Audit olores macro 2026-05-27** | NN ✅, PP ✅, QQ ✅, SS-3/4/5 ✅, **OO ✅, RR ✅, MM ✅**. Todos cerrados. |
-| **Audit per-package satélite SS** | **SS-1 ✅, SS-6 ✅** (sesión 2026-05-28 cleanup). Quedan SS-2, TT-5, TT-7, TT-8. |
-| **Tests backend** | 38 paquetes verdes (handlers split en 10 sub-paquetes) |
+| **Audit per-package satélite SS/TT** | **SS-1 ✅, SS-6 ✅, SS-2 ✅, TT-5 ✅, TT-7 ✅** (sesión 2026-05-30). Queda **TT-8** (comentarios en inglés, cosmético). |
+| **Tests backend** | todos los paquetes verdes (`go test ./...` exit 0, con -race en los tocados) |
 | **Tests frontend** | **717/717** vitest verdes |
-| **PRs abiertas** | [#481](https://github.com/Alexzafra13/HubPlay_demo/pull/481) (SS-6 cleanupLoop drain), una más en camino (SS-1 doc) |
+| **PRs abiertas** | ninguna |
+
+---
+
+## 🧹 Sesión 2026-05-30 — TT-5 + TT-7 + SS-2 + auditoría fresca
+
+Rama: `claude/project-review-mnJ9a`. 2 commits, suite backend verde
+(`go test ./...` exit 0). Cerrados los 3 olores satélite accionables que
+quedaban del audit per-package; sólo queda **TT-8** (cosmético).
+
+### TT-5 — `apperror.recorder` lock-free
+
+`var recorder func(code string)` plano → `atomic.Pointer[func(...)]`.
+Antes un `t.Parallel` que llamara `SetRecorder` podía pisar el global a
+mitad de un `Write` (data race latente — sólo no se manifestaba porque
+un único test lo seteaba). Ahora set/read es atómico. `init()` instala
+el no-op. ~10 LoC en `internal/api/apperror/apperror.go`.
+
+### TT-7 — `NewItemHandler` con struct de deps
+
+15 parámetros posicionales → `media.ItemHandlerDeps` con campos
+nombrados (precedente: `stream.Deps`, `iptv.Deps`). Dos interfaces del
+mismo tipo subyacente reordenadas ya no compilan a un handler roto.
+Callsite de producción (`mount_media.go`) + 4 de test migrados.
+
+### SS-2 — `upload`/`audit` dejan de importar `db`
+
+`AuditStore.Insert(db.UploadAuditRow)` y `Store.Insert(db.AuditLogRow)`
+forzaban importar `internal/db` sólo para construir el parámetro (viola
+DIP). Ahora cada paquete define su struct espejo (`upload.AuditRow`,
+`audit.LogRow`) y **no importa db en absoluto**. La conversión a tipos
+`db.*` vive en 2 adapters en el composition root
+(`cmd/hubplay/audit_adapters.go`). `audit.LogRow` lleva sólo los 9
+campos que el INSERT persiste (actor/target username se resuelven en
+read vía join). Patrón: **adapter en la frontera** (más ligero que crear
+un model package nuevo para 2 tipos diminutos; consistente con la
+dirección Opción B).
+
+### Auditoría fresca del backend (sin hallazgos accionables nuevos)
+
+Sweep exhaustivo de `internal/`+`cmd/` buscando bugs/seguridad/recursos
+fuera de lo ya catalogado. **Conclusión: el código está limpio.** El
+único hallazgo "alto" reportado (supuesto lock-order inversion /
+deadlock en `stream/manager.go:543-617` `RestartSessionAt`) se verificó
+y es **falso positivo**: la línea 546 hace `m.mu.Unlock()` ANTES de
+tomar `ms.restartMu` (551); el único anidamiento es `restartMu → m.mu`
+(612-617) y ningún camino mantiene `m.mu` esperando `restartMu`
+(`restartMu` sólo se usa en esa función). Sin ciclo de locks, sin
+deadlock. Resto de hallazgos del barrido eran no-problemas (patrones Go
+aceptados: `//nolint:errcheck` en `resp.Body.Close()`, validación de
+itemID mitigada por lookup en DB).
 
 ---
 
@@ -295,7 +345,7 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 | **5** | **F15-10/11/12** — Polish: fakes compartidos, naming, concurrency tests. | Baja | Baja |
 | **6** | **Distribución avanzada** — auto-update, TLS LAN, macOS notarized, AppImage. | Sesión grande | Producto |
 
-**Olores del audit 2026-05-27**: NN ✅ PP ✅ QQ ✅ cerrados. Quedan **OO** (sub-paquetes), **MM** (Dependencies), **RR** (deps_repos.go) — todos son refactors de organización física, no de lógica.
+**Olores del audit 2026-05-27**: NN ✅ PP ✅ QQ ✅ OO ✅ MM ✅ RR ✅ cerrados. Del satélite SS/TT: SS-1/2/3/4/5/6 ✅, TT-5 ✅ TT-6 ✅ TT-7 ✅. Sólo queda **TT-8** (comentarios en inglés en `handlers/`, cosmético, hacer incrementalmente al tocar cada fichero).
 
 ---
 
