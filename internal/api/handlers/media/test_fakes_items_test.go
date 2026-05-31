@@ -18,13 +18,7 @@ import (
 // needed by items_test.go. Only methods exercised by item tests are wired.
 
 type libFakeService struct {
-	createFn        func(ctx context.Context, req interface{}) (interface{}, error)
-	getByIDFn       func(ctx context.Context, id string) (interface{}, error)
-	listFn          func(ctx context.Context) (interface{}, error)
-	listForUserFn   func(ctx context.Context, userID string) (interface{}, error)
 	listItemsFn     func(ctx context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
-	latestFn        func(ctx context.Context, libraryID, itemType string, limit int) ([]*librarymodel.Item, error)
-	itemCountFn     func(ctx context.Context, libraryID string) (int, error)
 	getItemFn       func(ctx context.Context, id string) (*librarymodel.Item, error)
 	getChildrenFn   func(ctx context.Context, id string) ([]*librarymodel.Item, error)
 	getStreamsFn    func(ctx context.Context, id string) ([]*librarymodel.MediaStream, error)
