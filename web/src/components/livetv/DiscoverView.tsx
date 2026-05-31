@@ -120,6 +120,25 @@ export function DiscoverView({
   const showContinueWatching =
     category === "all" && continueWatching.length > 0;
 
+  // "Favoritos" — los canales que el usuario marcó con la estrella,
+  // arriba del todo en la vista agregada. Es su contenido más personal:
+  // así la página deja de ser sólo "las mismas categorías siempre" y
+  // empieza por lo que el usuario realmente ve. Se deriva del favoriteSet
+  // cruzado con el lineup; sólo en "all" (como Continuar viendo) — el
+  // filtro ?fav=1 ya cubre el favoritos-por-categoría.
+  const favoriteChannels = useMemo<Channel[]>(() => {
+    if (!isAggregate) return [];
+    const out: Channel[] = [];
+    for (const list of channelsByCategory.values()) {
+      for (const ch of list) {
+        if (favoriteSet.has(ch.id)) out.push(ch);
+      }
+    }
+    out.sort((a, b) => a.number - b.number);
+    return out;
+  }, [isAggregate, channelsByCategory, favoriteSet]);
+  const showFavorites = category === "all" && favoriteChannels.length > 0;
+
   // Visible "hero is hidden" hint. The HeroSettings dropdown lets the
   // user pick "Ocultar destacado", which sets `heroMode` to "off" and
   // makes <HeroSpotlight> render null. Without this hint the hero just
@@ -177,6 +196,25 @@ export function DiscoverView({
           />
         </div>
       </div>
+
+      {showFavorites ? (
+        <ChannelRail
+          title={t("liveTV.favorites", { defaultValue: "Favoritos" })}
+          count={favoriteChannels.length}
+        >
+          {favoriteChannels.map((ch) => (
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
+              upNext={getUpNext(scheduleByChannel[ch.id])}
+              isFavorite
+              onClick={() => onOpen(ch)}
+              onToggleFavorite={() => onToggleFavorite(ch.id)}
+            />
+          ))}
+        </ChannelRail>
+      ) : null}
 
       {showContinueWatching ? (
         <ChannelRail

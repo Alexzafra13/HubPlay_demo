@@ -161,6 +161,7 @@
     "nextUp": "Siguiente",
     "trending": "Tendencia esta semana",
     "liveNow": "En directo ahora",
+    "favoriteChannels": "Canales favoritos",
     "live": "En directo",
     "noProgramInfo": "Sin información de programa",
     "remainingMinutes": "Queda {{minutes}}min",
@@ -181,6 +182,7 @@
     "heroReasonRecommendedPair": "Porque te gusta {{first}} y {{second}}",
     "becauseYouWatchedLoading": "Porque viste…",
     "becauseYouWatched": "Porque viste {{title}}",
+    "recommendedForYou": "Recomendados para ti",
     "markWatched": "Marcar como visto",
     "removeFromContinueWatching": "Quitar de Seguir viendo"
   },

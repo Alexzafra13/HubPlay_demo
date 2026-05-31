@@ -32,6 +32,9 @@ import {
   PeerContinueWatchingRail,
   TrendingRail,
   BecauseYouWatchedRail,
+  RecommendedRail,
+  CollectionsRail,
+  FavoriteChannelsRail,
 } from "@/components/home";
 
 // ─── Layout-driven section dispatch ───────────────────────────────────────
@@ -177,6 +180,25 @@ export default function Home() {
             local-catalogue content (what's on this server) rather
             than peer content. */}
         <BecauseYouWatchedRail />
+
+        {/* "Recomendados para ti" — afinidad de género agregada. Mismo
+            pool que la tier "Recomendado" del hero, aquí como rail
+            dedicado. Va tras "Porque viste X" (que parte de un título
+            concreto) porque ambos son descubrimiento local; se auto-
+            oculta en cold-start. Aún no es un HomeSection registrado. */}
+        <RecommendedRail />
+
+        {/* "Colecciones" — sagas TMDb matcheadas en las bibliotecas de
+            pelis (Star Wars, MCU…). Rail de descubrimiento de catálogo
+            con "Ver todo" → /collections. Se auto-oculta si no hay
+            sagas. No es un HomeSection registrado todavía. */}
+        <CollectionsRail />
+
+        {/* "Canales favoritos" — los canales que el usuario marcó con la
+            estrella, como rail propio (antes sólo asomaban dentro de "En
+            directo ahora", capado a 5). Se auto-oculta sin favoritos / sin
+            IPTV. "Ver todo" → filtro de favoritos en /live-tv. */}
+        <FavoriteChannelsRail />
 
         {/* Federated rails. Live outside the layout-driven dispatch
             for v1 because `peer_recent` / `peer_continue_watching`
