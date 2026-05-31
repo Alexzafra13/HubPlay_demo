@@ -79,7 +79,7 @@ const MediaGrid: FC<MediaGridProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {SKELETON_KEYS.map((k) => (
           <div key={k} className="flex flex-col gap-2">
             <Skeleton
@@ -115,7 +115,7 @@ const MediaGrid: FC<MediaGridProps> = ({
 
   return (
     <>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {visible.map((item) => (
           <PosterCard
             key={item.id}
