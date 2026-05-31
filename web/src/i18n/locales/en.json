@@ -181,6 +181,7 @@
     "heroReasonRecommendedPair": "Because you like {{first}} and {{second}}",
     "becauseYouWatchedLoading": "Porque viste…",
     "becauseYouWatched": "Porque viste {{title}}",
+    "recommendedForYou": "Recommended for you",
     "markWatched": "Mark as watched",
     "removeFromContinueWatching": "Remove from Continue Watching"
   },

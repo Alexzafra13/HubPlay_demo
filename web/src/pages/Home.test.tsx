@@ -59,6 +59,7 @@ vi.mock("@/components/home", () => ({
     <div data-testid="rail-peer-continue" />
   ),
   BecauseYouWatchedRail: () => <div data-testid="rail-because" />,
+  RecommendedRail: () => <div data-testid="rail-recommended" />,
 }));
 
 import Home from "./Home";

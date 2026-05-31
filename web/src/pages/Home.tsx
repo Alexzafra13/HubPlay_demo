@@ -32,6 +32,7 @@ import {
   PeerContinueWatchingRail,
   TrendingRail,
   BecauseYouWatchedRail,
+  RecommendedRail,
 } from "@/components/home";
 
 // ─── Layout-driven section dispatch ───────────────────────────────────────
@@ -177,6 +178,13 @@ export default function Home() {
             local-catalogue content (what's on this server) rather
             than peer content. */}
         <BecauseYouWatchedRail />
+
+        {/* "Recomendados para ti" — afinidad de género agregada. Mismo
+            pool que la tier "Recomendado" del hero, aquí como rail
+            dedicado. Va tras "Porque viste X" (que parte de un título
+            concreto) porque ambos son descubrimiento local; se auto-
+            oculta en cold-start. Aún no es un HomeSection registrado. */}
+        <RecommendedRail />
 
         {/* Federated rails. Live outside the layout-driven dispatch
             for v1 because `peer_recent` / `peer_continue_watching`
