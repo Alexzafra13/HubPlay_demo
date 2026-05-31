@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useMe, useProfiles } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { UserAvatar } from "@/components/common";
 import { NotificationsBell } from "@/components/notifications/NotificationsBell";
 import { BrandWordmark } from "./BrandWordmark";
@@ -172,6 +173,28 @@ function UserAvatarMenu({
   // username/role mientras /me todavía está resolviendo.
   const { data: me } = useMe();
   const avatarUser = me ?? (user ? { username: user.username, display_name: user.display_name ?? "" } : null);
+  const isMobile = useIsMobile();
+
+  // Enlaces de cuenta para el drawer de móvil. El dropdown de desktop
+  // de abajo los mantiene inline; mantener ambas listas en sync si se
+  // añade una entrada nueva.
+  const accountLinks: {
+    to: string;
+    Icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+    label: string;
+  }[] = [
+    { to: "/settings", Icon: SettingsIcon, label: t("nav.settings") },
+    { to: "/link", Icon: Smartphone, label: t("nav.linkDevice") },
+    ...(me?.can_upload
+      ? [{ to: "/uploads", Icon: Upload, label: t("nav.uploads") }]
+      : []),
+    ...(canSwitchProfile
+      ? [{ to: "/select-profile", Icon: UserCog, label: t("topbar.switchProfile") }]
+      : []),
+    ...(isAdmin
+      ? [{ to: "/admin", Icon: ShieldCheck, label: t("common.administration") }]
+      : []),
+  ];
 
   return (
     <div ref={ref} className="relative flex-shrink-0">
@@ -185,8 +208,10 @@ function UserAvatarMenu({
         <UserAvatar user={avatarUser} size="md" />
       </button>
 
+      {/* Desktop: dropdown flotante. En móvil usamos el drawer de abajo
+          (mismo lenguaje que el hamburguesa de la izquierda). */}
       <AnimatePresence>
-        {open && (
+        {open && !isMobile && (
           <m.div
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -267,6 +292,92 @@ function UserAvatarMenu({
               {t("common.logOut")}
             </button>
           </m.div>
+        )}
+      </AnimatePresence>
+
+      {/* Móvil: drawer de cuenta desde la derecha. El hamburguesa de la
+          izquierda lleva la navegación; este lleva la cuenta (perfil +
+          ajustes + logout). Cada menú una función, sin solape. */}
+      <AnimatePresence>
+        {open && isMobile && (
+          <>
+            <m.button
+              type="button"
+              aria-label={t("common.close")}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setOpen(false)}
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden cursor-default"
+              style={{ top: "var(--topbar-height)" }}
+            />
+            <m.aside
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+              className="fixed right-0 z-40 flex w-[80vw] max-w-[300px] flex-col md:hidden"
+              style={{
+                top: "var(--topbar-height)",
+                height: "calc(100dvh - var(--topbar-height))",
+                background:
+                  "linear-gradient(180deg, rgba(11,15,23,0.96) 0%, rgba(7,9,14,0.98) 100%)",
+                backdropFilter: "blur(8px) saturate(140%)",
+                borderLeft: "1px solid var(--color-border-subtle)",
+              }}
+              role="menu"
+            >
+              <div className="flex items-center gap-3 border-b border-border-subtle px-4 py-4">
+                <UserAvatar user={avatarUser} size="md" className="flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-text-primary">
+                    {user?.display_name || user?.username}
+                  </p>
+                  <p className="mt-0.5 text-[11px] capitalize text-text-muted">
+                    {user?.role}
+                  </p>
+                </div>
+              </div>
+              <nav className="scrollbar-hide flex-1 overflow-y-auto px-3 py-3">
+                <ul className="flex flex-col gap-0.5">
+                  {accountLinks.map((l) => (
+                    <li key={l.to}>
+                      <NavLink
+                        to={l.to}
+                        onClick={() => setOpen(false)}
+                        className={({ isActive }) =>
+                          [
+                            "flex h-11 items-center gap-3 rounded-lg px-3 text-[13.5px] font-medium transition-colors",
+                            isActive
+                              ? "bg-bg-hover text-text-primary"
+                              : "text-text-secondary hover:bg-bg-hover/60 hover:text-text-primary",
+                          ].join(" ")
+                        }
+                        role="menuitem"
+                      >
+                        <l.Icon className="size-[18px]" strokeWidth={1.6} />
+                        <span className="truncate">{l.label}</span>
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+              <div className="flex-shrink-0 px-3 pb-3">
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    onLogout();
+                  }}
+                  className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-[13.5px] font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+                  role="menuitem"
+                >
+                  <LogOut className="size-[18px]" strokeWidth={1.6} />
+                  {t("common.logOut")}
+                </button>
+              </div>
+            </m.aside>
+          </>
         )}
       </AnimatePresence>
     </div>

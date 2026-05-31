@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router";
+import { Outlet, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { TopBar } from "./TopBar";
 import { MobileDrawer } from "./MobileDrawer";
@@ -7,7 +7,6 @@ import { MiniPlayer } from "@/components/livetv/MiniPlayer";
 import { usePlaylistRefreshEvents } from "@/hooks/usePlaylistRefreshEvents";
 import { useUserDataSync } from "@/hooks/useUserDataSync";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useAuthStore } from "@/store/auth";
 
 // ─── AppLayout ──────────────────────────────────────────────────────────────
 
@@ -28,8 +27,6 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const isMobile = useIsMobile();
   const location = useLocation();
-  const navigate = useNavigate();
-  const logout = useAuthStore((s) => s.logout);
 
   // Close drawer on navigation or when leaving the mobile viewport.
   // React-docs "reset on prop change" pattern (track last seen, compare
@@ -48,11 +45,6 @@ export function AppLayout() {
 
   const toggleMobile = () => setMobileOpen((prev) => !prev);
   const closeMobile = () => setMobileOpen(false);
-
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
 
   return (
     /*
@@ -91,7 +83,7 @@ export function AppLayout() {
           height: "calc(100dvh - var(--topbar-height))",
         }}
       >
-        <MobileDrawer onClose={closeMobile} onLogout={handleLogout} />
+        <MobileDrawer onClose={closeMobile} />
       </div>
 
       {/* Main content — full width below the topbar. No sidebar means
