@@ -163,7 +163,7 @@ export default function Home() {
         )}
       </div>
 
-      <div className="flex flex-col gap-10 px-8 pb-12 md:px-12">
+      <div className="flex flex-col gap-10 px-4 pb-12 md:px-12">
         {sections.map((s) => {
           const node = renderSection(s);
           if (!node) return null;

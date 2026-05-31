@@ -63,5 +63,18 @@ function ScrollRow({ children }: { children: ReactNode }) {
   // Hidden scrollbar everywhere — desktop gets the chevron arrows
   // on hover (HorizontalScroller), mobile keeps native swipe-to-
   // scroll. The Plex playbook: never advertise the scrollbar.
-  return <HorizontalScroller>{children}</HorizontalScroller>;
+  //
+  // En móvil la fila sangra a borde completo (`-mx-4` cancela el
+  // `px-4` del contenedor de rails) y re-inseta las cards con
+  // `px-4`, así la primera card queda alineada con el título pero el
+  // scroll llega hasta el borde de la pantalla (patrón Netflix/Plex).
+  // En desktop (`md:`) se desactiva — el contenedor ya da el gutter.
+  return (
+    <HorizontalScroller
+      className="-mx-4 md:mx-0"
+      paddingClassName="px-4 pb-2 md:px-0"
+    >
+      {children}
+    </HorizontalScroller>
+  );
 }
