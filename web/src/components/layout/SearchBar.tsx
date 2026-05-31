@@ -310,12 +310,16 @@ export function SearchBar() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
-              className="fixed left-0 right-0 z-50 bg-bg-overlay/95 backdrop-blur-2xl border-b border-border shadow-2xl shadow-black/60"
+              // Móvil: superficie sólida a pantalla completa (bottom-0) —
+              // antes el panel era translúcido y sólo cubría el contenido,
+              // así que el hero asomaba por detrás y el texto se solapaba.
+              // Desktop: dropdown que crece con el contenido.
+              className="fixed inset-x-0 bottom-0 z-50 bg-bg-base md:bottom-auto md:border-b md:border-border md:bg-bg-overlay md:shadow-2xl md:shadow-black/60"
               style={{ top: "var(--topbar-height)" }}
               role="region"
               aria-label={t("nav.search")}
             >
-              <div className="max-w-[1400px] mx-auto p-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
+              <div className="mx-auto h-full max-w-[1400px] overflow-y-auto p-4 md:h-auto md:max-h-[calc(100dvh-var(--topbar-height)-24px)] md:p-6">
                 {dropdownActive ? (
                   dropdownEmpty ? (
                     <SearchNoResults query={debounced} />

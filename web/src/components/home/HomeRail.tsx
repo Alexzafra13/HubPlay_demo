@@ -22,7 +22,7 @@ export function HomeRail({ title, linkTo, children }: HomeRailProps) {
   const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         {linkTo ? (
           // Whole title is a link when the rail has a destination —
           // the underline grows L→R on hover (Netflix-style row
@@ -32,9 +32,9 @@ export function HomeRail({ title, linkTo, children }: HomeRailProps) {
           // all" page yet).
           <Link
             to={linkTo}
-            className="group/title inline-flex flex-col items-start"
+            className="group/title inline-flex min-w-0 flex-col items-start"
           >
-            <h2 className="text-lg font-semibold text-white group-hover/title:text-white transition-colors">
+            <h2 className="max-w-full truncate text-lg font-semibold text-white transition-colors group-hover/title:text-white">
               {title}
             </h2>
             <span
@@ -43,12 +43,14 @@ export function HomeRail({ title, linkTo, children }: HomeRailProps) {
             />
           </Link>
         ) : (
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
+          <h2 className="min-w-0 truncate text-lg font-semibold text-white">
+            {title}
+          </h2>
         )}
         {linkTo && (
           <Link
             to={linkTo}
-            className="text-xs text-white/40 hover:text-white/70 transition-colors"
+            className="flex-shrink-0 text-xs text-white/40 transition-colors hover:text-white/70"
           >
             {t("common.seeAll")}
           </Link>
