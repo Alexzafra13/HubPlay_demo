@@ -32,7 +32,7 @@
 // rather than blind bullets so the user can tell what each slide
 // will give them at a glance.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -476,7 +476,7 @@ function SlideContents({
   if (isEpisode) {
     const poster = pickPoster(item);
     return (
-      <div className="absolute bottom-0 left-0 right-0 px-8 pb-12 md:px-12 md:pb-16">
+      <div className="absolute bottom-0 left-0 right-0 px-4 pb-10 md:px-12 md:pb-16">
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:gap-8">
           {poster && (
             <div className="hidden md:block flex-shrink-0">
@@ -495,7 +495,9 @@ function SlideContents({
             <ReasonLine text={slot.reason} />
             <MetaRow parts={metaParts} />
             {item.overview != null && (
-              <p className="max-w-xl text-sm leading-relaxed text-white/60 line-clamp-2">
+              // En móvil la descripción larga ensucia el hero y se solapa
+              // con el título del backdrop — se oculta y reaparece en sm+.
+              <p className="hidden max-w-xl text-sm leading-relaxed text-white/60 sm:line-clamp-2">
                 {item.overview}
               </p>
             )}
@@ -518,14 +520,16 @@ function SlideContents({
   // Movie / series single-column layout. Looks like the original hero
   // but driven by the same primitives so styling stays consistent.
   return (
-    <div className="absolute bottom-0 left-0 right-0 px-8 pb-12 md:px-12 md:pb-16">
+    <div className="absolute bottom-0 left-0 right-0 px-4 pb-10 md:px-12 md:pb-16">
       <div className="flex max-w-2xl flex-col gap-5">
         {tagChip}
         <TitleBlock item={item} detailHref={detailHref} />
         <ReasonLine text={slot.reason} />
         <MetaRow parts={metaParts} />
         {item.overview != null && (
-          <p className="max-w-xl text-sm leading-relaxed text-white/60 line-clamp-3">
+          // En móvil la descripción larga ensucia el hero y se solapa
+          // con el título del backdrop — se oculta y reaparece en sm+.
+          <p className="hidden max-w-xl text-sm leading-relaxed text-white/60 sm:line-clamp-3">
             {item.overview}
           </p>
         )}
@@ -561,6 +565,36 @@ export function HeroBanner(props: HeroBannerProps) {
   }, [slots.length, paused]);
 
   const goTo = useCallback((idx: number) => setActiveIndex(idx), []);
+  const goNext = useCallback(
+    () => setActiveIndex((prev) => (prev + 1) % slots.length),
+    [slots.length],
+  );
+  const goPrev = useCallback(
+    () => setActiveIndex((prev) => (prev - 1 + slots.length) % slots.length),
+    [slots.length],
+  );
+
+  // Swipe táctil en móvil: el carrusel sólo avanzaba solo o por los
+  // bullets, así que con el dedo no respondía. Registramos el gesto
+  // horizontal y, si supera el umbral, navegamos prev/next. Pausamos la
+  // rotación automática mientras el dedo está en el hero (equivalente
+  // táctil del onMouseEnter, que en touch nunca dispara) para que no
+  // cambie de slide a media lectura.
+  const touchStartX = useRef<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0]?.clientX ?? null;
+    setPaused(true);
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStartX.current;
+    touchStartX.current = null;
+    setPaused(false);
+    if (start == null || slots.length <= 1) return;
+    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
+    if (Math.abs(dx) < 40) return; // tap o micro-arrastre: no es swipe
+    if (dx < 0) goNext();
+    else goPrev();
+  };
 
   if (slots.length === 0) return null;
   // Clamp the active index in render rather than via a reset effect
@@ -571,10 +605,12 @@ export function HeroBanner(props: HeroBannerProps) {
 
   return (
     <section
-      className="relative -mx-4 md:-mx-6 h-[70vh] min-h-[450px] max-h-[750px] overflow-hidden"
+      className="relative -mx-4 md:-mx-6 h-[70vh] min-h-[450px] max-h-[750px] overflow-hidden touch-pan-y"
       style={{ marginTop: "calc(var(--topbar-height) * -1)" }}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
     >
       {slots.map((s, i) => {
         const bg = pickBackdrop(s.item);
@@ -605,7 +641,7 @@ export function HeroBanner(props: HeroBannerProps) {
       <SlideContents slot={slot} navigate={navigate} />
 
       {slots.length > 1 && (
-        <div className="absolute bottom-4 left-8 right-8 md:left-12 md:right-12 flex items-center justify-center gap-2">
+        <div className="absolute bottom-4 left-4 right-4 md:left-12 md:right-12 flex items-center justify-center gap-2">
           {slots.map((s, i) => (
             <button
               key={s.key}

@@ -2,11 +2,9 @@ import { useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { m, AnimatePresence } from "framer-motion";
-import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone, Upload } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
-import { useMe } from "@/api/hooks";
-import { UserAvatar } from "@/components/common";
 import { MAIN_NAV, PEERS_NAV, type NavItem } from "./navConfig";
 
 // MobileDrawer — replaces the legacy mobile sidebar drawer. Renders
@@ -14,25 +12,19 @@ import { MAIN_NAV, PEERS_NAV, type NavItem } from "./navConfig";
 // rows, menu items as accordions that expand inline. Lives below the
 // TopBar (top: var(--topbar-height)) and slides in from the left.
 //
-// Personal/admin actions (Settings · Vincular dispositivo · Admin ·
-// Logout) sit at the bottom inside a fixed pod so they're always
-// reachable even if the user has scrolled the nav.
+// Sólo navegación: las acciones de cuenta (perfil · Ajustes · Vincular
+// dispositivo · Admin · Cerrar sesión) viven en el drawer de cuenta que
+// abre el avatar de la derecha (TopBar). Dos menús, cada uno una
+// función: izquierda = a dónde ir, derecha = tu cuenta.
 
 interface MobileDrawerProps {
   onClose: () => void;
-  onLogout: () => void;
 }
 
-export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
+export function MobileDrawer({ onClose }: MobileDrawerProps) {
   const { t } = useTranslation();
   const { user } = useAuthStore();
-  const { data: me } = useMe();
   const isAdmin = user?.role === "admin";
-  // useMe trae avatar_image_url cuando el usuario sube foto desde
-  // Settings; useAuthStore.user es el cache del login y sirve sólo
-  // de fallback mientras /me resuelve.
-  const avatarUser =
-    me ?? (user ? { username: user.username, display_name: user.display_name ?? "" } : null);
 
   const { data: peerLibs } = useAllPeerLibraries();
   const showPeers = isAdmin && (peerLibs?.length ?? 0) > 0;
@@ -71,78 +63,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
             />
           )}
         </ul>
-
-        {/* Personal section — Settings + Vincular dispositivo + (admin) */}
-        <div className="mt-4">
-          <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted">
-            {t("nav.account")}
-          </p>
-          <ul className="flex flex-col gap-0.5">
-            <li>
-              <DrawerLink
-                to="/settings"
-                icon={<Settings className="size-[18px]" strokeWidth={1.6} />}
-                label={t("nav.settings")}
-                onClick={onClose}
-              />
-            </li>
-            <li>
-              <DrawerLink
-                to="/link"
-                icon={<Smartphone className="size-[18px]" strokeWidth={1.6} />}
-                label={t("nav.linkDevice")}
-                onClick={onClose}
-              />
-            </li>
-            {me?.can_upload && (
-              <li>
-                <DrawerLink
-                  to="/uploads"
-                  icon={<Upload className="size-[18px]" strokeWidth={1.6} />}
-                  label={t("nav.uploads")}
-                  onClick={onClose}
-                />
-              </li>
-            )}
-            {isAdmin && (
-              <li>
-                <DrawerLink
-                  to="/admin/dashboard"
-                  icon={<ShieldCheck className="size-[18px]" strokeWidth={1.6} />}
-                  label={t("common.administration")}
-                  onClick={onClose}
-                />
-              </li>
-            )}
-          </ul>
-        </div>
       </nav>
-
-      {/* User pod — pinned bottom; "Cerrar sesión" lives here. */}
-      <div className="px-3 pb-3 flex-shrink-0">
-        <div className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40">
-          <UserAvatar user={avatarUser} size="md" className="flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] font-medium text-text-primary truncate leading-tight">
-              {user?.display_name || user?.username}
-            </p>
-            <p className="text-[11px] text-text-muted truncate leading-tight mt-0.5 capitalize">
-              {user?.role}
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              onClose();
-              onLogout();
-            }}
-            className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors flex-shrink-0"
-            aria-label={t("common.logOut")}
-            title={t("common.logOut")}
-          >
-            <LogOut className="size-[16px]" strokeWidth={1.6} />
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }
