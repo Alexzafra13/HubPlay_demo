@@ -61,6 +61,7 @@ vi.mock("@/components/home", () => ({
   BecauseYouWatchedRail: () => <div data-testid="rail-because" />,
   RecommendedRail: () => <div data-testid="rail-recommended" />,
   CollectionsRail: () => <div data-testid="rail-collections" />,
+  FavoriteChannelsRail: () => <div data-testid="rail-favorite-channels" />,
 }));
 
 import Home from "./Home";

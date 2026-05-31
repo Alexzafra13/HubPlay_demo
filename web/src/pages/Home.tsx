@@ -34,6 +34,7 @@ import {
   BecauseYouWatchedRail,
   RecommendedRail,
   CollectionsRail,
+  FavoriteChannelsRail,
 } from "@/components/home";
 
 // ─── Layout-driven section dispatch ───────────────────────────────────────
@@ -192,6 +193,12 @@ export default function Home() {
             con "Ver todo" → /collections. Se auto-oculta si no hay
             sagas. No es un HomeSection registrado todavía. */}
         <CollectionsRail />
+
+        {/* "Canales favoritos" — los canales que el usuario marcó con la
+            estrella, como rail propio (antes sólo asomaban dentro de "En
+            directo ahora", capado a 5). Se auto-oculta sin favoritos / sin
+            IPTV. "Ver todo" → filtro de favoritos en /live-tv. */}
+        <FavoriteChannelsRail />
 
         {/* Federated rails. Live outside the layout-driven dispatch
             for v1 because `peer_recent` / `peer_continue_watching`
