@@ -34,6 +34,13 @@ interface HorizontalScrollerProps {
   paddingClassName?: string;
   /** Optional aria-label for the scroll region. */
   ariaLabel?: string;
+  /**
+   * Extra classes for the scroller root. Used by callers that want
+   * the row to bleed past the page gutter on mobile (e.g. HomeRail
+   * passes `-mx-4 md:mx-0` so cards reach the screen edge Netflix-
+   * style, while the section title stays inset).
+   */
+  className?: string;
 }
 
 export function HorizontalScroller({
@@ -41,6 +48,7 @@ export function HorizontalScroller({
   innerClassName = "flex gap-4",
   paddingClassName = "pb-2",
   ariaLabel,
+  className = "",
 }: HorizontalScrollerProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -80,7 +88,7 @@ export function HorizontalScroller({
   };
 
   return (
-    <div className="group/scroller relative">
+    <div className={`group/scroller relative ${className}`}>
       <div
         ref={scrollRef}
         className={`overflow-x-auto scrollbar-hide ${paddingClassName}`}

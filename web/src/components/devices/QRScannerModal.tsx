@@ -1,9 +1,36 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Scanner, type IDetectedBarcode } from "@yudiel/react-qr-scanner";
+import {
+  Scanner,
+  setZXingModuleOverrides,
+  type IDetectedBarcode,
+} from "@yudiel/react-qr-scanner";
+// Vite emite el .wasm como asset hasheado servido desde el propio
+// origen del app. Lo importamos por URL para apuntar locateFile a él.
+import zxingReaderWasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
 import { X } from "lucide-react";
 
 import { extractCode } from "./extractCode";
+
+// ── Fix del olor "escaneo QR no hace nada" ──────────────────────────
+//
+// El <Scanner> de @yudiel usa el ponyfill barcode-detector (zxing-wasm)
+// cuando el navegador NO trae BarcodeDetector nativo — el caso de iOS
+// Safari, justo el dispositivo con el que un usuario escanea el QR de la
+// TV. Por defecto ese ponyfill DESCARGA su binario .wasm de un CDN
+// externo (https://fastly.jsdelivr.net/npm/zxing-wasm@...). HubPlay es
+// self-hosted, casi siempre en una LAN sin salida a internet (o con
+// firewall / CSP que bloquea CDNs de terceros). El fetch del wasm
+// fallaba en silencio: getUserMedia abría la cámara, pero el detector
+// nunca inicializaba, así que el QR no se decodificaba nunca y — como el
+// error de init no es un DOMException de la lista FATAL_CAMERA_ERRORS —
+// se tragaba sin mensaje. Resultado: "lo escaneo y no pasa nada".
+//
+// Apuntamos locateFile al .wasm que Vite bundlea desde node_modules y
+// sirve desde el propio origen: funciona offline, sin depender de
+// ningún tercero. setZXingModuleOverrides se importa de @yudiel para
+// garantizar que tocamos la MISMA instancia del módulo que usa Scanner.
+setZXingModuleOverrides({ locateFile: () => zxingReaderWasmUrl });
 
 // QRScannerModal abre la cámara del móvil para escanear un QR
 // generado por la TV en /pair. Cuando decodifica, intenta extraer
@@ -199,6 +226,9 @@ export default function QRScannerModal({ onCode, onClose }: Props) {
           onScan={handleScan}
           onError={handleError}
           paused={paused}
+          // Restringir a QR (no `['any']`): es lo único que muestra la
+          // TV y evita que zxing intente todos los formatos por frame.
+          formats={["qr_code"]}
           constraints={{ facingMode: "environment" }}
           styles={{
             container: { width: "100%", height: "100%" },
