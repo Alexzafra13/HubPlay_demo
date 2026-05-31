@@ -5,6 +5,7 @@ export { LatestInLibraryRail } from "./LatestInLibraryRail";
 export { TrendingRail } from "./TrendingRail";
 export { BecauseYouWatchedRail } from "./BecauseYouWatchedRail";
 export { RecommendedRail } from "./RecommendedRail";
+export { CollectionsRail } from "./CollectionsRail";
 export { LiveNowRail } from "./LiveNowRail";
 export { PeerRecentRail } from "./PeerRecentRail";
 export { PeerContinueWatchingRail } from "./PeerContinueWatchingRail";

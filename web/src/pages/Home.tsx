@@ -33,6 +33,7 @@ import {
   TrendingRail,
   BecauseYouWatchedRail,
   RecommendedRail,
+  CollectionsRail,
 } from "@/components/home";
 
 // ─── Layout-driven section dispatch ───────────────────────────────────────
@@ -185,6 +186,12 @@ export default function Home() {
             concreto) porque ambos son descubrimiento local; se auto-
             oculta en cold-start. Aún no es un HomeSection registrado. */}
         <RecommendedRail />
+
+        {/* "Colecciones" — sagas TMDb matcheadas en las bibliotecas de
+            pelis (Star Wars, MCU…). Rail de descubrimiento de catálogo
+            con "Ver todo" → /collections. Se auto-oculta si no hay
+            sagas. No es un HomeSection registrado todavía. */}
+        <CollectionsRail />
 
         {/* Federated rails. Live outside the layout-driven dispatch
             for v1 because `peer_recent` / `peer_continue_watching`
