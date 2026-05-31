@@ -212,7 +212,7 @@ function BrowseControls({
       <select
         value={sort}
         onChange={(e) => onSortChange(e.target.value as SortOption)}
-        className="rounded-lg bg-bg-base border border-border px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+        className="rounded-lg bg-bg-base border border-border px-2 py-2 sm:py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
         aria-label={t("sort.by")}
       >
         {SORT_OPTIONS.map((opt) => (
@@ -227,7 +227,7 @@ function BrowseControls({
         aria-expanded={filtersOpen}
         aria-controls="media-browse-filters"
         className={[
-          "rounded-lg border px-2.5 py-1.5 text-sm transition-colors cursor-pointer",
+          "rounded-lg border px-2.5 py-2 sm:py-1.5 text-sm transition-colors cursor-pointer",
           filterCount > 0
             ? "border-accent bg-accent/10 text-accent"
             : "border-border bg-bg-base text-text-primary hover:bg-bg-elevated",
