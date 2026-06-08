@@ -33,6 +33,10 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # La app drena en hasta 30s; el default de Docker (10s) la cortaría a
+    # mitad de un transcode/upload o de un checkpoint WAL.
+    stop_grace_period: 40s
+    init: true
     logging:
       driver: json-file
       options:

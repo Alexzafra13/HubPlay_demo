@@ -439,6 +439,7 @@ func run(configPath string) error {
 			TrustedProxies:   cfg.Server.TrustedProxies,
 			MetricsEnabled:   cfg.Observability.MetricsEnabled,
 			MetricsPath:      cfg.Observability.MetricsPath,
+			MetricsToken:     cfg.Observability.MetricsToken,
 			CorsRegistry:     corsRegistry,
 			CorsOriginsRepo:  repos.CorsOrigins,
 			RestartRequester: restartRequester,

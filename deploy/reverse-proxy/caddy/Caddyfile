@@ -20,6 +20,12 @@
 }
 
 hubplay.example.com {
+	# /metrics no debe salir a la WAN: filtra internals (sesiones, rutas,
+	# FDs, versión). Bloqueado en el perímetro. Si scrapeas desde fuera,
+	# quita esto y protégelo con observability.metrics_token en el server.
+	@metrics path /metrics
+	respond @metrics 403
+
 	# Reverse-proxy to the HubPlay backend on localhost:8096. Caddy
 	# handles WebSocket upgrades and SSE keepalive correctly by default
 	# — no extra configuration required.

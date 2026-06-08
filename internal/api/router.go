@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"io/fs"
 	"net/http"
 	"net/netip"
@@ -244,7 +245,39 @@ func mountMetricsEndpoint(r chi.Router, deps Dependencies) {
 	if path == "" {
 		path = "/metrics"
 	}
-	r.Handle(path, deps.Infra.Metrics.Handler())
+	h := deps.Infra.Metrics.Handler()
+	if token := deps.Server.MetricsToken; token != "" {
+		// Gate opt-in: exige Bearer (o ?token= para scrapers que no pueden
+		// poner cabecera, p.ej. algunos blackbox exporters). Comparación
+		// en tiempo constante para no filtrar el token por timing.
+		h = requireMetricsToken(token, h)
+	} else if deps.Infra.Logger != nil {
+		// Sin token: /metrics queda público. Aviso ruidoso porque el bind
+		// por defecto es 0.0.0.0 y las métricas son reconocimiento útil.
+		deps.Infra.Logger.Warn("/metrics expuesto SIN autenticación — bloquéalo en el reverse proxy o define observability.metrics_token",
+			"path", path)
+	}
+	r.Handle(path, h)
+}
+
+// requireMetricsToken envuelve el handler de métricas con un check de
+// token (Bearer o query). Usa subtle.ConstantTimeCompare.
+func requireMetricsToken(token string, next http.Handler) http.Handler {
+	want := []byte(token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := ""
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			got = strings.TrimPrefix(h, "Bearer ")
+		} else if q := r.URL.Query().Get("token"); q != "" {
+			got = q
+		}
+		if got == "" || subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // mountSPAFallback sirve el frontend embebido. Intenta servir el path
@@ -285,6 +318,9 @@ func (deps *Dependencies) fillFromConfig() {
 	}
 	if deps.Server.MetricsPath == "" {
 		deps.Server.MetricsPath = cfg.Observability.MetricsPath
+	}
+	if deps.Server.MetricsToken == "" {
+		deps.Server.MetricsToken = cfg.Observability.MetricsToken
 	}
 	if deps.Server.AuthConfig == (config.AuthConfig{}) {
 		deps.Server.AuthConfig = cfg.Auth

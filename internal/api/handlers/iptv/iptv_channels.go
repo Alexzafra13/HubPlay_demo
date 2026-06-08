@@ -524,6 +524,17 @@ func (h *iptvChannelHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Anti relay abierto (A3): solo proxiamos URLs que el propio proxy
+	// firmó al reescribir la playlist de este canal. Sin esto, un usuario
+	// autenticado con acceso a un canal podía fetchear cualquier URL
+	// pública a través del server. La firma se valida ANTES del lookup de
+	// canal/ACL para no dar una señal de oráculo ni gastar una query DB.
+	if !h.proxy.VerifyProxySig(channelID, rawURL, r.URL.Query().Get("sig")) {
+		handlers.RespondError(w, r, http.StatusForbidden, "INVALID_PROXY_SIG",
+			"url not signed for this channel; reload the manifest")
+		return
+	}
+
 	// Authorisation: resolve the channel's library and check access. The
 	// proxy-itself validates the upstream URL against SSRF, but we must
 	// still confirm the caller owns the channel they're proxying through.

@@ -610,6 +610,7 @@ func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string,
 type iptvFakeProxy struct {
 	streamFn func(w http.ResponseWriter, channelID, streamURL string) error
 	urlFn    func(w http.ResponseWriter, channelID, url string) error
+	verifyFn func(channelID, rawURL, sig string) bool
 }
 
 func (p *iptvFakeProxy) ProxyStream(_ context.Context, w http.ResponseWriter, channelID, streamURL string) error {
@@ -626,6 +627,15 @@ func (p *iptvFakeProxy) ProxyURL(_ context.Context, w http.ResponseWriter, chann
 	}
 	_, _ = w.Write([]byte("URL_BYTES"))
 	return nil
+}
+
+// VerifyProxySig: el fake acepta cualquier firma salvo que verifyFn lo
+// override, así los tests existentes de ProxyURL no necesitan firmar.
+func (p *iptvFakeProxy) VerifyProxySig(channelID, rawURL, sig string) bool {
+	if p.verifyFn != nil {
+		return p.verifyFn(channelID, rawURL, sig)
+	}
+	return true
 }
 
 // ─── Fake handlers.LibraryRepository ────────────────────────────────────────────────
@@ -966,6 +976,27 @@ func TestIPTVHandler_ProxyURL_MissingURL_400(t *testing.T) {
 	rr := env.do(http.MethodGet, "/api/v1/channels/c-1/proxy", "")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+// TestIPTVHandler_ProxyURL_InvalidSig_403 fija A3: una URL sin firma
+// válida se rechaza con 403 ANTES de tocar el canal/ACL o el proxy, así
+// el endpoint no puede usarse como relay HTTP abierto.
+func TestIPTVHandler_ProxyURL_InvalidSig_403(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1", IsActive: true}
+	env.proxy.verifyFn = func(string, string, string) bool { return false }
+	proxyInvoked := false
+	env.proxy.urlFn = func(http.ResponseWriter, string, string) error {
+		proxyInvoked = true
+		return nil
+	}
+	rr := env.do(http.MethodGet, "/api/v1/channels/c-1/proxy?url=https://evil.example.com/x&sig=forged", "")
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: got %d want 403", rr.Code)
+	}
+	if proxyInvoked {
+		t.Fatal("el proxy no debería invocarse con firma inválida (relay abierto)")
 	}
 }
 

@@ -84,6 +84,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libchromaprint-tools \
     ca-certificates \
     tzdata \
+    tini \
     wget \
     # VAAPI (Intel/AMD)
     libva2 \
@@ -113,7 +114,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget -qO /dev/null http://localhost:8096/api/v1/health || exit 1
 
 VOLUME ["/config", "/cache"]
-ENTRYPOINT ["hubplay"]
+# tini como PID 1: reapea los ffmpeg/ffprobe huérfanos (un server de
+# transcoding spawnea muchos) y reenvía SIGTERM para el shutdown graceful
+# de 30s. Sin él los zombies se acumulan en un box de larga vida.
+ENTRYPOINT ["tini", "--", "hubplay"]
 CMD ["--config", "/config/hubplay.yaml"]
 
 # ═══════════════════════════════════════════
@@ -127,7 +131,8 @@ RUN apk add --no-cache \
     ffmpeg \
     chromaprint \
     ca-certificates \
-    tzdata
+    tzdata \
+    tini
 
 RUN adduser -D -s /sbin/nologin hubplay
 
@@ -143,5 +148,8 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget -qO /dev/null http://localhost:8096/api/v1/health || exit 1
 
 VOLUME ["/config", "/cache"]
-ENTRYPOINT ["hubplay"]
+# tini como PID 1: reapea los ffmpeg/ffprobe huérfanos (un server de
+# transcoding spawnea muchos) y reenvía SIGTERM para el shutdown graceful
+# de 30s. Sin él los zombies se acumulan en un box de larga vida.
+ENTRYPOINT ["tini", "--", "hubplay"]
 CMD ["--config", "/config/hubplay.yaml"]

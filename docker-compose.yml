@@ -29,6 +29,12 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # La app drena en hasta 30s (transcodes/uploads en vuelo + checkpoint
+    # WAL). El default de Docker (10s) la mataría a mitad; damos margen.
+    stop_grace_period: 40s
+    # init=tini ya va en la imagen (reapea ffmpeg); esto es defensa extra
+    # para quien arranque la imagen sin el ENTRYPOINT por defecto.
+    init: true
     logging:
       driver: json-file
       options:

@@ -164,6 +164,22 @@ func (s *Service) CompleteSetup(startScan bool) error {
 // NO valida la conexión (eso es del caller) — esto es ruta de persistencia pura.
 // Tampoco aplica al proceso vivo: el operador llama Restart después.
 func (s *Service) SaveDatabaseConfig(driver, path, dsn string) error {
+	// Normaliza el path de SQLite a una ruta ABSOLUTA bajo el directorio
+	// del fichero de config (que en el contenedor es el volumen /config).
+	// Defensa de datos: el frontend podría mandar un path vacío o relativo,
+	// y persistir "./hubplay.db" dejaría la DB en el cwd del proceso —
+	// efímero en el contenedor — con pérdida total de datos al recrearlo.
+	// Anclarla al dir del config garantiza el plug-and-play sin importar el
+	// input.
+	if driver == "sqlite" {
+		if strings.TrimSpace(path) == "" {
+			path = "hubplay.db"
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(s.configPath), filepath.Base(path))
+		}
+	}
+
 	s.config.Database.Driver = driver
 	s.config.Database.Path = path
 	s.config.Database.DSN = dsn

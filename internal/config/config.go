@@ -127,9 +127,17 @@ type IPTVTransmuxConfig struct {
 // ObservabilityConfig: endpoint Prometheus /metrics. Default activado en
 // /metrics. enabled:false para no exponerlos; metrics_path para moverlos por
 // higiene de reverse-proxy.
+//
+// MetricsToken: cuando se define, /metrics exige `Authorization: Bearer
+// <token>` (o `?token=<token>` para scrapers que no pueden poner cabecera).
+// Vacío = sin auth (comportamiento histórico) — en ese caso el operador
+// DEBE bloquear /metrics en su reverse proxy, porque el bind por defecto
+// es 0.0.0.0 y las métricas filtran internals (sesiones, rutas, FDs). La
+// app loguea un aviso al arrancar si está expuesto sin token.
 type ObservabilityConfig struct {
 	MetricsEnabled bool   `yaml:"metrics_enabled"`
 	MetricsPath    string `yaml:"metrics_path"`
+	MetricsToken   string `yaml:"metrics_token"`
 }
 
 type StreamingConfig struct {
@@ -407,6 +415,9 @@ func applyEnvOverrides(cfg *Config) {
 		if c, err := strconv.Atoi(v); err == nil {
 			cfg.Auth.BCryptCost = c
 		}
+	}
+	if v := os.Getenv("HUBPLAY_OBSERVABILITY_METRICS_TOKEN"); v != "" {
+		cfg.Observability.MetricsToken = v
 	}
 	if v := os.Getenv("HUBPLAY_LOGGING_LEVEL"); v != "" {
 		cfg.Logging.Level = v

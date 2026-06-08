@@ -6,6 +6,51 @@
 
 ---
 
+## 🌐 Sesión 2026-06-08 (parte 3) — Endurecimiento prod: Fase 0 (seguridad) + Fase 1 (despliegue)
+
+Rama: `claude/project-review-PO25J`. A partir del audit
+`audit-2026-06-08-production-readiness.md`. Enfoque **plug-and-play**
+(estilo Plex): defaults seguros que funcionan sin configurar nada, cero
+pérdida de datos. Todo con tests; build/vet/`-race` verdes.
+
+### Fase 0 — bloqueantes de exposición a internet (7 items)
+| Item | Fix |
+|---|---|
+| C1 | `extractToken` ya no acepta `?token=` (solo Bearer/cookie) — evita fuga del token por logs/Referer/historial. `middleware_test.go` |
+| C2 | `logging.RedactURL` + redacción por-valor en el `ReplaceAttr` central → enmascara user/pass en URLs IPTV (m3u/epg/upstream) en todos los call-sites. `logging_test.go` |
+| A1 | `IPRateLimitMiddleware` en login/refresh/setup/device (`NewAuthRateLimiter` 30/min·burst 10 por IP) |
+| A2 | Lockout de login por tupla `user:<u>@<ip>` (no username global) → mata el DoS de cuenta. `service_test.go` |
+| A3 | Proxy IPTV firma (HMAC-SHA256) las URLs reescritas; el handler exige+verifica firma → cierra el relay HTTP abierto. **No** host-lock (compatible multi-CDN). `proxy_sign_test.go`, `iptv_test.go` |
+| A4 | Quitadas las 4 cabeceras `Access-Control-Allow-Origin: *` del proxy HLS |
+| A5 | `observability.metrics_token` (+env) gate Bearer/`?token=` en `/metrics` + aviso si expuesto. `metrics_auth_test.go` |
+
+### Fase 1 — robustez de despliegue (plug-and-play)
+| Item | Fix |
+|---|---|
+| A7 | `tini` PID 1 en ambos stages del Dockerfile (reapea ffmpeg huérfanos + SIGTERM) + `init:true` en compose |
+| A8 | `stop_grace_period: 40s` en los compose (la app drena en 30s) |
+| M10 | `SaveDatabaseConfig` ancla el SQLite vacío/relativo bajo `/config` → no pérdida de datos al recrear contenedor. `service_test.go` |
+| A6 | nginx: bloque SSE dedicado (`proxy_buffering off`) → progreso de scans/uploads/pairing en tiempo real |
+| M9 | nginx: `location /` body acotado a 1g; subidas tus por bloque `/api/v1/uploads/` propio (sin tope) |
+| A5-perímetro | `deny`/`403` de `/metrics` en nginx y Caddy |
+| M11 | Backup SQLite automático (`VACUUM INTO`) antes de migrar, keep 3, best-effort. `build_database_backup_test.go` + integración real |
+
+**Diferidos a propósito** (forzarlos rompería plug-and-play): **M5**
+(password Postgres — es opt-in/avanzado, SQLite es default), **M7**
+(límites mem/cpu — dependen del hardware; hardcodearlos rompería
+transcoding o causaría OOM). Documentado en el audit.
+
+**Hallazgo afinado:** el supuesto bug crítico de DB efímera (M10) era
+parcial — la imagen por defecto ya pasa `--config /config/hubplay.yaml`,
+así que la DB ya caía en el volumen. Aun así se añadió la defensa en
+`SaveDatabaseConfig`.
+
+**Pendiente (no bloquea plug-and-play):** Fase 2 supply-chain (SHA-pin
+de actions, provenance/firma, checksum FFmpeg), Fase 3 observabilidad,
+Fase 4 frontend (error boundaries, virtualización), Fase 5 gobernanza.
+
+---
+
 ## 🌐 Sesión 2026-06-08 (parte 2) — F15-5 integration tests library
 
 Rama: `claude/project-review-PO25J`.

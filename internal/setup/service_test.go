@@ -39,3 +39,38 @@ func TestCompleteSetup_WritesYAMLWith0600(t *testing.T) {
 		t.Errorf("config file perms = %o, want 0600", got)
 	}
 }
+
+// TestSaveDatabaseConfig_AnclaSQLiteAlDirDelConfig fija la defensa de
+// datos plug-and-play: un path SQLite vacío o relativo enviado por el
+// frontend se ancla bajo el directorio del config (el volumen /config en
+// el contenedor), nunca al cwd efímero del proceso.
+func TestSaveDatabaseConfig_AnclaSQLiteAlDirDelConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "hubplay.yaml")
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"vacío", "", filepath.Join(dir, "hubplay.db")},
+		{"relativo simple", "hubplay.db", filepath.Join(dir, "hubplay.db")},
+		{"relativo con dir", "data/foo.db", filepath.Join(dir, "foo.db")},
+		{"absoluto se respeta", "/var/lib/hubplay/x.db", "/var/lib/hubplay/x.db"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			svc := NewService(cfg, cfgPath, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err := svc.SaveDatabaseConfig("sqlite", tc.in, ""); err != nil {
+				t.Fatalf("SaveDatabaseConfig: %v", err)
+			}
+			if cfg.Database.Path != tc.want {
+				t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, tc.want)
+			}
+			if !filepath.IsAbs(cfg.Database.Path) {
+				t.Errorf("el path persistido debe ser absoluto, got %q", cfg.Database.Path)
+			}
+		})
+	}
+}
