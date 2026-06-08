@@ -299,9 +299,13 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
 
 ## Plan de ataque por fases (orden recomendado)
 
+> **Estado (2026-06-08):** Fase 0 **completada** ✅ — C1, C2, A1, A2, A3,
+> A4, A5 implementados con tests en la rama `claude/project-review-PO25J`.
+> Ver §"Fase 0 — implementación" al final.
+
 | Fase | Tema | Items | Coste |
 |---|---|---|---|
-| **0** | **Bloqueantes de exposición** | C1, C2, A1, A2, A3, A4, A5 | 1 sesión |
+| **0 ✅** | **Bloqueantes de exposición** | C1, C2, A1, A2, A3, A4, A5 | hecho |
 | **1** | **Robustez de despliegue** | A6, A7, A8, M5, M6, M7, M9, M10, M11 | 1 sesión |
 | **2** | **Supply-chain / release** | A9, A10, M12, M13, M14, M15, M16, M17 | 1 sesión |
 | **3** | **Observabilidad & config** | M18, M19, M20, M21, M22, M23, M24, B6 | 1 sesión |
@@ -314,3 +318,30 @@ C1, C2, A1+A2, A3+A4, A5.
 > Nota: muchos fixes son de bajo riesgo y alto valor (config de proxy,
 > compose, pineado de actions) — no tocan lógica de negocio. Los de auth
 > (C1, A1, A2) requieren cuidado y tests.
+
+---
+
+## Fase 0 — implementación (2026-06-08)
+
+Rama `claude/project-review-PO25J`. 4 commits, todos con tests; build +
+`go vet` + `-race` verdes en los paquetes tocados (auth, iptv, api,
+logging, config).
+
+| Item | Qué se hizo | Tests |
+|---|---|---|
+| **C1** | `extractToken` ya no acepta `?token=`; solo Bearer/cookie | `middleware_test.go` (Bearer/cookie 200, query/none 401) |
+| **C2** | `RedactURL` + redacción por-valor en el `ReplaceAttr` central para claves url/m3u_url/epg_url/upstream/… | `logging_test.go` |
+| **A1** | `IPRateLimitMiddleware` en login/refresh/setup/device (30/min burst 10 por IP); SSE fuera | reuso del limiter de federation |
+| **A2** | Lockout de login por tupla `user:<u>@<ip>` (no username global) → sin DoS de cuenta | `service_test.go` (víctima desde otra IP entra) |
+| **A3** | Proxy IPTV firma (HMAC) las URLs reescritas; handler exige+verifica firma → no relay abierto. No host-lock (compatible multi-CDN) | `proxy_sign_test.go`, `iptv_test.go` (403 invalid sig) |
+| **A4** | Quitadas las 4 cabeceras `Access-Control-Allow-Origin: *` del proxy | suite iptv verde |
+| **A5** | `observability.metrics_token` (+env) gate Bearer/?token= en /metrics; aviso si expuesto sin token | `metrics_auth_test.go` |
+
+**Notas:**
+- C1/A5 aceptan el token de métricas por `?token=` SOLO para `/metrics`
+  (scrapers que no ponen cabecera); el token de sesión sigue prohibido en
+  query.
+- A3 usa clave de firma aleatoria de vida de proceso: al reiniciar, los
+  players en vuelo re-piden el manifest (refresco de segundos en live).
+- Pendiente de Fase 1 (deploy): bloquear `/metrics` en nginx/Caddy/Traefik
+  como perímetro adicional a A5; binding a localhost durante setup (M3).
