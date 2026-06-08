@@ -17,9 +17,9 @@ import (
 	"hubplay/internal/federation"
 )
 
-// RequireParam extracts a chi URL parameter by name and writes a 400
-// response if it is empty. Returns the value; callers should return
-// immediately when the result is "".
+// RequireParam extrae un parámetro de URL de chi por nombre y escribe una
+// respuesta 400 si está vacío. Devuelve el valor; los callers deben retornar
+// inmediatamente cuando el resultado es "".
 func RequireParam(w http.ResponseWriter, r *http.Request, name string) string {
 	v := chi.URLParam(r, name)
 	if v == "" {
@@ -40,10 +40,10 @@ func RequirePeer(w http.ResponseWriter, r *http.Request) *federation.Peer {
 	return peer
 }
 
-// SetErrorRecorder installs the observability hook fired for every
-// rendered AppError. Thin wrapper around apperror.SetRecorder kept on
-// the handlers surface so router.go wiring (which already imports
-// handlers) doesn't need a second import.
+// SetErrorRecorder instala el hook de observability que se dispara por cada
+// AppError renderizado. Wrapper fino sobre apperror.SetRecorder mantenido en
+// la superficie de handlers para que el wiring de router.go (que ya importa
+// handlers) no necesite un segundo import.
 func SetErrorRecorder(fn func(code string)) {
 	apperror.SetRecorder(fn)
 }
@@ -71,10 +71,10 @@ func DecodeJSON(r *http.Request, v any) error {
 
 const PaginationMaxLimit = 500
 
-// parsePagination extracts offset and limit from query parameters with
-// validation: both must be non-negative, limit is capped at
-// paginationMaxLimit. Returns (offset, limit, ok). When ok is false
-// the response has already been written.
+// ParsePagination extrae offset y limit de los query parameters con
+// validación: ambos deben ser no-negativos, limit se acota a
+// PaginationMaxLimit. Devuelve (offset, limit, ok). Cuando ok es false
+// la respuesta ya ha sido escrita.
 func ParsePagination(w http.ResponseWriter, r *http.Request) (offset, limit int, ok bool) {
 	return ParsePaginationFromValues(w, r, r.URL.Query())
 }
@@ -94,17 +94,17 @@ func ParsePaginationFromValues(w http.ResponseWriter, r *http.Request, q url.Val
 	return offset, limit, true
 }
 
-// respondAppError writes an AppError as a JSON response. Thin wrapper
-// around apperror.Write so handler call sites stay terse and the
-// envelope/recorder/Retry-After logic lives in one place.
+// RespondAppError escribe un AppError como respuesta JSON. Wrapper fino
+// sobre apperror.Write para que los call sites de handlers queden concisos y
+// la lógica de envelope/recorder/Retry-After viva en un solo sitio.
 func RespondAppError(w http.ResponseWriter, ctx context.Context, appErr *domain.AppError) {
 	apperror.Write(w, ctx, appErr)
 }
 
-// respondError writes an ad-hoc error response. Prefer returning an AppError
-// from the service layer and letting handleServiceError render it; this helper
-// exists for handler-local input validation where building an AppError is
-// overkill.
+// RespondError escribe una respuesta de error ad-hoc. Preferir devolver un
+// AppError desde la capa de servicio y dejar que HandleServiceError lo
+// renderice; este helper existe para la validación de input local al handler
+// donde construir un AppError es excesivo.
 func RespondError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	RespondAppError(w, r.Context(), &domain.AppError{
 		Code:       code,
@@ -113,13 +113,13 @@ func RespondError(w http.ResponseWriter, r *http.Request, status int, code, mess
 	})
 }
 
-// handleServiceError maps a service-layer error to an HTTP response.
+// HandleServiceError mapea un error de la capa de servicio a una respuesta HTTP.
 //
-// Resolution order:
-//  1. *AppError → rendered directly (richest case).
-//  2. *ValidationError → 400 with per-field details.
-//  3. Sentinel errors (errors.Is) → mapped to the matching AppError.
-//  4. Anything else → 500 with INTERNAL_ERROR, cause logged for operators.
+// Orden de resolución:
+//  1. *AppError → renderizado directamente (caso más rico).
+//  2. *ValidationError → 400 con detalles por campo.
+//  3. Errores sentinel (errors.Is) → mapeados al AppError correspondiente.
+//  4. Cualquier otra cosa → 500 con INTERNAL_ERROR, causa logueada para operadores.
 func HandleServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	ctx := r.Context()
 
@@ -170,8 +170,8 @@ func HandleServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrValidation):
 		RespondAppError(w, ctx, domain.NewValidation(nil))
 	default:
-		// Internal error: log the cause (with request_id for correlation) but
-		// never expose it to the client.
+		// Error interno: loguear la causa (con request_id para correlación) pero
+		// nunca exponerla al cliente.
 		slog.Error("unhandled error",
 			"error", err,
 			"request_id", middleware.GetReqID(ctx),

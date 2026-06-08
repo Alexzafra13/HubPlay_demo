@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	authmodel "hubplay/internal/auth/model"
-	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/iptv"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
 	providermodel "hubplay/internal/provider/model"
 	"hubplay/internal/setup"
@@ -19,7 +19,7 @@ import (
 
 // ─── Auth service ───────────────────────────────────────────────────────────
 
-// AuthService defines auth operations needed by handlers.
+// AuthService define las operaciones de auth que necesitan los handlers.
 type AuthService interface {
 	Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error)
 	RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
@@ -39,7 +39,7 @@ type AuthService interface {
 
 // ─── User service ───────────────────────────────────────────────────────────
 
-// UserService defines user operations needed by handlers.
+// UserService define las operaciones de usuario que necesitan los handlers.
 type UserService interface {
 	GetByID(ctx context.Context, id string) (*authmodel.User, error)
 	List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
@@ -63,70 +63,71 @@ type UserService interface {
 	EnsureOwner(ctx context.Context, userID string) (bool, error)
 }
 
-// LibraryAccessService is the minimal surface the IPTV handler uses to gate
-// channel/EPG endpoints on per-library ACLs. Defined separately so tests can
-// fake just the one method without pulling in the fat LibraryService mock.
+// LibraryAccessService es la superficie mínima que el handler IPTV usa para
+// gatear los endpoints de canal/EPG según las ACLs por-biblioteca. Definida
+// aparte para que los tests puedan fakear sólo ese método sin arrastrar el
+// mock gordo de LibraryService.
 type LibraryAccessService interface {
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 }
 
 // ─── Stream manager ─────────────────────────────────────────────────────────
 
-// StreamManagerService defines streaming operations needed by handlers.
+// StreamManagerService define las operaciones de streaming que necesitan los handlers.
 type StreamManagerService interface {
 	StartSession(ctx context.Context, req stream.StartSessionRequest) (*stream.ManagedSession, error)
 	GetSession(key string) (*stream.ManagedSession, bool)
-	// RestartSessionAt re-spawns the ffmpeg behind an active session
-	// so it begins encoding at `segmentIndex * segmentDuration`.
-	// Used by the segment handler when the player asks for a
-	// far-future segment that the existing ffmpeg run hasn't reached.
+	// RestartSessionAt re-lanza el ffmpeg detrás de una sesión activa
+	// para que empiece a codificar en `segmentIndex * segmentDuration`.
+	// Lo usa el handler de segmentos cuando el player pide un segmento
+	// lejano en el futuro que el ffmpeg actual aún no ha alcanzado.
 	RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error
 	StopSession(key string)
-	// StopSessionsByItem stops every active session for (user, item)
-	// across qualities and audio configs. Used by the player-teardown
-	// DELETE so a single call frees the whole bag the player accreted
-	// during ABR + audio-track switches.
+	// StopSessionsByItem para toda sesión activa de (user, item) a
+	// través de calidades y configs de audio. Lo usa el DELETE de
+	// teardown del player para que una sola llamada libere todo el
+	// conjunto que el player acumuló durante los cambios de ABR + pista de audio.
 	StopSessionsByItem(userID, itemID string) int
 	ActiveSessions() int
 }
 
-// IPTVStreamProxyService defines IPTV proxy operations needed by handlers.
+// IPTVStreamProxyService define las operaciones de proxy IPTV que necesitan los handlers.
 type IPTVStreamProxyService interface {
 	ProxyStream(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error
 	ProxyURL(ctx context.Context, w http.ResponseWriter, channelID, rawURL string) error
 }
 
-// IPTVTransmuxer is the minimum surface the channel-stream handler
-// needs from the live MPEG-TS → HLS session manager. The handler
-// imports iptv anyway, but expressing the dependency as an interface
-// here lets tests inject a fake without spinning real ffmpeg
-// processes — and keeps the handler from accidentally reaching for
-// internal manager state.
+// IPTVTransmuxer es la superficie mínima que el handler de channel-stream
+// necesita del gestor de sesiones MPEG-TS → HLS en vivo. El handler
+// importa iptv de todos modos, pero expresar la dependencia como interface
+// aquí permite a los tests inyectar un fake sin levantar procesos ffmpeg
+// reales — y evita que el handler toque accidentalmente estado interno
+// del manager.
 type IPTVTransmuxer interface {
-	// GetOrStart returns a live session for the channel, spawning a
-	// new ffmpeg process if necessary. Blocks until the session has
-	// produced its first segment or the manager-side timeout elapses.
+	// GetOrStart devuelve una sesión en vivo para el canal, lanzando un
+	// nuevo proceso ffmpeg si es necesario. Bloquea hasta que la sesión
+	// haya producido su primer segmento o expire el timeout del manager.
 	GetOrStart(ctx context.Context, channelID, upstreamURL string) (*iptv.TransmuxSession, error)
-	// Touch records that a viewer is still consuming the session,
-	// preventing the idle reaper from killing it. Returns
-	// iptv.ErrSessionNotFound when the session has expired.
+	// Touch registra que un espectador sigue consumiendo la sesión,
+	// evitando que el reaper de inactividad la mate. Devuelve
+	// iptv.ErrSessionNotFound cuando la sesión ha expirado.
 	Touch(channelID string) (*iptv.TransmuxSession, error)
 }
 
 // ─── Repository interfaces ──────────────────────────────────────────────────
 
-// ItemRepository defines item data access needed by handlers.
+// ItemRepository define el acceso a datos de items que necesitan los handlers.
 type ItemRepository interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Item, error)
 	List(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
 }
 
-// MediaStreamRepository defines media stream data access needed by handlers.
+// MediaStreamRepository define el acceso a datos de media streams que necesitan los handlers.
 type MediaStreamRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
 }
 
-// ImageRepository defines image data access needed by handlers.
+// ImageRepository define el acceso a datos de imágenes que necesitan los handlers.
 type ImageRepository interface {
 	GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]librarymodel.PrimaryImageRef, error)
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
@@ -137,59 +138,61 @@ type ImageRepository interface {
 	DeleteByID(ctx context.Context, id string) error
 }
 
-// MetadataRepository defines metadata access needed by handlers.
+// MetadataRepository define el acceso a metadata que necesitan los handlers.
 type MetadataRepository interface {
 	GetByItemID(ctx context.Context, itemID string) (*librarymodel.Metadata, error)
 	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*librarymodel.Metadata, error)
 }
 
-// ExternalIDsRepository defines the per-item external-id lookup
-// needed by the items handler. Used to surface IMDb / TMDb / TVDB
-// links in the detail response so the client can render "Open in
-// IMDb" / "Open in TMDb" affordances without a second round-trip.
+// ExternalIDsRepository define el lookup de external-id por-item que
+// necesita el handler de items. Se usa para exponer los enlaces IMDb /
+// TMDb / TVDB en la respuesta de detalle, de modo que el cliente pueda
+// renderizar los affordances "Abrir en IMDb" / "Abrir en TMDb" sin un
+// segundo round-trip.
 type ExternalIDsRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
-	// GetItemIDByExternalID is the reverse lookup used by the
-	// recommendations endpoint to mark TMDb candidates that the user
-	// already has locally. Returns "" when no item carries that
-	// (provider, external_id) pairing.
+	// GetItemIDByExternalID es el lookup inverso que usa el endpoint de
+	// recomendaciones para marcar los candidatos TMDb que el usuario ya
+	// tiene en local. Devuelve "" cuando ningún item lleva ese par
+	// (provider, external_id).
 	GetItemIDByExternalID(ctx context.Context, provider, externalID string) (string, error)
 }
 
-// PeopleRepoForItems is the per-item people lookup used by the
-// items handler to fold cast/crew into the detail response.
+// PeopleRepoForItems es el lookup de personas por-item que usa el
+// handler de items para incorporar el cast/crew a la respuesta de detalle.
 type PeopleRepoForItems interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ItemPersonCredit, error)
 }
 
-// CollectionRepoForItems is the per-collection lookup used by the
-// items handler to surface the "Part of: X" affordance on a movie's
-// detail page. nil-safe at the handler level so deployments without
-// the collections feature wired keep returning the same shape.
+// CollectionRepoForItems es el lookup por-colección que usa el handler
+// de items para exponer el affordance "Parte de: X" en la página de
+// detalle de una película. nil-safe a nivel de handler para que los
+// deployments sin la feature de colecciones cableada sigan devolviendo
+// la misma shape.
 type CollectionRepoForItems interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Collection, error)
 }
 
-// ChapterRepository defines chapter data access needed by handlers.
-// Optional dep: when nil, the item-detail handler simply omits the
-// `chapters` field — older test environments and bare deployments
-// keep working without one wired.
+// ChapterRepository define el acceso a datos de capítulos que necesitan
+// los handlers. Dep opcional: cuando es nil, el handler de item-detail
+// simplemente omite el campo `chapters` — los entornos de test antiguos y
+// los deployments básicos siguen funcionando sin uno cableado.
 type ChapterRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Chapter, error)
 }
 
-// EpisodeSegmentRepository surfaces skip-intro / skip-credits markers
-// to the item handler so the playback page can render the floating
-// "Saltar intro" / "Saltar créditos" buttons without a second API
-// call. One row per (item_id, kind, source) — a single episode can
-// carry chapter-derived AND fingerprint-derived segments in the same
-// query result; the handler picks the highest-confidence row per
-// kind before serialising.
+// EpisodeSegmentRepository expone los marcadores skip-intro /
+// skip-credits al handler de items para que la página de reproducción
+// pueda renderizar los botones flotantes "Saltar intro" / "Saltar
+// créditos" sin una segunda llamada API. Una fila por (item_id, kind,
+// source) — un mismo episodio puede llevar segmentos derivados de
+// capítulos Y derivados de fingerprint en el mismo resultado de query;
+// el handler elige la fila de mayor confianza por kind antes de serializar.
 type EpisodeSegmentRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]librarymodel.EpisodeSegment, error)
 }
 
-// UserDataRepository defines user data access needed by handlers.
+// UserDataRepository define el acceso a user data que necesitan los handlers.
 type UserDataRepository interface {
 	Get(ctx context.Context, userID, itemID string) (*librarymodel.UserData, error)
 	GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*librarymodel.UserData, error)
@@ -204,16 +207,18 @@ type UserDataRepository interface {
 	ClearProgress(ctx context.Context, userID, itemID string) error
 }
 
-// ImageRefreshService runs the library-wide image refresh. Defined here so
-// handlers depend on an interface, not the concrete library.ImageRefresher —
-// keeps the handler layer's compile-time surface minimal and tests trivial.
+// ImageRefreshService corre el refresh de imágenes de toda la biblioteca.
+// Definida aquí para que los handlers dependan de una interface, no del
+// concreto library.ImageRefresher — mantiene mínima la superficie de
+// compile-time de la capa de handlers y triviales los tests.
 type ImageRefreshService interface {
 	RefreshForLibrary(ctx context.Context, libraryID string) (int, error)
 }
 
-// EventBusSubscriber defines the event bus subscription needed by handlers.
-// Subscribe returns an unsubscribe function; handlers MUST call it when the
-// subscriber goes away (e.g. SSE client disconnect) to avoid handler leaks.
+// EventBusSubscriber define la suscripción al event bus que necesitan los
+// handlers. Subscribe devuelve una función de unsubscribe; los handlers
+// DEBEN llamarla cuando el suscriptor desaparece (ej. desconexión de cliente
+// SSE) para evitar leaks de handlers.
 type EventBusSubscriber interface {
 	Subscribe(eventType event.Type, handler event.Handler) func()
 }
@@ -225,16 +230,16 @@ type UploadAuditLister interface {
 	ListByUser(ctx context.Context, userID string, limit int) ([]db.UploadAuditRow, error)
 }
 
-// EventBusPublisher is the publish-only side of the bus, used by
-// handlers that emit events but never consume them (progress handler
-// fans out user-scoped events to other clients of the same user).
+// EventBusPublisher es el lado publish-only del bus, usado por los
+// handlers que emiten eventos pero nunca los consumen (el handler de
+// progreso difunde eventos con scope de usuario a otros clientes del mismo usuario).
 type EventBusPublisher interface {
 	Publish(e event.Event)
 }
 
 // ─── Setup service ──────────────────────────────────────────────────────────
 
-// SetupService defines setup wizard operations needed by handlers.
+// SetupService define las operaciones del wizard de setup que necesitan los handlers.
 type SetupService interface {
 	NeedsSetup(ctx context.Context) bool
 	BrowseDirectories(path string) (*setup.BrowseResult, error)
@@ -244,37 +249,37 @@ type SetupService interface {
 
 // ─── Provider interfaces ────────────────────────────────────────────────────
 
-// ProviderManager defines metadata/image/subtitle provider operations.
+// ProviderManager define las operaciones de provider de metadata/imágenes/subtítulos.
 type ProviderManager interface {
 	SearchMetadata(ctx context.Context, query provider.SearchQuery) ([]provider.SearchResult, error)
 	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
 	FetchImages(ctx context.Context, externalIDs map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 	SearchSubtitles(ctx context.Context, query provider.SubtitleQuery) ([]provider.SubtitleResult, error)
 	DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error)
-	// FetchRecommendations powers the "more like this" rail on the
-	// detail page. Implementations return (nil, nil) when no provider
-	// can resolve recs for the given external id — handlers render
-	// an empty rail rather than a 5xx for that case.
+	// FetchRecommendations alimenta el rail "más como esto" en la página
+	// de detalle. Las implementaciones devuelven (nil, nil) cuando ningún
+	// provider puede resolver recomendaciones para el external id dado —
+	// los handlers renderizan un rail vacío en vez de un 5xx en ese caso.
 	FetchRecommendations(ctx context.Context, externalID string, itemType provider.ItemType, limit int) ([]provider.RecommendationResult, error)
 }
 
-// ProviderRepository defines provider config data access.
+// ProviderRepository define el acceso a datos de config de providers.
 type ProviderRepository interface {
 	ListAll(ctx context.Context) ([]*providermodel.ProviderConfig, error)
 	GetByName(ctx context.Context, name string) (*providermodel.ProviderConfig, error)
 	Upsert(ctx context.Context, p *providermodel.ProviderConfig) error
 }
 
-// LibraryRepository defines library data access for handlers that need direct repo access.
+// LibraryRepository define el acceso a datos de biblioteca para los handlers que necesitan acceso directo al repo.
 type LibraryRepository interface {
 	Create(ctx context.Context, lib *librarymodel.Library) error
-	// ListForUser returns every library the given user has explicit
-	// access to. Used by handlers that need to materialise the
-	// library-access set (e.g. continue-watching filter).
+	// ListForUser devuelve toda biblioteca a la que el usuario dado tiene
+	// acceso explícito. Lo usan los handlers que necesitan materializar el
+	// conjunto de library-access (ej. el filtro de continue-watching).
 	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
 }
 
-// ExternalIDRepository defines external ID data access.
+// ExternalIDRepository define el acceso a datos de external IDs.
 type ExternalIDRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
 }

@@ -6,33 +6,33 @@ import (
 	"time"
 )
 
-// Defaults sized for a self-hosted server: a household of ~10 users
-// with 2-3 tabs each fits under 100 global, and a single user opening
-// more than 5 concurrent /me/events is almost certainly a runaway
-// reconnect loop rather than legitimate use.
+// Defaults dimensionados para un servidor self-hosted: un hogar de ~10
+// usuarios con 2-3 pestañas cada uno cabe bajo 100 global, y un solo
+// usuario abriendo más de 5 /me/events concurrentes es casi con seguridad
+// un bucle de reconexión descontrolado y no uso legítimo.
 const (
 	DefaultSSEGlobalMax  = 100
 	DefaultSSEPerUserMax = 5
 )
 
-// ErrSSEGlobalCap and ErrSSEPerUserCap let callers distinguish "the
-// server is saturated" from "this user is hammering us"; today both
-// surface as the same 503 to the client, but the distinction matters
-// for logs / future per-user telemetry.
+// ErrSSEGlobalCap y ErrSSEPerUserCap permiten a los callers distinguir "el
+// servidor está saturado" de "este usuario nos está martilleando"; hoy
+// ambos se exponen como el mismo 503 al cliente, pero la distinción importa
+// para logs / futura telemetría por-usuario.
 var (
 	ErrSSEGlobalCap  = errors.New("sse: global connection cap reached")
 	ErrSSEPerUserCap = errors.New("sse: per-user connection cap reached")
 )
 
-// SSELimiter bounds concurrent Server-Sent Events connections. One
-// instance is shared by every SSE handler (events, me_events,
-// admin_logs) so the global cap really is global — counted across
-// surfaces, not per-handler.
+// SSELimiter acota las conexiones concurrentes de Server-Sent Events. Una
+// instancia es compartida por cada handler SSE (events, me_events,
+// admin_logs) para que el cap global sea de verdad global — contado a
+// través de superficies, no por-handler.
 //
-// Each SSE connection also subscribes 1-20 callbacks to the event
-// bus and holds a goroutine + buffered channel; without a cap, a
-// malicious or buggy client can open thousands and exhaust both
-// memory and bus dispatch latency.
+// Cada conexión SSE además suscribe 1-20 callbacks al event bus y retiene
+// una goroutine + canal con buffer; sin un cap, un cliente malicioso o con
+// bug puede abrir miles y agotar tanto la memoria como la latencia de
+// dispatch del bus.
 type SSELimiter struct {
 	globalMax  int
 	perUserMax int
@@ -62,12 +62,12 @@ func NewSSELimiter(globalMax, perUserMax int) *SSELimiter {
 	}
 }
 
-// Acquire reserves one connection slot for userID. The returned
-// release func is idempotent — callers can defer it without worrying
-// about double-decrement. An empty userID counts toward the global
-// cap only (no per-user tracking); current callers always supply
-// claims.UserID, but the carve-out keeps the API usable for any
-// future unauthenticated SSE surface.
+// Acquire reserva un slot de conexión para userID. La función release
+// devuelta es idempotente — los callers pueden hacerle defer sin
+// preocuparse de un doble decremento. Un userID vacío cuenta sólo hacia el
+// cap global (sin tracking por-usuario); los callers actuales siempre
+// aportan claims.UserID, pero la excepción mantiene la API usable para
+// cualquier futura superficie SSE no autenticada.
 func (l *SSELimiter) Acquire(userID string) (release func(), err error) {
 	l.mu.Lock()
 	if l.global >= l.globalMax {
@@ -108,9 +108,9 @@ func (l *SSELimiter) notifyChange() {
 	}
 }
 
-// Snapshot returns the current global count and a copy of the
-// per-user map. Intended for tests and future observability — not on
-// any hot path, so the map copy cost is fine.
+// Snapshot devuelve el contador global actual y una copia del mapa
+// por-usuario. Pensado para tests y futura observability — no está en
+// ningún hot path, así que el coste de copiar el mapa es aceptable.
 func (l *SSELimiter) Snapshot() (global int, perUser map[string]int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
