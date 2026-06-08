@@ -306,7 +306,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
 | Fase | Tema | Items | Coste |
 |---|---|---|---|
 | **0 ✅** | **Bloqueantes de exposición** | C1, C2, A1, A2, A3, A4, A5 | hecho |
-| **1** | **Robustez de despliegue** | A6, A7, A8, M5, M6, M7, M9, M10, M11 | 1 sesión |
+| **1 ✅** | **Robustez de despliegue** | A6, A7, A8, M9, M10, M11, A5-perímetro | hecho (M5/M7 diferidos, ver nota) |
 | **2** | **Supply-chain / release** | A9, A10, M12, M13, M14, M15, M16, M17 | 1 sesión |
 | **3** | **Observabilidad & config** | M18, M19, M20, M21, M22, M23, M24, B6 | 1 sesión |
 | **4** | **Frontend hardening** | A11, A12, M2(ui), B10-B14 | 1 sesión |
@@ -345,3 +345,37 @@ logging, config).
   players en vuelo re-piden el manifest (refresco de segundos en live).
 - Pendiente de Fase 1 (deploy): bloquear `/metrics` en nginx/Caddy/Traefik
   como perímetro adicional a A5; binding a localhost durante setup (M3).
+
+---
+
+## Fase 1 — implementación (2026-06-08)
+
+Rama `claude/project-review-PO25J`. Enfoque **plug-and-play** (estilo
+Plex): defaults seguros que funcionan out-of-the-box, cero pérdida de
+datos, sin pasos manuales. 3 commits, con tests; build/vet/`-race` verdes.
+
+| Item | Qué se hizo | Test |
+|---|---|---|
+| **A7** | `tini` como PID 1 en ambos stages → reapea ffmpeg/ffprobe huérfanos + forward SIGTERM. `init:true` en compose (defensa extra) | — (Docker) |
+| **A8** | `stop_grace_period: 40s` en los 2 compose (la app drena en 30s) | — (compose) |
+| **M10** | `SaveDatabaseConfig` ancla el SQLite vacío/relativo bajo el dir del config (volumen `/config`) → no pérdida de datos al recrear contenedor, sin depender del input del frontend | `service_test.go` |
+| **A6** | nginx: bloque SSE dedicado (`proxy_buffering off`) para events/me-events/uploads-events/device-events/admin-logs | — (nginx) |
+| **M9** | nginx: `location /` body acotado a 1g; subidas tus por bloque `/api/v1/uploads/` dedicado (sin tope, sin rate-limit) | — (nginx) |
+| **A5-perímetro** | `deny`/`403` de `/metrics` en nginx y Caddy (complementa el token del server, Fase 0) | — |
+| **M11** | Backup SQLite automático antes de migrar (`VACUUM INTO` a `<dir>/backups/`, keep 3, best-effort, solo si hay pending + datos). Red de seguridad para migraciones up-only | `build_database_backup_test.go` + integración real |
+
+**Diferidos deliberadamente (incompatibles con plug-and-play si se fuerzan):**
+- **M5** (password Postgres por defecto): Postgres es **opt-in/avanzado**
+  (SQLite es el default y el puerto no se expone). Auto-generar un
+  password compartido en compose puro es frágil; se deja documentado. Si
+  el operador activa el toggle PG, debería poner su propio password.
+- **M7** (límites de recursos mem/cpu): **NO hardcodeados** — dependen del
+  hardware (un Raspberry Pi vs un servidor potente). Hardcodear límites
+  rompería transcoding en hardware capaz o causaría OOM en uno pequeño.
+  Mejor sin límite (la app usa lo que necesita) o que el operador los
+  ajuste. Documentado como decisión.
+
+**Pendiente Fase 2+ (no plug-and-play-bloqueante):** supply-chain
+(SHA-pin actions, provenance/firma, checksum FFmpeg), observabilidad
+(client IP en logs, panics en métricas), frontend (error boundaries,
+virtualización), gobernanza (README/SECURITY/CODEOWNERS).
