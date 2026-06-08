@@ -637,7 +637,6 @@ func (p *StreamProxy) serveRewrittenPlaylistBody(w http.ResponseWriter, body []b
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, err := w.Write(rewritten)
 	return err
 }
@@ -722,7 +721,6 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 		// Not a real playlist, serve raw
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, err = w.Write(body)
 		return err
 	}
@@ -743,7 +741,6 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 		// Not a playlist — serve peeked data + rest
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if _, err := w.Write(peek); err != nil {
 			return nil
 		}
@@ -754,7 +751,6 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 	// Raw segment — pipe through
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-cache, no-store")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		w.Header().Set("Content-Length", cl)
 	}
