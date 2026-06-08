@@ -36,6 +36,19 @@ mkdir -p "$OUTDIR"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+# dl: descarga con reintentos + backoff exponencial. Los assets viven en
+# el CDN de releases de GitHub (BtbN) y evermeet.cx, que devuelven 5xx
+# transitorios (504 gateway timeout, 503) bajo carga sin que la red local
+# falle. `curl --retry` ya cubre los códigos transitorios (408/429/5xx) y
+# los timeouts; `--retry-delay 2` arranca el backoff y curl lo escala
+# solo. `--retry-connrefused` cubre el caso de un edge node reiniciando.
+# Sin esto, un único 504 aborta todo el job de release.
+dl() {
+	local url="$1" out="$2"
+	curl -fSL --no-progress-meter --retry 5 --retry-delay 2 \
+		--retry-connrefused --connect-timeout 30 "$url" -o "$out"
+}
+
 # Releases de BtbN/FFmpeg-Builds. La carpeta `latest` (tag explícito,
 # no alias) tiene los assets con nombres canónicos `ffmpeg-master-latest-*`
 # que el script consume. **No** usar `releases/latest/download/X` —
@@ -52,7 +65,7 @@ case "$GOOS-$GOARCH" in
 linux-amd64)
 	url="${BTBN_BASE}/ffmpeg-master-latest-linux64-lgpl.tar.xz"
 	echo "→ downloading $url"
-	curl -fsSL "$url" -o "$tmpdir/ff.tar.xz"
+	dl "$url" "$tmpdir/ff.tar.xz"
 	tar -xJf "$tmpdir/ff.tar.xz" -C "$tmpdir"
 	# Estructura: ffmpeg-N-...-linux64-lgpl/bin/{ffmpeg,ffprobe}
 	dir="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
@@ -63,7 +76,7 @@ linux-amd64)
 linux-arm64)
 	url="${BTBN_BASE}/ffmpeg-master-latest-linuxarm64-lgpl.tar.xz"
 	echo "→ downloading $url"
-	curl -fsSL "$url" -o "$tmpdir/ff.tar.xz"
+	dl "$url" "$tmpdir/ff.tar.xz"
 	tar -xJf "$tmpdir/ff.tar.xz" -C "$tmpdir"
 	dir="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
 	cp "$dir/bin/ffmpeg" "$OUTDIR/ffmpeg"
@@ -73,7 +86,7 @@ linux-arm64)
 windows-amd64)
 	url="${BTBN_BASE}/ffmpeg-master-latest-win64-lgpl.zip"
 	echo "→ downloading $url"
-	curl -fsSL "$url" -o "$tmpdir/ff.zip"
+	dl "$url" "$tmpdir/ff.zip"
 	unzip -q "$tmpdir/ff.zip" -d "$tmpdir"
 	dir="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
 	cp "$dir/bin/ffmpeg.exe" "$OUTDIR/ffmpeg.exe"
@@ -82,8 +95,8 @@ windows-amd64)
 darwin-amd64 | darwin-arm64)
 	# evermeet sirve binarios universales en su zip individual.
 	echo "→ downloading evermeet ffmpeg + ffprobe (universal)"
-	curl -fsSL "https://evermeet.cx/ffmpeg/getrelease/zip" -o "$tmpdir/ffmpeg.zip"
-	curl -fsSL "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o "$tmpdir/ffprobe.zip"
+	dl "https://evermeet.cx/ffmpeg/getrelease/zip" "$tmpdir/ffmpeg.zip"
+	dl "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" "$tmpdir/ffprobe.zip"
 	unzip -q "$tmpdir/ffmpeg.zip" -d "$tmpdir/ffmpeg"
 	unzip -q "$tmpdir/ffprobe.zip" -d "$tmpdir/ffprobe"
 	cp "$tmpdir/ffmpeg/ffmpeg" "$OUTDIR/ffmpeg"
