@@ -7,7 +7,7 @@
 
 ## Stack
 
-**Backend (Go 1.24.7)**
+**Backend (Go 1.25.11)**
 - Router: `chi/v5` + `chi/cors`
 - DB: SQLite (`modernc.org/sqlite`, pure-Go, sin CGO)
 - Queries: `sqlc` (generated) · Migraciones: `goose`
