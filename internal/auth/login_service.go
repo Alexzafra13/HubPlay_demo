@@ -56,10 +56,23 @@ func newLoginService(
 	}
 }
 
-// Login verifica credenciales, gatea por rate-limit (username + IP)
-// y mintea un session row vía el `sessionIssuer`.
+// Login verifica credenciales, gatea por rate-limit y mintea un session
+// row vía el `sessionIssuer`.
+//
+// El rate-limit usa dos keys, NO el username a secas:
+//   - "ip:<ip>"           frena fuerza-bruta desde una IP concreta.
+//   - "user:<username>@<ip>"  frena adivinanza de password contra UN
+//                          usuario desde UNA IP.
+//
+// Antes la key era el `username` global, lo que permitía un DoS de
+// cuenta: un atacante que conociera un username podía fallar logins a
+// propósito para bloquear al usuario legítimo (lockout). Con la tupla
+// (username, ip) el atacante solo se bloquea a sí mismo desde su IP; la
+// víctima, que entra desde otra IP, no se ve afectada.
 func (s *LoginService) Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*AuthToken, error) {
-	if s.rateLimiter.isLocked(username) || s.rateLimiter.isLocked("ip:"+ip) {
+	userKey := "user:" + username + "@" + ip
+	ipKey := "ip:" + ip
+	if s.rateLimiter.isLocked(userKey) || s.rateLimiter.isLocked(ipKey) {
 		s.logger.Warn("login rate limited", "username", username, "ip", ip)
 		return nil, fmt.Errorf("too many failed attempts, try again later: %w", domain.ErrForbidden)
 	}
@@ -67,8 +80,8 @@ func (s *LoginService) Login(ctx context.Context, username, password, deviceName
 	user, err := s.users.GetByUsername(ctx, username)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			s.rateLimiter.recordFailure(username)
-			s.rateLimiter.recordFailure("ip:" + ip)
+			s.rateLimiter.recordFailure(userKey)
+			s.rateLimiter.recordFailure(ipKey)
 			return nil, fmt.Errorf("login: %w", domain.ErrInvalidPassword)
 		}
 		return nil, fmt.Errorf("login lookup: %w", err)
@@ -89,14 +102,14 @@ func (s *LoginService) Login(ctx context.Context, username, password, deviceName
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		s.rateLimiter.recordFailure(username)
-		s.rateLimiter.recordFailure("ip:" + ip)
+		s.rateLimiter.recordFailure(userKey)
+		s.rateLimiter.recordFailure(ipKey)
 		s.logger.Warn("failed login attempt", "username", username, "ip", ip)
 		return nil, fmt.Errorf("login: %w", domain.ErrInvalidPassword)
 	}
 
-	s.rateLimiter.recordSuccess(username)
-	s.rateLimiter.recordSuccess("ip:" + ip)
+	s.rateLimiter.recordSuccess(userKey)
+	s.rateLimiter.recordSuccess(ipKey)
 
 	token, err := s.issuer.issue(ctx, user, deviceName, deviceID, ip)
 	if err != nil {

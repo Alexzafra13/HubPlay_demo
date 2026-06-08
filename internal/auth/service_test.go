@@ -298,6 +298,40 @@ func newTestAuthServiceWithRL(t *testing.T, maxFails int) (*auth.Service, *db.Us
 	return svc, userRepo, sessionRepo
 }
 
+// TestService_Login_LockoutIsPerIP_NotAccountWide fija el fix del olor
+// A2 (account-lockout DoS): un atacante que falla logins contra el
+// username de la víctima desde SU IP se bloquea a sí mismo, pero la
+// víctima — entrando desde otra IP — NO queda bloqueada. Antes la key de
+// rate-limit era el username global, así que cualquiera que conociera un
+// username podía dejar al usuario legítimo fuera a voluntad.
+func TestService_Login_LockoutIsPerIP_NotAccountWide(t *testing.T) {
+	const maxFails = 3
+	svc, _, _ := newTestAuthServiceWithRL(t, maxFails)
+	registerTestUser(t, svc)
+
+	const attackerIP = "198.51.100.9"
+	const victimIP = "10.0.0.1"
+
+	// El atacante agota los intentos contra la cuenta de la víctima.
+	for i := 0; i < maxFails; i++ {
+		if _, err := svc.Login(context.Background(), "testuser", "wrong", "Bot", "dev-x", attackerIP); err == nil {
+			t.Fatalf("attempt %d: wrong password debería fallar", i)
+		}
+	}
+
+	// Desde la IP del atacante queda bloqueado incluso con la password
+	// correcta.
+	if _, err := svc.Login(context.Background(), "testuser", "password123", "Bot", "dev-x", attackerIP); !errors.Is(err, domain.ErrForbidden) {
+		t.Errorf("atacante debería estar bloqueado en su IP, got %v", err)
+	}
+
+	// La víctima, desde otra IP, sigue pudiendo entrar — sin esto el fix
+	// no sirve de nada (el bug era exactamente este lockout global).
+	if _, err := svc.Login(context.Background(), "testuser", "password123", "Phone", "dev-v", victimIP); err != nil {
+		t.Errorf("la víctima desde otra IP NO debería estar bloqueada, got %v", err)
+	}
+}
+
 // TestService_RefreshToken_RateLimited asserts that a refresh-token
 // bruteforce is locked out after maxFails. Without this gate, a leaked
 // or guessable refresh token can be hammered indefinitely — a parallel

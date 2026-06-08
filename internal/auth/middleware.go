@@ -68,13 +68,16 @@ func extractToken(r *http.Request) string {
 			return strings.TrimPrefix(auth, "Bearer ")
 		}
 	}
-	// 2. HTTP-only cookie (secure web clients)
+	// 2. Cookie HttpOnly (clientes web). EventSource/SSE del navegador
+	//    envían la cookie con `withCredentials`, así que no hace falta el
+	//    token en query.
 	if c, err := r.Cookie("hubplay_access"); err == nil && c.Value != "" {
 		return c.Value
 	}
-	// 3. Query param (for WebSocket/SSE)
-	if token := r.URL.Query().Get("token"); token != "" {
-		return token
-	}
+	// Nota: NO se acepta el token por query param (`?token=`). Las query
+	// strings se filtran a los logs del reverse proxy, al RequestLogger
+	// propio, al historial del navegador y a cabeceras Referer — un token
+	// filtrado es una sesión completa. Los SSE web usan la cookie; los
+	// clientes nativos (TV/CLI) pueden poner la cabecera Bearer.
 	return ""
 }
