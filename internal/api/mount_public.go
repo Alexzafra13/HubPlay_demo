@@ -45,7 +45,8 @@ func mountAuthPublic(
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)
 		// Setup — crea el primer admin (sólo cuando no hay usuarios todavía).
-		r.Post("/auth/setup", authHandler.Setup)
+		// Solo desde la red local (M3): cierra el race-to-setup desde internet.
+		r.With(RequirePrivateClient).Post("/auth/setup", authHandler.Setup)
 
 		if deviceHandler != nil {
 			r.Post("/auth/device/start", deviceHandler.Start)
@@ -80,17 +81,27 @@ func mountSetupWizard(r chi.Router, deps Dependencies) {
 		Logger:    deps.Infra.Logger,
 	})
 
+	// /setup/status queda accesible siempre: la SPA lo consulta para saber
+	// si toca el wizard o el login (también desde fuera, post-setup).
 	r.Get("/setup/status", setupHandler.Status)
-	r.Get("/setup/capabilities", setupHandler.Capabilities)
-	r.Get("/setup/browse", setupHandler.Browse)
-	r.Post("/setup/libraries", setupHandler.CreateLibraries)
-	r.Post("/setup/settings", setupHandler.UpdateSettings)
-	r.Post("/setup/complete", setupHandler.Complete)
-	// Step 0 — selector de driver de DB. El operador escoge SQLite
-	// o Postgres antes de que aterricen datos, así el resto del
-	// wizard crea filas en el backend elegido y no en el default
-	// del YAML.
-	r.Get("/setup/db/profiles", setupHandler.DatabaseProfiles)
-	r.Post("/setup/db/test", setupHandler.TestDatabase)
-	r.Post("/setup/db", setupHandler.SaveDatabase)
+
+	// El resto del wizard solo desde la red local (M3): incluye navegar el
+	// filesystem del host (/setup/browse) y crear libs/ajustes/DB. Post-setup
+	// estos endpoints ya devuelven 404 (validan wizard activo), así que la
+	// restricción solo muerde durante la ventana inicial.
+	r.Group(func(r chi.Router) {
+		r.Use(RequirePrivateClient)
+		r.Get("/setup/capabilities", setupHandler.Capabilities)
+		r.Get("/setup/browse", setupHandler.Browse)
+		r.Post("/setup/libraries", setupHandler.CreateLibraries)
+		r.Post("/setup/settings", setupHandler.UpdateSettings)
+		r.Post("/setup/complete", setupHandler.Complete)
+		// Step 0 — selector de driver de DB. El operador escoge SQLite
+		// o Postgres antes de que aterricen datos, así el resto del
+		// wizard crea filas en el backend elegido y no en el default
+		// del YAML.
+		r.Get("/setup/db/profiles", setupHandler.DatabaseProfiles)
+		r.Post("/setup/db/test", setupHandler.TestDatabase)
+		r.Post("/setup/db", setupHandler.SaveDatabase)
+	})
 }
