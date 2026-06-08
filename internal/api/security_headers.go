@@ -70,6 +70,13 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 			h.Set("X-Frame-Options", "DENY")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("Content-Security-Policy", csp)
+			// Permissions-Policy: deniega features sensibles que un server
+			// de media nunca usa (M8). Deliberadamente NO se tocan
+			// fullscreen/autoplay/picture-in-picture — los necesita el
+			// reproductor y los tráileres de YouTube/Vimeo — para no
+			// romper la UX. Se pone aquí (no en cada proxy) para que valga
+			// en todos los despliegues.
+			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()")
 			// Cross-origin isolation: deny embedding our docs as resources
 			// from another origin. Conservative default — flip to
 			// 'cross-origin' if you ever need to expose poster URLs to a
