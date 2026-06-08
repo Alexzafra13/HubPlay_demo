@@ -45,9 +45,22 @@ parcial — la imagen por defecto ya pasa `--config /config/hubplay.yaml`,
 así que la DB ya caía en el volumen. Aun así se añadió la defensa en
 `SaveDatabaseConfig`.
 
+### Bloque 1 — seguridad media (post-Fase 0/1)
+| Item | Fix |
+|---|---|
+| M4 | `trustForwardedProto` borra `X-Forwarded-Proto` de peers no declarados en `trusted_proxies` → no se puede falsear https. `forwarded_proto_test.go` |
+| M2 | `EnforcePasswordChange` bloquea mutaciones (403) de usuarios con `password_change_required` salvo `/me/password` + `/auth/logout`; mira el flag en DB (desbloqueo inmediato). `password_change_test.go` |
+| M8 | `Permissions-Policy` en la app (deniega camera/mic/geo/payment/usb; NO toca fullscreen/autoplay/PiP). `security_headers_test.go` |
+| M3 | `RequirePrivateClient`: `/auth/setup` y `/setup/*` (salvo `/setup/status`) solo desde IP privada/loopback → cierra race-to-setup + browse del FS desde internet, sin romper LAN. `setup_network_test.go` |
+| B5 | `ReadHeaderTimeout: 10s` en el `http.Server` (slowloris) |
+| M1 | Verificado: el double-submit CSRF ya exige header en mutaciones cookie-auth; Bearer no es CSRF-vulnerable. Sin cambio. |
+
 **Pendiente (no bloquea plug-and-play):** Fase 2 supply-chain (SHA-pin
-de actions, provenance/firma, checksum FFmpeg), Fase 3 observabilidad,
-Fase 4 frontend (error boundaries, virtualización), Fase 5 gobernanza.
+de actions, provenance/firma, checksum FFmpeg), Fase 3 observabilidad
+(M18-M24, p.ej. JWT auto-gen no persistido), Fase 4 frontend (error
+boundaries por ruta, virtualización de grids), Fase 5 gobernanza
+(README/SECURITY/CODEOWNERS). Bajos restantes: B2 (DNS-rebind TOCTOU),
+B3 (refresh TTL 30d).
 
 ---
 
