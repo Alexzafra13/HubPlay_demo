@@ -29,6 +29,10 @@ func openDatabase(cfg databaseConfig, logger *slog.Logger) (*sql.DB, *db.Reposit
 		return nil, nil, fmt.Errorf("opening database: %w", err)
 	}
 
+	// Red de seguridad: snapshot SQLite antes de aplicar migraciones
+	// pendientes (up-only, sin rollback). Best-effort, no bloquea el boot.
+	backupBeforeMigrate(database, cfg, hubplay.Migrations(cfg.Driver), logger)
+
 	if err := db.Migrate(cfg.Driver, database, hubplay.Migrations(cfg.Driver), logger); err != nil {
 		database.Close() //nolint:errcheck
 		return nil, nil, fmt.Errorf("running migrations: %w", err)
