@@ -6,6 +6,42 @@
 
 ---
 
+## 🌐 Sesión 2026-06-08 (parte 2) — F15-5 integration tests library
+
+Rama: `claude/project-review-PO25J`.
+
+### F15-5 — integration tests con DB real para LibraryHandler
+
+Cerrado el último item de severidad media del audit 2026-05-14. Nuevo
+fichero `internal/api/handlers/library/library_integration_test.go`
+(~9 tests) que cablea el **`library.Service` real sobre repos sqlc
+reales** (`testutil.NewTestRepos`) y dirige requests HTTP por chi.
+A diferencia de `library_test.go` (fakes), ejercita el camino completo
+**Handler → Service → Repository → DB** — cubre lo que los fakes no
+pueden:
+
+| Test | Qué pina (con DB real) |
+|---|---|
+| `CreateThenGet_Persists` | round-trip de persistencia + `item_count` |
+| `Get_NotFound_404` | 404 desde el repo real (sentinel) |
+| `List_AdminSeesAll_UserScopedByAccess` | ACL `ListForUser` (INNER JOIN `library_access` + `GrantAccess`) |
+| `Update_Persists` / `Delete_RemovesFromDB` | mutaciones reflejadas en la DB |
+| `Items_KeysetPagination` | paginación keyset (cursor, `next_cursor`, total) |
+| `Items_ContentRatingCap` | cap por content-rating materializado en SQL (`IN (...)`, NULL excluido) |
+| `LatestItems_NewestFirst` | orden `added_at DESC` |
+| `Genres_CountsFromItemValues` | vocabulario desde `item_value_map` |
+
+Detalles: items sembrados vía `repos.Items.Create` (top-level,
+`IsAvailable: true`); libs creadas en `ScanMode: "manual"` para no
+disparar auto-scan; `svc.Shutdown` en `t.Cleanup` (LIFO antes del
+teardown de DB). El cap usa un usuario real con `max_content_rating`
+fijado vía `testutil.Exec`. Dual-backend listo (sqlite + postgres en CI).
+
+**Verificado:** paquete verde con `-race` (19.6s), `go vet` limpio,
+gofmt limpio. 0 cambios de producción — sólo tests.
+
+---
+
 ## 🌐 Sesión 2026-06-08 — TT-8 root + limpieza docs
 
 Rama: `claude/project-review-EOwig`.
@@ -381,7 +417,7 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 
 | # | Tarea | Coste | Severidad |
 |---|---|---|---|
-| **1** | **F15-5** — Integration tests con DB real para handlers de library. Con micro-interfaces cerradas (NN ✅), los fakes son de 2-7 métodos en vez de 25. | ~4-6 h | Media |
+| ~~1~~ | ~~**F15-5** — Integration tests con DB real para handlers de library.~~ ✅ **cerrado** (2026-06-08 parte 2) | — | — |
 | **2** | **TT-8 (resto)** — traducir comentarios en inglés en los **sub-paquetes** de `handlers/` (admin, auth, federation, iptv, me, media, system). El root compartido ya está 100% en español (sesión 2026-06-08). Hacer incrementalmente al tocar cada fichero. | Bajo, incremental | Baja (cosmético) |
 | **3** | **F15-10/11/12** — Polish: fakes compartidos, naming, concurrency tests. | Baja | Baja |
 | **4** | **Distribución avanzada** — auto-update, TLS LAN, macOS notarized, AppImage. | Sesión grande | Producto |
@@ -425,7 +461,7 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 | H | `*db.X` directos en `Dependencies` | Interfaces broad (#419) |
 | LL | Transcoder + Manager con doble session tracking | Transcoder stateless ([#468](https://github.com/Alexzafra13/HubPlay_demo/pull/468)) |
 
-### Olores medios (núcleo cerrado, F15-5 pendiente)
+### Olores medios (todos cerrados ✅)
 
 | Olor | Estado |
 |---|---|
@@ -437,7 +473,7 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 | F15-2 | ✅ Clock-injected en scanner/notification/upload + db repos via package seam |
 | F15-3 | ✅ waitForCount ya migrado a notify-channel en F15-1 |
 | F15-4 | ✅ Sleep legítimo documentado, goleak cubre regresión real |
-| F15-5 | ⚠️ **Pendiente** (integration tests library, sesión propia) |
+| F15-5 | ✅ Integration tests con DB real para LibraryHandler (2026-06-08 parte 2) |
 | F15-6 | ✅ 6 tests nuevos en library_test.go ([#471](https://github.com/Alexzafra13/HubPlay_demo/pull/471)) |
 | F15-7 | ✅ 314 → 375 t.Parallel (+61) |
 | F15-8 | ✅ `t.TempDir()` adoptado |
