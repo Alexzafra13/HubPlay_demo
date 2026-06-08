@@ -95,6 +95,9 @@ type StreamManagerService interface {
 type IPTVStreamProxyService interface {
 	ProxyStream(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error
 	ProxyURL(ctx context.Context, w http.ResponseWriter, channelID, rawURL string) error
+	// VerifyProxySig valida que (canal, URL upstream) fueron firmados por el
+	// propio proxy al reescribir la playlist — cierra el relay abierto (A3).
+	VerifyProxySig(channelID, rawURL, sig string) bool
 }
 
 // IPTVTransmuxer es la superficie mínima que el handler de channel-stream

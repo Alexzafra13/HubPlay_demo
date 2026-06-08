@@ -3,6 +3,11 @@ package iptv
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +48,16 @@ type StreamProxy struct {
 	client   *http.Client
 	reporter ChannelHealthReporter
 	breaker  *channelBreaker
+
+	// signKey firma las URLs upstream que el proxy reescribe en las
+	// playlists HLS. ProxyURL (vía el handler) solo acepta URLs que el
+	// propio proxy emitió, cerrando el olor A3 (relay HTTP abierto): sin
+	// firma, un usuario autenticado con acceso a UN canal podía hacer que
+	// el server fetcheara cualquier URL pública (abuso de relay / bypass
+	// de geo-bloqueo con la IP del server). Clave aleatoria de vida de
+	// proceso: las URLs de segmento son efímeras (el player re-pide el
+	// manifest en segundos), así que rotarla al reiniciar es inocuo.
+	signKey []byte
 }
 
 // SetHealthReporter wires the reporter after construction so main.go
@@ -92,10 +107,18 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 		MaxIdleConnsPerHost:   4,
 		ForceAttemptHTTP2:     true,
 	}
+	signKey := make([]byte, 32)
+	if _, err := rand.Read(signKey); err != nil {
+		// crypto/rand fallando es catastrófico y no recuperable; sin clave
+		// no podemos firmar URLs y el proxy sería un relay abierto. Mejor
+		// caer ruidosamente en el arranque que servir inseguro.
+		panic("iptv: no se pudo generar la clave de firma del proxy: " + err.Error())
+	}
 	return &StreamProxy{
 		relays:  make(map[string]*relay),
 		logger:  logger.With("module", "stream-proxy"),
 		breaker: newChannelBreaker(clock.New(), logger),
+		signKey: signKey,
 		client: &http.Client{
 			Transport: transport,
 			// No client-level timeout — it also clocks the body read, which
@@ -417,9 +440,32 @@ func IsHLSURL(streamURL string) bool { return isHLSURL(streamURL) }
 // hlsURLPattern matches absolute URLs in m3u8 playlists.
 var hlsURLPattern = regexp.MustCompile(`(?i)(https?://[^\s\r\n"]+)`)
 
+// signProxyURL devuelve la firma HMAC-SHA256 (hex) que liga una URL
+// upstream a un canal. Verificada en VerifyProxySig antes de fetchear.
+func (p *StreamProxy) signProxyURL(channelID, rawURL string) string {
+	mac := hmac.New(sha256.New, p.signKey)
+	mac.Write([]byte(channelID))
+	mac.Write([]byte{0}) // separador para que (ch="a",url="bc") != (ch="ab",url="c")
+	mac.Write([]byte(rawURL))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyProxySig comprueba que `sig` corresponde a (channelID, rawURL).
+// rawURL debe ser el valor TAL CUAL llega en el query param `url` (el que
+// se firmó al reescribir la playlist), antes de cualquier unescape extra.
+// Comparación en tiempo constante.
+func (p *StreamProxy) VerifyProxySig(channelID, rawURL, sig string) bool {
+	if sig == "" {
+		return false
+	}
+	want := p.signProxyURL(channelID, rawURL)
+	return subtle.ConstantTimeCompare([]byte(sig), []byte(want)) == 1
+}
+
 // rewriteHLSPlaylist rewrites URLs in an m3u8 playlist to route through our proxy.
 // baseURL is the final URL of the playlist (after redirects) used to resolve relative paths.
-func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
+// makeProxyURL construye la URL proxiada (firmada) para una URL upstream.
+func rewriteHLSPlaylist(body []byte, baseURL string, makeProxyURL func(string) string) []byte {
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return body
@@ -441,14 +487,14 @@ func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 			rewritten := line
 			// First handle URI="..." attributes (may contain relative paths)
 			if strings.Contains(strings.ToUpper(rewritten), "URI=\"") {
-				rewritten = rewriteURIAttribute(rewritten, base, proxyPrefix)
+				rewritten = rewriteURIAttribute(rewritten, base, makeProxyURL)
 			}
 			// Then rewrite any remaining absolute URLs
 			rewritten = hlsURLPattern.ReplaceAllStringFunc(rewritten, func(u string) string {
 				if strings.Contains(u, "/proxy?url=") {
 					return u
 				}
-				return proxyPrefix + url.QueryEscape(u)
+				return makeProxyURL(u)
 			})
 			result = append(result, rewritten)
 			continue
@@ -456,7 +502,7 @@ func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 
 		// Non-comment line = segment or playlist URL
 		resolved := resolveURL(base, trimmed)
-		result = append(result, proxyPrefix+url.QueryEscape(resolved))
+		result = append(result, makeProxyURL(resolved))
 	}
 
 	return []byte(strings.Join(result, "\n"))
@@ -478,7 +524,7 @@ func resolveURL(base *url.URL, rawURL string) string {
 var uriAttrPattern = regexp.MustCompile(`(?i)URI="([^"]+)"`)
 
 // rewriteURIAttribute rewrites URI="..." attributes in EXT tags.
-func rewriteURIAttribute(line string, base *url.URL, proxyPrefix string) string {
+func rewriteURIAttribute(line string, base *url.URL, makeProxyURL func(string) string) string {
 	return uriAttrPattern.ReplaceAllStringFunc(line, func(match string) string {
 		// Extract the URI value (skip 'URI="' prefix and '"' suffix)
 		inner := match[5 : len(match)-1]
@@ -487,7 +533,7 @@ func rewriteURIAttribute(line string, base *url.URL, proxyPrefix string) string 
 		}
 		// Preserve original case of URI=
 		prefix := match[:4] // "URI=" (preserving case)
-		return prefix + `"` + proxyPrefix + url.QueryEscape(inner) + `"`
+		return prefix + `"` + makeProxyURL(inner) + `"`
 	})
 }
 
@@ -626,7 +672,14 @@ func (p *StreamProxy) serveRewrittenPlaylist(w http.ResponseWriter, resp *http.R
 // serveRewrittenPlaylistBody rewrites and serves an m3u8 playlist body.
 func (p *StreamProxy) serveRewrittenPlaylistBody(w http.ResponseWriter, body []byte, channelID, baseURL string) error {
 	proxyPrefix := "/api/v1/channels/" + channelID + "/proxy?url="
-	rewritten := rewriteHLSPlaylist(body, baseURL, proxyPrefix)
+	// Cada URL upstream se firma y se liga al canal; ProxyURL (vía handler)
+	// rechaza las que no lleven una firma válida (cierra A3). Se firma sobre
+	// `raw` (la URL absoluta sin escapar), porque el handler verifica con
+	// r.URL.Query().Get("url"), que Go decodifica de vuelta a `raw`.
+	makeProxyURL := func(raw string) string {
+		return proxyPrefix + url.QueryEscape(raw) + "&sig=" + p.signProxyURL(channelID, raw)
+	}
+	rewritten := rewriteHLSPlaylist(body, baseURL, makeProxyURL)
 
 	p.logger.Debug("serving rewritten HLS playlist",
 		"channel", channelID,
