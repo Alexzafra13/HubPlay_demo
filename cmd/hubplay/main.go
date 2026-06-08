@@ -504,9 +504,15 @@ func run(configPath string) error {
 	})
 
 	server := &http.Server{
-		Addr:        cfg.Server.Addr(),
-		Handler:     router,
-		ReadTimeout: 15 * time.Second,
+		Addr:    cfg.Server.Addr(),
+		Handler: router,
+		// ReadHeaderTimeout acota cuánto puede tardar un cliente en mandar
+		// las cabeceras — defensa directa contra slowloris (abrir miles de
+		// conexiones que gotean cabeceras byte a byte para agotar el pool).
+		// Separado de ReadTimeout para que valga aunque algún handler
+		// streaming relaje el deadline del body.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
 		// WriteTimeout default 30s. Cubre el 95 % de los handlers
 		// (JSON CRUD bajo /api/v1/*) y evita que un cliente lento
 		// consumiendo a 1 byte/segundo deje una goroutine de servidor

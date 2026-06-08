@@ -151,17 +151,17 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
   Correcto para el modelo double-submit, pero toda la capa CSRF descansa
   en la presencia de cookie. Auditar que ningún flujo mutante mezcle
   cookie-auth saltándose el header. Considerar `SameSite=Strict`.
-- **M2 · `password_change_required` solo es advisory.** `internal/api/handlers/auth/auth.go:38,224`.
+- ✅ **M2 · `password_change_required` solo es advisory.** `internal/api/handlers/auth/auth.go:38,224`.
   El server emite tokens válidos aunque el flag esté activo; el frontend
   es quien enruta. Un usuario/atacante con password temporal puede ignorar
   la rotación vía API. **Fix:** rechazar mutaciones (salvo allowlist
   pequeño tipo `/me/password`) mientras el flag esté activo.
-- **M3 · Ventana pre-setup abierta en `0.0.0.0`.** `internal/api/handlers/system/setup.go:149-169`.
+- ✅ **M3 · Ventana pre-setup abierta en `0.0.0.0`.** `internal/api/handlers/system/setup.go:149-169`.
   Antes del primer admin, `/auth/setup` y `/setup/browse` están abiertos
   → race-to-setup (reclamar admin) + browse del filesystem del host.
   Post-setup sí queda bloqueado. **Fix:** documentar bind a localhost hasta
   completar setup, o token de setup impreso en consola (patrón Jellyfin).
-- **M4 · `X-Forwarded-Proto` confiado incondicionalmente.** `internal/api/security_headers.go:96-99`,
+- ✅ **M4 · `X-Forwarded-Proto` confiado incondicionalmente.** `internal/api/security_headers.go:96-99`,
   `csrf.go:54-56`, `auth.go:114`. Desacoplado de `trusted_proxies` (que sí
   gobierna XFF). Frontera de confianza inconsistente. **Fix:** honrar XFP
   solo si el peer está en `trusted_proxies`.
@@ -179,7 +179,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
 - **M7 · Sin límites de recursos (mem/cpu) en ningún compose.** Un
   transcode/scan desbocado puede OOM-killear el host. **Fix:** `mem_limit`
   + `cpus` en hubplay/Postgres/nginx.
-- **M8 · Falta CSP/Permissions-Policy en los proxies.** `deploy/nginx/hubplay.conf:84-87`
+- ✅ **M8 · Falta CSP/Permissions-Policy en los proxies.** `deploy/nginx/hubplay.conf:84-87`
   pone XFO/nosniff/Referrer/HSTS pero no CSP ni Permissions-Policy. (Nota:
   la app **sí** setea CSP server-side — `security_headers.go` — así que el
   hueco del proxy es redundante para CSP, pero Permissions-Policy falta en
@@ -270,7 +270,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
 - **B4 · `Browse` admin con denylist** (`library.go:221-278,752-766`): un
   admin puede enumerar `/home`, `/var/lib`. Admin-only, bajo riesgo, pero
   denylist es frágil. Preferir allowlist anclada a media roots.
-- **B5 · Sin `ReadHeaderTimeout`** (`main.go:505-518`); `ReadTimeout` cubre
+- ✅ **B5 · Sin `ReadHeaderTimeout`** (`main.go:505-518`); `ReadTimeout` cubre
   Slowloris pero es idiomático ponerlo.
 - **B6 · `/health` filtra el string de error de DB** crudo
   (`system/health.go:73,122`, sin auth): para Postgres podría filtrar

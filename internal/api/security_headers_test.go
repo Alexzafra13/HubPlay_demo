@@ -26,6 +26,7 @@ func TestSecurityHeaders_StaticHeadersPresent(t *testing.T) {
 		"X-Frame-Options":              "DENY",
 		"Referrer-Policy":              "strict-origin-when-cross-origin",
 		"Cross-Origin-Resource-Policy": "same-origin",
+		"Permissions-Policy":           "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
 	}
 	for header, want := range cases {
 		if got := rr.Header().Get(header); got != want {
