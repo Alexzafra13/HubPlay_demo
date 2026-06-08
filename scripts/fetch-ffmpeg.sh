@@ -36,17 +36,37 @@ mkdir -p "$OUTDIR"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-# dl: descarga con reintentos + backoff exponencial. Los assets viven en
-# el CDN de releases de GitHub (BtbN) y evermeet.cx, que devuelven 5xx
-# transitorios (504 gateway timeout, 503) bajo carga sin que la red local
-# falle. `curl --retry` ya cubre los códigos transitorios (408/429/5xx) y
-# los timeouts; `--retry-delay 2` arranca el backoff y curl lo escala
-# solo. `--retry-connrefused` cubre el caso de un edge node reiniciando.
-# Sin esto, un único 504 aborta todo el job de release.
+# dl: descarga resiliente. El problema real no es la red local sino el
+# CDN de releases de GitHub: BtbN publica autobuilds diarios bajo el tag
+# *rolling* `latest`, y mientras re-sube ese tag el CDN devuelve 504
+# PERSISTENTE durante varios minutos (no un parpadeo). evermeet.cx tiene
+# ventanas parecidas. Un `curl --retry` con delay fijo corto (~10s) no
+# aguanta eso, así que aquí hacemos backoff exponencial con un
+# presupuesto total de ~4 min (8 intentos: 5,10,20,40,60,60,60s). Cada
+# intento lleva además `-C -` para reanudar descargas parciales de los
+# assets de ~100 MB. Configurable vía FFMPEG_DL_RETRIES para CI.
 dl() {
 	local url="$1" out="$2"
-	curl -fSL --no-progress-meter --retry 5 --retry-delay 2 \
-		--retry-connrefused --connect-timeout 30 "$url" -o "$out"
+	local max_attempts="${FFMPEG_DL_RETRIES:-8}"
+	local attempt=1 delay=5
+	while :; do
+		if curl -fSL --no-progress-meter --connect-timeout 30 \
+			--retry 2 --retry-connrefused -C - "$url" -o "$out"; then
+			return 0
+		fi
+		# `curl -C -` deja un fichero parcial si el server no soporta
+		# range; lo limpiamos para que el siguiente intento parta limpio.
+		if (( attempt >= max_attempts )); then
+			echo "✗ descarga fallida tras $max_attempts intentos: $url" >&2
+			echo "  (el CDN de releases de GitHub/BtbN suele dar 504 persistente" >&2
+			echo "   mientras re-publica el tag 'latest'; reintenta el job en unos minutos)" >&2
+			return 22
+		fi
+		echo "  intento $attempt/$max_attempts falló; reintento en ${delay}s…" >&2
+		sleep "$delay"
+		(( attempt++ ))
+		(( delay = delay < 60 ? delay * 2 : 60 ))
+	done
 }
 
 # Releases de BtbN/FFmpeg-Builds. La carpeta `latest` (tag explícito,
