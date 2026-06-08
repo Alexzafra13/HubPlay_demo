@@ -44,3 +44,14 @@ func IPRateLimitMiddleware(limiter *federation.RateLimiter) func(http.Handler) h
 func NewPairingRequestRateLimiter() *federation.RateLimiter {
 	return federation.NewRateLimiter(clock.New(), 5, 3)
 }
+
+// NewAuthRateLimiter limita los endpoints publicos de auth (login,
+// refresh, setup, device start/poll) por IP. 30 req/min con burst 10:
+// holgado para un humano que reintenta o un cliente headless polleando
+// el device-code cada ~5s (RFC 8628), pero corta en seco un flood de
+// fuerza-bruta (que necesitaria miles/min). Defensa en profundidad sobre
+// el rate-limit per-cuenta de internal/auth, que NO debe depender de que
+// el operador configure el reverse proxy (cierra A1 del audit prod).
+func NewAuthRateLimiter() *federation.RateLimiter {
+	return federation.NewRateLimiter(clock.New(), 30, 10)
+}

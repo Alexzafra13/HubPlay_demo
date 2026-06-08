@@ -80,6 +80,7 @@ type ServerDeps struct {
 	TrustedProxies   []string
 	MetricsEnabled   bool
 	MetricsPath      string
+	MetricsToken     string
 	CorsRegistry     *CorsRegistry
 	CorsOriginsRepo  handlers.CorsOriginStore
 	RestartRequester *config.RestartRequester

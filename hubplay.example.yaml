@@ -49,6 +49,13 @@ rate_limit:
 observability:
   metrics_enabled: true
   metrics_path: "/metrics"
+  # IMPORTANTE: /metrics filtra internals (sesiones, rutas, FDs, versión).
+  # El bind por defecto es 0.0.0.0, así que en producción DEBES protegerlo:
+  #  - define metrics_token (o HUBPLAY_OBSERVABILITY_METRICS_TOKEN) para
+  #    exigir `Authorization: Bearer <token>` (o ?token=<token>), o
+  #  - bloquea /metrics en tu reverse proxy.
+  # Vacío = sin auth (la app avisa en el log al arrancar).
+  metrics_token: ""
 
 # Daily background sweep for append-only diagnostic tables. Without it
 # the EPG and federation audit log grow forever — a long-lived install
