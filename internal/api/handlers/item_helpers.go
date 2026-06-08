@@ -4,11 +4,11 @@ import (
 	librarymodel "hubplay/internal/library/model"
 )
 
-// AttachPosterPlaceholder folds the cheap loading-placeholder fields
-// for the poster image into a listing entry. PosterCard renders the
-// solid color as background while the real <img> decodes, so cards
-// don't pop from grey to image. Exported for use across handler
-// sub-packages (library, media, me).
+// AttachPosterPlaceholder incorpora a una entrada de listado los campos
+// baratos de placeholder de carga para la imagen de póster. PosterCard
+// renderiza el color sólido como fondo mientras el <img> real decodifica,
+// para que las tarjetas no salten de gris a imagen. Exportada para uso
+// entre los sub-paquetes de handlers (library, media, me).
 func AttachPosterPlaceholder(entry map[string]any, ref librarymodel.PrimaryImageRef) {
 	if ref.DominantColor != "" {
 		entry["poster_color"] = ref.DominantColor
@@ -21,9 +21,9 @@ func AttachPosterPlaceholder(entry map[string]any, ref librarymodel.PrimaryImage
 	}
 }
 
-// UserDataResponse renders a UserData row in the canonical client
-// shape. `percentage` is computed server-side and clamped to [0, 100].
-// Exported for use across handler sub-packages.
+// UserDataResponse renderiza una fila de UserData en la shape canónica del
+// cliente. `percentage` se calcula server-side y se acota a [0, 100].
+// Exportada para uso entre los sub-paquetes de handlers.
 func UserDataResponse(ud *librarymodel.UserData, durationTicks int64) map[string]any {
 	if ud == nil {
 		return nil
@@ -53,20 +53,20 @@ func UserDataResponse(ud *librarymodel.UserData, durationTicks int64) map[string
 	return resp
 }
 
-// ItemSummaryResponse creates the compact wire shape for an item used
-// in listing endpoints (library browse, children, search). Exported
-// for use across handler sub-packages.
+// ItemSummaryResponse crea la wire shape compacta de un item usada en los
+// endpoints de listado (browse de biblioteca, children, búsqueda). Exportada
+// para uso entre los sub-paquetes de handlers.
 func ItemSummaryResponse(item *librarymodel.Item) map[string]any {
 	resp := map[string]any{
 		"id":         item.ID,
 		"library_id": item.LibraryID,
 		"type":       item.Type,
 		"title":      item.Title,
-		// `sort_title` is the lowercased + article-stripped variant the
-		// backend stores for SQL ORDER BY (so "The Matrix" sorts as
-		// "matrix"). The browse page also re-sorts client-side when
-		// the user picks "title" — without this field on the wire it
-		// did `undefined.localeCompare(...)` and crashed the grid.
+		// `sort_title` es la variante en minúsculas + sin artículo que el
+		// backend almacena para el ORDER BY de SQL (de modo que "The Matrix"
+		// ordena como "matrix"). La página de browse también re-ordena
+		// client-side cuando el usuario elige "title" — sin este campo en el
+		// wire hacía `undefined.localeCompare(...)` y crasheaba el grid.
 		"sort_title":     item.SortTitle,
 		"duration_ticks": item.DurationTicks,
 		"is_available":   item.IsAvailable,

@@ -6,6 +6,44 @@
 
 ---
 
+## 🌐 Sesión 2026-06-08 — TT-8 root + limpieza docs
+
+Rama: `claude/project-review-EOwig`.
+
+### TT-8 — comentarios en inglés del root de `handlers/`
+
+Traducidos a español (convención del proyecto: comentarios técnicos,
+concisos, en español) **los 9 ficheros compartidos del paquete raíz**
+`internal/api/handlers/` — exactamente los targets nombrados en el audit:
+
+| Fichero | Qué |
+|---|---|
+| `interfaces.go` | 30+ doc comments de interfaces de servicio/repo (AuthService, StreamManagerService, IPTVTransmuxer, todas las `*Repository`…). gofmt reordenó imports de paso. |
+| `responses.go` | `RequireParam`, `SetErrorRecorder`, `ParsePagination`, `RespondAppError`, `RespondError`, `HandleServiceError` + caso default. |
+| `contracts.go` | `PermissionsStore`, `CorsOriginStore`, `AuditLogStore`, `UpdatesProvider`. |
+| `item_helpers.go` | `AttachPosterPlaceholder`, `UserDataResponse`, `ItemSummaryResponse` + nota `sort_title`. |
+| `sse_limiter.go` | defaults, `ErrSSE*`, `SSELimiter`, `Acquire`, `Snapshot`. |
+| `streaming_deadline.go` | bloque doc inicial de `DisableWriteDeadline`. |
+| `cache_control.go`, `client_ip.go`, `iprate_middleware.go` | ya estaban en español (sin cambios). |
+
+**Sólo comentarios** — 0 cambios de lógica. `go build ./internal/api/...`
+verde, gofmt limpio.
+
+**Pendiente (incremental):** los sub-paquetes (`admin`, `auth`,
+`federation`, `iptv`, `me`, `media`, `system`) aún tienen ~muchos
+comentarios en inglés. El audit clasifica esto como "hacer
+incrementalmente al tocar cada fichero" — no un big-bang de miles de
+líneas. Registrado como item 2 en pendientes.
+
+### Limpieza de docs
+
+La tabla "📋 Pendientes priorizadas" listaba OO/MM/RR + el merge de PR
+#477 como abiertos, pero el propio header del doc ya los marcaba
+cerrados (sesiones 2026-05-28). Tabla reescrita: sólo F15-5, TT-8 resto,
+F15-10/11/12 y distribución avanzada siguen abiertos.
+
+---
+
 ## 🔭 Estado actual (2026-05-30)
 
 **Salud del proyecto**: MVP funcional, cerca de early-production.
@@ -14,7 +52,7 @@
 |---|---|
 | **Audit olores altos 2026-05-14** | ✅ **6/6 cerrados** |
 | **Audit olores macro 2026-05-27** | NN ✅, PP ✅, QQ ✅, SS-3/4/5 ✅, **OO ✅, RR ✅, MM ✅**. Todos cerrados. |
-| **Audit per-package satélite SS/TT** | **SS-1 ✅, SS-6 ✅, SS-2 ✅, TT-5 ✅, TT-7 ✅** (sesión 2026-05-30). Queda **TT-8** (comentarios en inglés, cosmético). |
+| **Audit per-package satélite SS/TT** | **SS-1 ✅, SS-6 ✅, SS-2 ✅, TT-5 ✅, TT-7 ✅** (sesión 2026-05-30). **TT-8 root compartido ✅** (2026-06-08); sub-paquetes pendientes incrementalmente. |
 | **Tests backend** | todos los paquetes verdes (`go test ./...` exit 0, con -race en los tocados) |
 | **Tests frontend** | **717/717** vitest verdes |
 | **PRs abiertas** | ninguna |
@@ -335,17 +373,20 @@ PRs: [#452](https://github.com/Alexzafra13/HubPlay_demo/pull/452), [#454](https:
 
 ## 📋 Pendientes priorizadas
 
+> **Nota (2026-06-08):** los items OO/MM/RR de esta tabla estaban
+> **obsoletos** — se cerraron en las sesiones 2026-05-28 (ver §"OO + RR
+> cerrados" y §"split Dependencies"). El merge de PR #477 también está
+> resuelto (la rama está mergeada). Tabla reescrita para reflejar sólo lo
+> realmente abierto.
+
 | # | Tarea | Coste | Severidad |
 |---|---|---|---|
-| **0** | **Resolver merge de PR #477** — rebase o squash sobre main. La rama tiene todo el trabajo de la sesión 2026-05-28 (NN, PP, QQ, SS cerrados). | ~30 min | Bloqueante |
-| **1** | **OO — sub-paquetes por dominio en `handlers/`**. Mover 72 ficheros a sub-dirs (auth/, iptv/, federation/, admin/, me/, items/, system/). Cada sub-paquete define SUS micro-interfaces. `interfaces.go` y `deps_repos.go` desaparecen. | 1 sesión grande | Media (estructura) |
-| **2** | **MM — split Dependencies** (77 campos → sub-structs por mount). Se simplifica mucho tras OO porque cada sub-paquete handler define su propio deps struct con 3-7 campos. | 1 sesión mediana | Media |
-| **3** | **RR — eliminar `deps_repos.go`** (216 LoC). Se resuelve automáticamente al cerrar OO — cada sub-paquete define sus propios contratos de repo. | Automático con OO | Baja |
-| **4** | **F15-5** — Integration tests con DB real para handlers de library. Con micro-interfaces cerradas (NN ✅), los fakes son de 2-7 métodos en vez de 25. | ~4-6 h | Media |
-| **5** | **F15-10/11/12** — Polish: fakes compartidos, naming, concurrency tests. | Baja | Baja |
-| **6** | **Distribución avanzada** — auto-update, TLS LAN, macOS notarized, AppImage. | Sesión grande | Producto |
+| **1** | **F15-5** — Integration tests con DB real para handlers de library. Con micro-interfaces cerradas (NN ✅), los fakes son de 2-7 métodos en vez de 25. | ~4-6 h | Media |
+| **2** | **TT-8 (resto)** — traducir comentarios en inglés en los **sub-paquetes** de `handlers/` (admin, auth, federation, iptv, me, media, system). El root compartido ya está 100% en español (sesión 2026-06-08). Hacer incrementalmente al tocar cada fichero. | Bajo, incremental | Baja (cosmético) |
+| **3** | **F15-10/11/12** — Polish: fakes compartidos, naming, concurrency tests. | Baja | Baja |
+| **4** | **Distribución avanzada** — auto-update, TLS LAN, macOS notarized, AppImage. | Sesión grande | Producto |
 
-**Olores del audit 2026-05-27**: NN ✅ PP ✅ QQ ✅ OO ✅ MM ✅ RR ✅ cerrados. Del satélite SS/TT: SS-1/2/3/4/5/6 ✅, TT-5 ✅ TT-6 ✅ TT-7 ✅. Sólo queda **TT-8** (comentarios en inglés en `handlers/`, cosmético, hacer incrementalmente al tocar cada fichero).
+**Olores del audit 2026-05-27**: NN ✅ PP ✅ QQ ✅ OO ✅ MM ✅ RR ✅ cerrados. Del satélite SS/TT: SS-1/2/3/4/5/6 ✅, TT-5 ✅ TT-6 ✅ TT-7 ✅. Queda **TT-8** (comentarios en inglés en `handlers/`): **root compartido cerrado** (2026-06-08), sub-paquetes pendientes incrementalmente.
 
 ---
 

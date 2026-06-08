@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// DisableWriteDeadline clears the per-request write deadline so a
-// long-lived handler (HLS streaming, SSE, big file download, peer
-// stream proxy) can write for an indefinite period without the
-// HTTP server killing the connection mid-stream.
+// DisableWriteDeadline limpia el write deadline por-request para que un
+// handler de larga duración (streaming HLS, SSE, descarga de fichero
+// grande, proxy de stream de peer) pueda escribir durante un periodo
+// indefinido sin que el servidor HTTP mate la conexión a mitad del stream.
 //
 // El default global en `cmd/hubplay/main.go` setea
 // `WriteTimeout: 30s` (cierre del olor Q de la auditoría
@@ -36,6 +36,6 @@ import (
 // que añada un endpoint streaming pueda invocarlo sin duplicar el
 // helper.
 func DisableWriteDeadline(w http.ResponseWriter) error {
-	// time.Time{} (cero) le dice al servidor "no deadline".
+	// time.Time{} (cero) le dice al servidor "sin deadline".
 	return http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }

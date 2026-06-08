@@ -67,13 +67,13 @@ func (NoopAudit) LogBackupRestored(_ context.Context, _ *http.Request)          
 func (NoopAudit) LogSystemRestart(_ context.Context, _ *http.Request, _ string)             {}
 func (NoopAudit) LogDBSwap(_ context.Context, _ *http.Request, _, _ string)                 {}
 
-// PermissionsStore defines user permission operations for Dependencies.
+// PermissionsStore define las operaciones de permisos de usuario para Dependencies.
 type PermissionsStore interface {
 	GetByID(ctx context.Context, id string) (*authmodel.User, error)
 	SetPermission(ctx context.Context, id, column string, value bool) error
 }
 
-// CorsOriginStore defines CORS origin operations for Dependencies.
+// CorsOriginStore define las operaciones de orígenes CORS para Dependencies.
 type CorsOriginStore interface {
 	List(ctx context.Context) ([]db.CorsOriginRow, error)
 	Insert(ctx context.Context, row db.CorsOriginRow) error
@@ -81,13 +81,13 @@ type CorsOriginStore interface {
 	ListOrigins(ctx context.Context) ([]string, error)
 }
 
-// AuditLogStore defines audit log query operations for Dependencies.
+// AuditLogStore define las operaciones de query del audit log para Dependencies.
 type AuditLogStore interface {
 	Query(ctx context.Context, q db.AuditQuery) ([]db.AuditLogRow, int64, error)
 	DistinctEventTypes(ctx context.Context) ([]string, error)
 }
 
-// UpdatesProvider defines update status operations for Dependencies.
+// UpdatesProvider define las operaciones de estado de actualizaciones para Dependencies.
 type UpdatesProvider interface {
 	Status() updates.Status
 	Check(ctx context.Context) error
