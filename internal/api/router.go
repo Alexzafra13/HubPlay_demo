@@ -146,6 +146,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		// Protected routes (deps.Auth.Auth.Middleware enforza sesión).
 		r.Group(func(r chi.Router) {
 			r.Use(deps.Auth.Auth.Middleware)
+			// M2: si el usuario arrastra password_change_required, bloquea
+			// mutaciones salvo cambiar su clave / logout. Tras Middleware
+			// (necesita los claims en ctx).
+			r.Use(EnforcePasswordChange(deps.Auth.Users))
 
 			mountAuthProtected(r, authHandler, deviceHandler)
 			mountSSEEvents(r, deps)
@@ -192,6 +196,11 @@ func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
 	} else {
 		r.Use(middleware.ClientIPFromRemoteAddr)
 	}
+	// Borra X-Forwarded-Proto de peers no declarados en trusted_proxies
+	// (M4): sin esto un cliente directo puede falsear https y forzar
+	// cookies Secure/HSTS. Va aquí, antes de SecurityHeaders/CSRF/auth,
+	// que son quienes leen XFP.
+	r.Use(trustForwardedProto(normalizeCIDRs(deps.Server.TrustedProxies)))
 	r.Use(middleware.RequestID)
 	r.Use(RequestLogger(deps.Infra.Logger))
 	r.Use(middleware.Recoverer)
