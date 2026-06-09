@@ -1,5 +1,7 @@
 bin/
 /hubplay
+/hpseed
+/hploadgen
 *.db
 *.db-wal
 *.db-shm
