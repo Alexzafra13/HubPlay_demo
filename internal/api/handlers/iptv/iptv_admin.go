@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -56,7 +55,7 @@ func (h *iptvAdminHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) 
 		M3UURL      string `json:"m3u_url"`
 		TLSInsecure bool   `json:"tls_insecure"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
 		return
 	}
@@ -197,7 +196,7 @@ func (h *iptvAdminHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Reque
 		Country string `json:"country"`
 		Name    string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}

@@ -59,7 +59,7 @@ type updateServerIdentityRequest struct {
 // fallback determinista del frontend.
 func (h *FederationAdminHandler) UpdateServerIdentity(w http.ResponseWriter, r *http.Request) {
 	var body updateServerIdentityRequest
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
 		return
 	}
@@ -220,7 +220,7 @@ type probePeerRequest struct {
 // see the fingerprint before committing. Read-only on both sides.
 func (h *FederationAdminHandler) ProbePeer(w http.ResponseWriter, r *http.Request) {
 	var req probePeerRequest
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -252,7 +252,7 @@ type acceptInviteRequest struct {
 // paired peer on success.
 func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 	var req acceptInviteRequest
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -380,7 +380,7 @@ func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req shareLibraryRequest
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -478,7 +478,7 @@ func (h *FederationAdminHandler) GetFederationSettings(w http.ResponseWriter, r 
 // UpdateFederationSettings persiste el toggle. Idempotente.
 func (h *FederationAdminHandler) UpdateFederationSettings(w http.ResponseWriter, r *http.Request) {
 	var body federationSettingsWire
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -550,7 +550,7 @@ func (h *FederationAdminHandler) SendPairingRequest(w http.ResponseWriter, r *ht
 		return
 	}
 	var body sendPairingRequestBody
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}

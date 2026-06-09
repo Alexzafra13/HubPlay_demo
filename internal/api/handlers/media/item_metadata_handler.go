@@ -2,7 +2,6 @@ package media
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -144,7 +143,7 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req identifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}
@@ -208,7 +207,7 @@ func (h *MetadataHandler) UpdateItemMetadata(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req patchMetadataRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}
@@ -269,7 +268,7 @@ func (h *MetadataHandler) SetMetadataLock(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req setMetadataLockRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}

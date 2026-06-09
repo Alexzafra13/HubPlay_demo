@@ -2,7 +2,6 @@ package uploads
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -174,7 +173,7 @@ func (h *UploadBrowseHandler) CreateFolder(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req CreateFolderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "BAD_BODY", err.Error())
 		return
 	}
@@ -321,7 +320,7 @@ func (h *UploadBrowseHandler) RenameEntry(w http.ResponseWriter, r *http.Request
 	}
 
 	var req RenameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "BAD_BODY", err.Error())
 		return
 	}

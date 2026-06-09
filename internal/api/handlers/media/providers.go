@@ -81,7 +81,7 @@ func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req updateProviderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}

@@ -2,7 +2,6 @@ package system
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -184,7 +183,7 @@ func (h *SetupHandler) CreateLibraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createLibrariesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -223,7 +222,7 @@ func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -301,7 +300,7 @@ func (h *SetupHandler) TestDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req admin.DBTestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -325,7 +324,7 @@ func (h *SetupHandler) SaveDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req admin.DBSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -353,7 +352,7 @@ func (h *SetupHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req completeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}

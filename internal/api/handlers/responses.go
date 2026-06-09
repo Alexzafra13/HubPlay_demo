@@ -65,8 +65,35 @@ func RespondData(w http.ResponseWriter, status int, payload any) {
 	}{payload})
 }
 
-func DecodeJSON(r *http.Request, v any) error {
-	return json.NewDecoder(r.Body).Decode(v)
+// MaxJSONBody caps the size of a JSON request body the handlers will
+// buffer. 1 MiB is generous for the JSON CRUD surface (the largest real
+// payloads are admin settings + IPTV channel-order arrays) while closing
+// the unbounded-body memory-DoS vector on authenticated endpoints. File
+// uploads do NOT go through this path — they stream via the tus handler.
+const MaxJSONBody = 1 << 20 // 1 MiB
+
+// DecodeJSON decodes a JSON request body into v with a hard size cap
+// (http.MaxBytesReader). Returns a typed *domain.AppError — 413 when the
+// body exceeds the cap, 400 when it's malformed — so callers can hand the
+// error straight to HandleServiceError for a consistent envelope.
+func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxJSONBody)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return &domain.AppError{
+				Code:       "REQUEST_TOO_LARGE",
+				HTTPStatus: http.StatusRequestEntityTooLarge,
+				Message:    "request body too large",
+			}
+		}
+		return &domain.AppError{
+			Code:       "INVALID_JSON",
+			HTTPStatus: http.StatusBadRequest,
+			Message:    "invalid or malformed JSON body",
+		}
+	}
+	return nil
 }
 
 const PaginationMaxLimit = 500
