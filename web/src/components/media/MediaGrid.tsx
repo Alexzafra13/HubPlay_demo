@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useLayoutEffect, useCallback } from "react";
+import { useRef, useState, useEffect } from "react";
 import type { FC, ReactNode } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { MediaItem } from "@/api/types";
@@ -36,25 +36,67 @@ const SKELETON_KEYS = [
   "grid-sk-h",
 ];
 
-// Gap entre tarjetas en px (≈ gap-4 de Tailwind). Se usa para calcular el
-// ancho de cada celda y la altura de fila en la virtualización.
+// Gap entre tarjetas en px (≈ gap-4 de Tailwind), usado tanto en la
+// cuadrícula directa como en la virtualizada para que ambas coincidan.
 const GAP = 16;
 // Alto del bloque de info bajo el póster: pt-2 (8) + título text-sm de 1
 // línea (~20) + gap-0.5 (2) + meta text-xs de 1 línea (~16) ≈ 46px. El
-// título y la meta usan `truncate` (siempre 1 línea), así que la altura de
-// cada tarjeta es DETERMINISTA y podemos usar filas de altura fija — sin
-// medición por fila (que en jsdom/SSR daría 0 y rompería el cálculo).
+// título y la meta de PosterCard usan `truncate` (siempre 1 línea), así
+// que la altura de cada tarjeta es DETERMINISTA y la fila virtualizada
+// puede ser de altura fija. Si PosterCard pasara a varias líneas, habría
+// que revisar este valor (o medir por fila).
 const META_BLOCK = 46;
+// Por debajo de este nº de ítems se renderiza la cuadrícula completa sin
+// virtualizar: el coste en DOM es trivial, la ruta es más simple y es la
+// que ejercitan los tests jsdom (donde el virtualizador de ventana no
+// recibe el evento de layout inicial). Mismo enfoque que EPGGrid.
+const VIRTUALIZE_THRESHOLD = 60;
 
-// columnsForWidth replica los breakpoints del grid CSS original
-// (grid-cols-2 / sm:3 / md:4 / lg:5 / xl:6) usando el ancho de viewport,
-// para que el número de columnas sea idéntico al de antes en cada tamaño.
+// columnsForWidth es la ÚNICA fuente de verdad del nº de columnas
+// (responsive). Reemplaza a las clases `grid-cols-*` para que la
+// cuadrícula directa y la virtualizada usen exactamente el mismo cálculo.
+// Los cortes coinciden con los breakpoints de Tailwind (sm/md/lg/xl).
 function columnsForWidth(w: number): number {
   if (w >= 1280) return 6;
   if (w >= 1024) return 5;
   if (w >= 768) return 4;
   if (w >= 640) return 3;
   return 2;
+}
+
+// useGridColumns devuelve el nº de columnas actual y lo recalcula al
+// redimensionar la ventana. Compartido por ambas rutas (directa /
+// virtualizada).
+function useGridColumns(): number {
+  const [cols, setCols] = useState(() =>
+    typeof window === "undefined" ? 6 : columnsForWidth(window.innerWidth),
+  );
+  useEffect(() => {
+    const onResize = () => setCols(columnsForWidth(window.innerWidth));
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return cols;
+}
+
+function gridTemplate(columns: number): React.CSSProperties {
+  return { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` };
+}
+
+function renderCards(
+  items: MediaItem[],
+  hrefFor?: (item: MediaItem) => string,
+  cornerBadgeFor?: (item: MediaItem) => ReactNode,
+) {
+  return items.map((item) => (
+    <PosterCard
+      key={item.id}
+      item={item}
+      href={hrefFor?.(item)}
+      cornerBadge={cornerBadgeFor?.(item)}
+    />
+  ));
 }
 
 const MediaGrid: FC<MediaGridProps> = ({
@@ -64,79 +106,11 @@ const MediaGrid: FC<MediaGridProps> = ({
   hrefFor,
   cornerBadgeFor,
 }) => {
-  // Opt-out del React Compiler para este componente. El virtualizador de
-  // @tanstack/react-virtual es un store externo mutable que fuerza
-  // re-renders vía su propio onChange; el compiler, al memoizar la salida,
-  // cacheaba `getVirtualItems()` y el grid no se actualizaba al scrollear
-  // (no reciclaba). Este es el escape-hatch oficial hasta que la librería
-  // sea compiler-ready. Verificado en navegador real (ver web/verify/).
-  "use no memo";
-
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Columnas (responsive) y ancho del contenedor — gobiernan cuántas
-  // tarjetas entran por fila y la altura estimada de cada fila.
-  const [columns, setColumns] = useState(() =>
-    typeof window === "undefined" ? 6 : columnsForWidth(window.innerWidth),
-  );
-  const [containerWidth, setContainerWidth] = useState(0);
-
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const measure = () => {
-      setColumns(columnsForWidth(window.innerWidth));
-      setContainerWidth(el.getBoundingClientRect().width);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Offset del contenedor respecto al top del documento — necesario para
-  // alinear las coordenadas del virtualizador de ventana con el scroll.
-  const [scrollMargin, setScrollMargin] = useState(0);
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () =>
-      setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [columns, items.length]);
-
-  const rowCount = Math.ceil(items.length / columns);
-
-  // Altura de fila (fija): alto del póster (2:3) + bloque de info + gap.
-  const cellWidth =
-    containerWidth > 0 ? (containerWidth - GAP * (columns - 1)) / columns : 180;
-  const rowHeight = cellWidth * 1.5 + META_BLOCK + GAP;
-
-  const virtualizer = useWindowVirtualizer({
-    count: rowCount,
-    estimateSize: useCallback(() => rowHeight, [rowHeight]),
-    overscan: 4,
-    scrollMargin,
-  });
-
-  // Recalcula la ventana de filas en el montaje y cuando cambia algún valor
-  // de layout (alto de fila, columnas, offset del contenedor). Hace falta
-  // un measure() explícito porque en el primer render —y en entornos sin
-  // layout como jsdom— getVirtualItems() vuelve vacío pese a tener la altura
-  // total correcta, hasta que llega un evento de scroll/resize. Incluir
-  // `scrollMargin` asegura que se re-mida DESPUÉS de que el layout effect
-  // fije el offset (si no, la primera medición usaría 0). La instancia del
-  // virtualizador es estable (el hook la crea con useState), así que el
-  // efecto solo corre cuando cambian esos valores, no en cada render.
-  useEffect(() => {
-    virtualizer.measure();
-  }, [virtualizer, rowHeight, scrollMargin, columns]);
+  const columns = useGridColumns();
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+      <div className="grid gap-3 sm:gap-4" style={gridTemplate(columns)}>
         {SKELETON_KEYS.map((k) => (
           <div key={k} className="flex flex-col gap-2">
             <Skeleton
@@ -168,52 +142,120 @@ const MediaGrid: FC<MediaGridProps> = ({
     );
   }
 
-  // Virtualización por FILAS contra el scroll de la ventana: solo las
-  // filas visibles (+overscan) están en el DOM, así una biblioteca de
-  // miles de títulos no acumula miles de PosterCard (cada una con su
-  // canvas de blurhash + img). El contenedor reserva la altura total para
-  // que la barra de scroll y el sentinel de "cargar más" del padre sigan
-  // funcionando igual.
-  const virtualRows = virtualizer.getVirtualItems();
+  // Catálogos pequeños: cuadrícula completa, ruta simple.
+  if (items.length <= VIRTUALIZE_THRESHOLD) {
+    return (
+      <div
+        data-testid="media-grid"
+        className="grid gap-3 sm:gap-4"
+        style={gridTemplate(columns)}
+      >
+        {renderCards(items, hrefFor, cornerBadgeFor)}
+      </div>
+    );
+  }
+
+  // Catálogos grandes: virtualización por filas (DOM acotado).
+  return (
+    <VirtualizedMediaGrid
+      items={items}
+      columns={columns}
+      hrefFor={hrefFor}
+      cornerBadgeFor={cornerBadgeFor}
+    />
+  );
+};
+
+interface VirtualizedMediaGridProps {
+  items: MediaItem[];
+  columns: number;
+  hrefFor?: (item: MediaItem) => string;
+  cornerBadgeFor?: (item: MediaItem) => ReactNode;
+}
+
+// VirtualizedMediaGrid aísla el uso de @tanstack/react-virtual en su
+// propio componente (igual que EPGGrid → VirtualizedRows). Virtualiza por
+// filas contra el scroll de la PÁGINA (`useWindowVirtualizer`), que es la
+// UX de las páginas de catálogo.
+//
+// Lleva el directivo `"use no memo"`: el virtualizador es un store externo
+// mutable cuyas funciones no son memoizables; el React Compiler (babel
+// v1.0) cachearía getVirtualItems() y el grid dejaría de reciclar al
+// scrollear (verificado en navegador, ver web/verify/). La regla de lint
+// `react-hooks/incompatible-library` haría el auto-bail automáticamente,
+// pero solo reconoce `useVirtualizer`, no `useWindowVirtualizer`; y este
+// último es el que acota bien el DOM con scroll de página (useVirtualizer
+// sobre el elemento raíz renderiza todo). De ahí el directivo explícito,
+// confinado a este pequeño componente.
+function VirtualizedMediaGrid({
+  items,
+  columns,
+  hrefFor,
+  cornerBadgeFor,
+}: VirtualizedMediaGridProps) {
+  "use no memo";
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  // Offset del contenedor respecto al top del documento — alinea las
+  // coordenadas del virtualizador con el scroll de la página.
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      setWidth(rect.width);
+      setScrollMargin(rect.top + window.scrollY);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  const cellWidth = width > 0 ? (width - GAP * (columns - 1)) / columns : 180;
+  // Altura de fila fija = póster (2:3) + bloque de info + gap.
+  const rowHeight = cellWidth * 1.5 + META_BLOCK + GAP;
+  const rowCount = Math.ceil(items.length / columns);
+
+  const virtualizer = useWindowVirtualizer({
+    count: rowCount,
+    estimateSize: () => rowHeight,
+    overscan: 4,
+    scrollMargin,
+  });
 
   return (
     <div
       ref={containerRef}
+      data-testid="media-grid-virtualized"
       style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}
     >
-      {virtualRows.map((virtualRow) => {
+      {virtualizer.getVirtualItems().map((virtualRow) => {
         const start = virtualRow.index * columns;
-        const rowItems = items.slice(start, start + columns);
         return (
           <div
             key={virtualRow.key}
-            data-index={virtualRow.index}
+            className="grid"
             style={{
+              ...gridTemplate(columns),
               position: "absolute",
               top: 0,
               left: 0,
               width: "100%",
               height: rowHeight,
-              transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
-              display: "grid",
-              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+              transform: `translateY(${virtualRow.start - scrollMargin}px)`,
               gap: GAP,
               paddingBottom: GAP,
             }}
           >
-            {rowItems.map((item) => (
-              <PosterCard
-                key={item.id}
-                item={item}
-                href={hrefFor?.(item)}
-                cornerBadge={cornerBadgeFor?.(item)}
-              />
-            ))}
+            {renderCards(items.slice(start, start + columns), hrefFor, cornerBadgeFor)}
           </div>
         );
       })}
     </div>
   );
-};
+}
 
 export { MediaGrid };
