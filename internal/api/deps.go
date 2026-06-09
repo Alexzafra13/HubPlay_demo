@@ -81,6 +81,7 @@ type ServerDeps struct {
 	MetricsEnabled   bool
 	MetricsPath      string
 	MetricsToken     string
+	PprofEnabled     bool
 	CorsRegistry     *CorsRegistry
 	CorsOriginsRepo  handlers.CorsOriginStore
 	RestartRequester *config.RestartRequester

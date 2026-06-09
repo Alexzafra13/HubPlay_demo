@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"io/fs"
 	"net/http"
+	"net/http/pprof"
 	"net/netip"
 	"path/filepath"
 	"strings"
@@ -82,6 +83,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	applyGlobalMiddleware(r, deps)
 	mountMetricsEndpoint(r, deps)
+	mountPprofEndpoint(r, deps)
 
 	// Handlers compartidos por varios mountXxx — construidos una vez.
 	authHandler := authhandler.NewAuthHandler(
@@ -269,6 +271,43 @@ func mountMetricsEndpoint(r chi.Router, deps Dependencies) {
 	r.Handle(path, h)
 }
 
+// mountPprofEndpoint registra los handlers de net/http/pprof bajo
+// /debug/pprof cuando el operador los habilita (observability.pprof_enabled).
+//
+// Fail-closed: pprof es más sensible que /metrics — un heap dump filtra
+// contenido de memoria y /profile + /trace son palancas de DoS (bloquean
+// CPU N segundos). Por eso SOLO se monta si además hay metrics_token; sin
+// token, se avisa y NO se expone, aunque esté enabled.
+func mountPprofEndpoint(r chi.Router, deps Dependencies) {
+	if !deps.Server.PprofEnabled {
+		return
+	}
+	token := deps.Server.MetricsToken
+	if token == "" {
+		if deps.Infra.Logger != nil {
+			deps.Infra.Logger.Warn("pprof habilitado pero sin observability.metrics_token — NO se expone /debug/pprof (fail-closed). Define un token para usar profiling.")
+		}
+		return
+	}
+
+	// ServeMux con los paths completos para que pprof.Index despache los
+	// perfiles nombrados (heap, goroutine, allocs, block, mutex, ...) por
+	// el sufijo de la ruta.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	h := requireMetricsToken(token, mux)
+	r.Handle("/debug/pprof", h)
+	r.Handle("/debug/pprof/*", h)
+	if deps.Infra.Logger != nil {
+		deps.Infra.Logger.Info("pprof endpoints montados en /debug/pprof (protegidos por metrics_token)")
+	}
+}
+
 // requireMetricsToken envuelve el handler de métricas con un check de
 // token (Bearer o query). Usa subtle.ConstantTimeCompare.
 func requireMetricsToken(token string, next http.Handler) http.Handler {
@@ -330,6 +369,9 @@ func (deps *Dependencies) fillFromConfig() {
 	}
 	if deps.Server.MetricsToken == "" {
 		deps.Server.MetricsToken = cfg.Observability.MetricsToken
+	}
+	if !deps.Server.PprofEnabled {
+		deps.Server.PprofEnabled = cfg.Observability.PprofEnabled
 	}
 	if deps.Server.AuthConfig == (config.AuthConfig{}) {
 		deps.Server.AuthConfig = cfg.Auth

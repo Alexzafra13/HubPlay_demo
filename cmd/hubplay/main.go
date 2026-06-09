@@ -449,6 +449,7 @@ func run(configPath string) error {
 			MetricsEnabled:   cfg.Observability.MetricsEnabled,
 			MetricsPath:      cfg.Observability.MetricsPath,
 			MetricsToken:     cfg.Observability.MetricsToken,
+			PprofEnabled:     cfg.Observability.PprofEnabled,
 			CorsRegistry:     corsRegistry,
 			CorsOriginsRepo:  repos.CorsOrigins,
 			RestartRequester: restartRequester,

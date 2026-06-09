@@ -56,6 +56,12 @@ observability:
   #  - bloquea /metrics en tu reverse proxy.
   # Vacío = sin auth (la app avisa en el log al arrancar).
   metrics_token: ""
+  # Endpoints de profiling Go (net/http/pprof) en /debug/pprof para
+  # diagnosticar CPU / heap / goroutines / contención bajo carga real.
+  # Apagado por defecto. Cuando se activa SOLO se expone si metrics_token
+  # está definido (un heap dump filtra memoria y /profile bloquea CPU —
+  # fail-closed sin token). Úsalo puntualmente, no lo dejes encendido.
+  pprof_enabled: false
 
 # Daily background sweep for append-only diagnostic tables. Without it
 # the EPG and federation audit log grow forever — a long-lived install
