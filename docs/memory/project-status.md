@@ -55,12 +55,18 @@ así que la DB ya caía en el volumen. Aun así se añadió la defensa en
 | B5 | `ReadHeaderTimeout: 10s` en el `http.Server` (slowloris) |
 | M1 | Verificado: el double-submit CSRF ya exige header en mutaciones cookie-auth; Bearer no es CSRF-vulnerable. Sin cambio. |
 
+### Bloque 2 — quick wins de mayor retorno
+| Item | Resultado |
+|---|---|
+| A11 ✅ | Error boundary por ruta en `AppLayout` (`key={pathname}`): un crash de página ya no tira el shell/navegación. Test `ErrorBoundary.test.tsx`; suite frontend 721/721; `tsc -b` limpio. |
+| M22 | **No-issue**: la `JWTSecret` auto-gen solo siembra el keystore en el 1er arranque (`Bootstrap` solo si la tabla está vacía); luego las claves viven en DB (persistidas) y son la fuente de verdad. Con DB compartida las réplicas comparten clave → ya mitigado. No se toca. |
+
 **Pendiente (no bloquea plug-and-play):** Fase 2 supply-chain (SHA-pin
 de actions, provenance/firma, checksum FFmpeg), Fase 3 observabilidad
-(M18-M24, p.ej. JWT auto-gen no persistido), Fase 4 frontend (error
-boundaries por ruta, virtualización de grids), Fase 5 gobernanza
-(README/SECURITY/CODEOWNERS). Bajos restantes: B2 (DNS-rebind TOCTOU),
-B3 (refresh TTL 30d).
+(M18-M21/M23/M24), Fase 4 frontend (A12 virtualización de grids — alto
+valor pero toca el render core, requiere prueba de scroll real), Fase 5
+gobernanza (README/SECURITY/CODEOWNERS). Bajos: B2 (DNS-rebind TOCTOU),
+B3 (refresh TTL 30d), M6 (backup periódico).
 
 ---
 
