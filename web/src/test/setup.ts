@@ -47,6 +47,20 @@ if (typeof globalThis !== "undefined" && typeof (globalThis as { EventSource?: u
   (globalThis as { EventSource: unknown }).EventSource = NoopEventSource;
 }
 
+// jsdom no implementa ResizeObserver. La cuadrícula virtualizada
+// (MediaGrid, vía @tanstack/react-virtual) lo instancia para medir filas.
+// Un stub no-op basta: sin callbacks de medición el virtualizador usa
+// `estimateSize`, lo que mantiene el render acotado y determinista en los
+// tests (que es justo lo que queremos comprobar a nivel de contrato).
+if (typeof globalThis !== "undefined" && typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === "undefined") {
+  class NoopResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as { ResizeObserver: unknown }).ResizeObserver = NoopResizeObserver;
+}
+
 afterEach(() => {
   cleanup();
   localStorage.clear();

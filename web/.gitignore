@@ -21,3 +21,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# capturas de verificación manual (web/verify)
+verify/*.png

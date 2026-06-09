@@ -66,6 +66,7 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
     <Link
       to={resolvedHref}
       onClick={onClick}
+      data-testid="poster-card"
       className="group flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
       {/* Poster image stack:

@@ -1,75 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/i18n";
 import type { MediaItem } from "@/api/types";
 import { MediaGrid } from "./MediaGrid";
-
-// ─── IntersectionObserver mock ───────────────────────────────────────────────
-//
-// jsdom doesn't ship one. We replace it with a class that exposes the
-// callback so the test can synthesise an intersection event the same
-// way the browser would. Each instance captures itself in a registry
-// the test reads from.
-
-interface FakeObserver {
-  callback: IntersectionObserverCallback;
-  options?: IntersectionObserverInit;
-  observed: Element[];
-  disconnected: boolean;
-}
-
-let observers: FakeObserver[] = [];
-
-class MockIntersectionObserver implements IntersectionObserver {
-  root: Element | Document | null = null;
-  rootMargin = "";
-  thresholds: ReadonlyArray<number> = [];
-  private record: FakeObserver;
-
-  constructor(cb: IntersectionObserverCallback, options?: IntersectionObserverInit) {
-    this.record = { callback: cb, options, observed: [], disconnected: false };
-    observers.push(this.record);
-  }
-
-  observe(target: Element): void { this.record.observed.push(target); }
-  unobserve(): void {}
-  disconnect(): void { this.record.disconnected = true; }
-  takeRecords(): IntersectionObserverEntry[] { return []; }
-}
-
-beforeEach(() => {
-  observers = [];
-  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-/**
- * Trigger the most recently created observer's callback as if its
- * sentinel had scrolled into view. No-ops when no observer is alive
- * (e.g. all items already visible — sentinel unmounted).
- */
-function triggerLatestIntersect() {
-  const live = observers.filter((o) => !o.disconnected);
-  const latest = live[live.length - 1];
-  if (!latest || latest.observed.length === 0) return;
-  const entry = {
-    isIntersecting: true,
-    target: latest.observed[0],
-    intersectionRatio: 1,
-    boundingClientRect: {} as DOMRectReadOnly,
-    intersectionRect: {} as DOMRectReadOnly,
-    rootBounds: null,
-    time: 0,
-  } as IntersectionObserverEntry;
-  act(() => {
-    latest.callback([entry], latest as unknown as IntersectionObserver);
-  });
-}
 
 // ─── Item factory ────────────────────────────────────────────────────────────
 
@@ -99,9 +34,6 @@ function makeItems(n: number, prefix = "it"): MediaItem[] {
   }));
 }
 
-// Helper común para los tests: las cards (vía ItemKebab) necesitan
-// un QueryClient en context para el botón "Actualizar metadatos",
-// aunque los tests no ejerciten ese flujo. retry: false evita esperas.
 function makeClient() {
   return new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -121,11 +53,8 @@ function renderGrid(items: MediaItem[], loading = false, emptyMessage?: string) 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("MediaGrid", () => {
-  it("renders SKELETON_COUNT (8) skeleton placeholders when loading", () => {
+  it("renders 8 skeleton placeholders when loading", () => {
     const { container } = renderGrid([], true);
-    // Match the SKELETON_COUNT constant in MediaGrid exactly. A loose
-    // ">= 8" would silently swallow regressions where someone bumps
-    // the count without updating the contract.
     const skeletons = container.querySelectorAll(".aspect-\\[2\\/3\\]");
     expect(skeletons).toHaveLength(8);
   });
@@ -135,64 +64,26 @@ describe("MediaGrid", () => {
     expect(screen.getByText("No movies found")).toBeInTheDocument();
   });
 
-  it("renders only the first BATCH_SIZE (40) cards when more items are available", () => {
-    renderGrid(makeItems(120));
-    const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(40);
+  it("renders the first items of a short list", () => {
+    renderGrid(makeItems(12));
+    expect(screen.getByText("Item 0")).toBeInTheDocument();
+    expect(screen.getAllByTestId("poster-card").length).toBeGreaterThan(0);
   });
 
-  it("grows visibleCount by BATCH_SIZE when the sentinel intersects", () => {
-    renderGrid(makeItems(120));
-    expect(screen.getAllByRole("link")).toHaveLength(40);
-
-    triggerLatestIntersect();
-    expect(screen.getAllByRole("link")).toHaveLength(80);
-
-    triggerLatestIntersect();
-    expect(screen.getAllByRole("link")).toHaveLength(120);
-  });
-
-  it("does not mount the sentinel when items < BATCH_SIZE", () => {
-    // 30 items < BATCH_SIZE (40), so all fit in the first slice and
-    // the sentinel never needs to render. La aserción busca el div
-    // específico del sentinel (className="h-1" + aria-hidden) — el
-    // resto de [aria-hidden] son iconos de las cards (kebab, etc.)
-    // que no nos interesa contar aquí.
-    const { container } = renderGrid(makeItems(30));
-    expect(container.querySelectorAll('div.h-1[aria-hidden="true"]')).toHaveLength(0);
-  });
-
-  it("resets visibleCount when the items reference changes (new search/filter)", () => {
-    const client = makeClient();
-    const { rerender } = render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <MediaGrid items={makeItems(120, "first")} loading={false} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    triggerLatestIntersect();
-    triggerLatestIntersect();
-    expect(screen.getAllByRole("link")).toHaveLength(120);
-
-    // Caller swaps in a fresh array (e.g. new search). The compare-
-    // during-render pattern in MediaGrid should snap visibleCount
-    // back to BATCH_SIZE so the user lands at the top of the new
-    // result set, not deep inside the previous one.
-    rerender(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <MediaGrid items={makeItems(80, "second")} loading={false} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    expect(screen.getAllByRole("link")).toHaveLength(40);
-  });
-
-  it("disconnects the observer when the grid unmounts", () => {
-    const { unmount } = renderGrid(makeItems(120));
-    expect(observers.some((o) => !o.disconnected)).toBe(true);
-    unmount();
-    expect(observers.every((o) => o.disconnected)).toBe(true);
+  // Guardia de regresión de la virtualización (A12): con una lista enorme,
+  // el grid NO debe meter las miles de tarjetas en el DOM, solo una ventana
+  // de filas visibles. En jsdom el virtualizador cae a `estimateSize`
+  // (ResizeObserver es no-op), así que el render queda acotado y
+  // determinista. El grid acumulativo anterior renderizaba ~todas → este
+  // test lo habría hecho fallar.
+  it("solo monta una ventana acotada de tarjetas para listas grandes", () => {
+    renderGrid(makeItems(2000));
+    const cards = screen.getAllByTestId("poster-card");
+    expect(cards.length).toBeGreaterThan(0);
+    // Muy por debajo de 2000: si alguien rompe la virtualización (vuelve a
+    // renderizar todo), este límite salta.
+    expect(cards.length).toBeLessThan(300);
+    // Y los ítems del final NO están en el DOM hasta scrollear.
+    expect(screen.queryByText("Item 1999")).not.toBeInTheDocument();
   });
 });

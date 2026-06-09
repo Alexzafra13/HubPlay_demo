@@ -142,6 +142,9 @@ importers:
       knip:
         specifier: ^6.14.2
         version: 6.14.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
+      playwright-core:
+        specifier: 1.56.0
+        version: 1.56.0
       png-to-ico:
         specifier: ^3.0.1
         version: 3.0.1
@@ -3720,6 +3723,11 @@ packages:
 
   pixelmatch@4.0.2:
     resolution: {integrity: sha512-J8B6xqiO37sU/gkcMglv6h5Jbd9xNER7aHzpfRdNmV4IbQBzBpe4l9XmbG+xPF/znacgu2jfEw+wHffaq/YkXA==}
+    hasBin: true
+
+  playwright-core@1.56.0:
+    resolution: {integrity: sha512-1SXl7pMfemAMSDn5rkPeZljxOCYAmQnYLBTExuh6E8USHXGSX3dx6lYZN/xPpTz1vimXmPA9CDnILvmJaB8aSQ==}
+    engines: {node: '>=18'}
     hasBin: true
 
   png-to-ico@3.0.1:
@@ -8184,6 +8192,8 @@ snapshots:
   pixelmatch@4.0.2:
     dependencies:
       pngjs: 3.4.0
+
+  playwright-core@1.56.0: {}
 
   png-to-ico@3.0.1:
     dependencies:
