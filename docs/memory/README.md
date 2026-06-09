@@ -27,13 +27,14 @@ complementa con contexto, decisiones y pendientes.
 
 **Documentos vivos específicos** — referenciados cuando aplica:
 
-- `audit-2026-05-14-go-backend-review.md` — review arquitectónico por fases
-  (vivo). Iteraciones 4-7 abiertas.
-- `intervention-2026-05-14.md` — tracker iteración por iteración del audit
-  anterior. Se actualiza al cerrar cada olor.
+- `audit-2026-06-08-production-readiness.md` — roadmap activo. Fases 0/1 +
+  Bloques 1/2 cerrados; **Fases 2–5 abiertas** (supply-chain,
+  observabilidad, frontend, gobernanza).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
   (SQLite + Postgres) para repos del hot-path.
-- `per-user-channel-order-pending.md` — spec de feature pendiente Live TV.
+
+Los audits arquitectónicos cerrados (2026-05-14 y 2026-05-27 macro +
+per-package) viven en `archive/` — ya no son vivos.
 
 **Archivo** (`archive/`) — sesiones cerradas, conservadas para arqueología.
 No se lee al inicio; sólo cuando hace falta consultar una decisión vieja.
