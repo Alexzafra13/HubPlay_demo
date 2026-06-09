@@ -73,6 +73,7 @@
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
     "knip": "^6.16.1",
+    "playwright-core": "1.56.0",
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.3.0",

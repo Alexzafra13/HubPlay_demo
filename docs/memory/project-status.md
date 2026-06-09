@@ -55,12 +55,24 @@ así que la DB ya caía en el volumen. Aun así se añadió la defensa en
 | B5 | `ReadHeaderTimeout: 10s` en el `http.Server` (slowloris) |
 | M1 | Verificado: el double-submit CSRF ya exige header en mutaciones cookie-auth; Bearer no es CSRF-vulnerable. Sin cambio. |
 
+### Bloque 2 — quick wins de mayor retorno
+| Item | Resultado |
+|---|---|
+| A11 ✅ | Error boundary por ruta en `AppLayout` (`key={pathname}`): un crash de página ya no tira el shell/navegación. Test `ErrorBoundary.test.tsx`. |
+| A12 ✅ | `MediaGrid` virtualizado (window scroll, `@tanstack/react-virtual`). DOM acotado: pico ~72 tarjetas para 5000 ítems (vs 5000), verificado en Chromium real (arnés `web/verify/`). **Refactor house-clean** (patrón EPGGrid): umbral `VIRTUALIZE_THRESHOLD=60` (catálogos pequeños = ruta directa testeable; grandes = subcomponente `VirtualizedMediaGrid` aislado); **una sola fuente de columnas** (`columnsForWidth`+`useGridColumns`, sin duplicar breakpoints); sin hack de `measure()`. Directivo `"use no memo"` confinado al subcomponente (confirmado necesario: `incompatible-library` no reconoce `useWindowVirtualizer`; `useVirtualizer` sobre el root renderiza todo). Override de eslint scopeado al fichero por desfase de rc2. Test jsdom = guardia real del umbral. Stub `ResizeObserver` en setup. |
+| M22 | **No-issue**: la `JWTSecret` auto-gen solo siembra el keystore en el 1er arranque (`Bootstrap` solo si la tabla está vacía); luego las claves viven en DB (persistidas) y son la fuente de verdad. Con DB compartida las réplicas comparten clave → ya mitigado. No se toca. |
+
+**Verificación en navegador real (nuevo en el repo):** `web/verify/` —
+arnés standalone (`grid-harness.*`) + script Playwright (`measure-grid.mjs`,
+usa `PW_CHROME`) que mide cuántas `PosterCard` hay en el DOM y comprueba
+que la virtualización recicla. No entra en build ni CI (manual). `playwright-core` añadido como devDep.
+
 **Pendiente (no bloquea plug-and-play):** Fase 2 supply-chain (SHA-pin
 de actions, provenance/firma, checksum FFmpeg), Fase 3 observabilidad
-(M18-M24, p.ej. JWT auto-gen no persistido), Fase 4 frontend (error
-boundaries por ruta, virtualización de grids), Fase 5 gobernanza
-(README/SECURITY/CODEOWNERS). Bajos restantes: B2 (DNS-rebind TOCTOU),
-B3 (refresh TTL 30d).
+(M18-M21/M23/M24), Fase 4 frontend (A12 virtualización de grids — alto
+valor pero toca el render core, requiere prueba de scroll real), Fase 5
+gobernanza (README/SECURITY/CODEOWNERS). Bajos: B2 (DNS-rebind TOCTOU),
+B3 (refresh TTL 30d), M6 (backup periódico).
 
 ---
 
