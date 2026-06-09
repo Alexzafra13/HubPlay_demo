@@ -8,16 +8,56 @@
 
 ## 🔭 Estado actual (2026-06-09)
 
-**Salud:** MVP funcional, cerca de early-production. Todo el trabajo
-reciente está **mergeado en `main`**.
+**Salud:** MVP funcional, cerca de early-production. Hay una **PR grande
+abierta sin mergear** con endurecimiento/perf de esta sesión (ver abajo).
 
 | Área | Estado |
 |---|---|
 | Tests backend | `go test ./...` verde (con `-race` en los paquetes tocados) |
 | Tests frontend | **718/718** vitest verdes; `tsc` y `eslint` (0 errores) limpios |
-| PRs abiertas | ninguna nuestra (#489 dependabot pendiente de revisar) |
+| PRs abiertas | **#504** (rama `claude/monorepo-audit-go-react-94dgzk`) — 13 commits, **pendiente de CI + merge**. #489 dependabot pendiente |
 | Audit prod 2026-06-08 | Fases 0/1 + Bloques 1/2 ✅ shipped. **Fases 2–5 abiertas** |
 | Audits arquitectónicos previos | 2026-05-14 ✅ y 2026-05-27 (macro + per-package) ✅ — cerrados, archivados |
+
+### 🚧 PR #504 — endurecimiento + perf + observabilidad (2026-06-09, SIN mergear)
+
+Resultado de una auditoría técnica completa (comité multi-rol) → 13 commits
+con tests. **Solo backend; el frontend embebido NO cambia — no hay nada
+nuevo visible en la web.** El único cambio de comportamiento: el ACL por
+biblioteca ahora se aplica en VOD/streaming (un usuario sin grant deja de
+ver/reproducir esa biblioteca). Contenido de la PR:
+
+- **Seguridad:** H1 — ACL por biblioteca en TODO el surface VOD/streaming
+  (stream endpoints autorizan antes de crear sesión; item detail/children/
+  recommendations; `/libraries/{id}`+items; scoping cross-library en
+  `/items`, `/items/search`, `/items/latest` vía `ItemFilter.LibraryIDs`).
+  Home rails ya estaban scoped en SQL (verificado). Cap de body JSON 1 MiB
+  (`handlers.DecodeJSON`, anti-DoS). CSRF constant-time. Logs de errores
+  antes tragados (provider register, migrador PG).
+- **Fiabilidad:** ffmpeg en su propio process-group + kill del árbol
+  (`internal/procutil`, build-tagged) → sin huérfanos VAAPI/NVENC. Quitado
+  el cap de 30 min del scan (mataba bibliotecas grandes).
+- **Perf:** cgroup-awareness (`internal/runtimetune`: GOMAXPROCS desde
+  cuota CFS + GOMEMLIMIT; autotune lee GOMAXPROCS) → corre bien en
+  Pi/NAS/contenedores. Scan en 1 transacción/fichero (`IngestItem`). Drop
+  de 2 índices PK-redundantes (migración **058**, ambos backends). `/health`
+  ya no llama a `ReadMemStats` (sin pausa STW) — verificado re-perfilando.
+- **Observabilidad/medición (opt-in, sin impacto):** pprof gated
+  (`observability.pprof_enabled`, off por defecto, fail-closed sin token);
+  stack Prometheus+Grafana turnkey (`deploy/observability/`) sobre las
+  métricas RED ya existentes; script k6 (`scripts/perf/`); herramientas dev
+  `cmd/hpseed` + `cmd/hploadgen`; runbook `docs/perf-measurement.md`.
+
+**Aprendizajes de la sesión:**
+- `runtime.NumCPU()` NO respeta la cuota CFS (`--cpus`), solo afinidad
+  (`--cpuset`). Para contenedores hay que leer cgroup y fijar GOMAXPROCS.
+- pprof reveló en vivo que `/health` hacía `ReadMemStats` (STW) por request
+  — los microbenchmarks de DB nunca lo verían. Profiling > intuición.
+- El perfil de allocs reprodujo el hallazgo #1 del perf-doc
+  (`ListChannelsByLibrary` ~51% de allocs por el prober IPTV con 5000 canales).
+- Para medir un media server de verdad: Grafana (sobre métricas RED ya
+  existentes) + pprof + medir transcodes bajo reproducción real. k6 es
+  secundario (mide la API, no el transcoding). No sobre-ingenierar.
 
 **Endurecido de cara a internet** (2026-06-08, en `main`): token solo por
 Bearer/cookie, redacción de credenciales en logs, rate-limit de auth,
@@ -41,6 +81,24 @@ virtualizado. Detalle: `archive/2026-05-27-to-06-08.md`.
 | Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes). A11/A12 ya hechos. |
 | Baja | **Fase 5 — gobernanza** | README de despliegue, `SECURITY.md`, `CODEOWNERS` |
 | Baja | **Bajos sueltos** | B2 (DNS-rebind TOCTOU), B3 (refresh TTL 30d), M6 (backup periódico) |
+
+**Pendiente del hilo perf/medición (sesión 2026-06-09, post-#504):**
+- **C1 worker-pool del scan** — paralelizar `processFile` + desacoplar el
+  enrich TMDb a un pipeline rate-limited. Refactor delicado (estado mutable
+  compartido: `showCache`/`seenPaths`/`result`); hacer con harness sobre
+  biblioteca real. *Lo único crítico del audit que queda sin tocar.*
+- **#4 paginación de canales** — el read path (`GetChannelsForUser`) aplica
+  3 capas de overlay (logo/admin/user) en Go, así que paginar exige meter
+  la ordenación/visibilidad en SQL. Rewrite ordering-sensitive; verificar
+  en LiveTV real. El 51% de allocs medido era del prober (background), no
+  del read path.
+- **Métrica time-to-first-segment del transcode** — el KPI que falta para
+  un media server; instrumentar el stream manager + panel en el dashboard.
+  Verificar con ffmpeg real en el target.
+- **OFFSET profundo** (DB-High) sigue O(offset); migrar a cursor-only.
+- Highs del audit sin tocar: SHA-pin de Actions (A9), SBOM/provenance,
+  `AuditEmitter` 23 métodos (ISP). Mediums: rate-limit TMDb, SSRF guard del
+  transmux IPTV, rol stale en JWT, god-components React (`UsersAdmin` 1828 LoC).
 
 **Pendientes menores (de audits cerrados):**
 - **TT-8 (resto)** — traducir comentarios en inglés en los sub-paquetes de
