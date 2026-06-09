@@ -161,7 +161,9 @@ func MigrateSQLiteToPostgres(ctx context.Context, opts MigrateOptions) (*Migrate
 	// resetting explicitly removes any ambiguity if the pool reuses
 	// the same backend for the post-migration repopulation step.
 	defer func() {
-		_, _ = conn.ExecContext(context.Background(), "SET session_replication_role = 'origin'")
+		if _, err := conn.ExecContext(context.Background(), "SET session_replication_role = 'origin'"); err != nil {
+			logger.Warn("restore session_replication_role failed", "error", err)
+		}
 	}()
 
 	// ── Phase 4: enumerate + topologically sort target tables ───
