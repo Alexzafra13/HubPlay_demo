@@ -1,0 +1,19 @@
+# Prometheus scrape config for HubPlay.
+#
+# HubPlay exposes /metrics gated by observability.metrics_token. Put that
+# token in the `credentials` field below (or use a file via
+# `credentials_file`). The target assumes HubPlay runs on the Docker host;
+# on Linux the compose file maps host.docker.internal via extra_hosts.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: hubplay
+    metrics_path: /metrics
+    # Matches observability.metrics_token in hubplay.yaml.
+    authorization:
+      type: Bearer
+      credentials: "CHANGE_ME_METRICS_TOKEN"
+    static_configs:
+      - targets: ["host.docker.internal:8096"]
