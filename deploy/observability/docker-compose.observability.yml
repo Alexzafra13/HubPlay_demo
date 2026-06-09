@@ -1,0 +1,42 @@
+# Turnkey observability stack for HubPlay: Prometheus + Grafana with the
+# HubPlay dashboard auto-provisioned. Point it at a running HubPlay that
+# has observability.metrics_enabled + metrics_token set.
+#
+#   1. set the token in prometheus.yml (credentials)
+#   2. docker compose -f deploy/observability/docker-compose.observability.yml up -d
+#   3. open http://localhost:3000  (admin / admin) → HubPlay dashboard
+#
+# This is intentionally separate from the app compose so you can run it
+# only when you want to look, and on a different host if you like.
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      # Lets the scrape target host.docker.internal resolve on Linux.
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
+volumes:
+  prom-data:
+  grafana-data:

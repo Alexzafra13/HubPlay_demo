@@ -1,0 +1,105 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["hubplay"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "HubPlay",
+  "uid": "hubplay-main",
+  "version": 1,
+  "panels": [
+    {
+      "type": "stat", "title": "Active streams", "id": 1,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "targets": [ { "refId": "A", "expr": "hubplay_stream_active_sessions" } ]
+    },
+    {
+      "type": "stat", "title": "Requests / sec", "id": 2,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(hubplay_http_requests_total[5m]))" } ]
+    },
+    {
+      "type": "stat", "title": "5xx error rate", "id": 3,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.01 } ] } } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(hubplay_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(hubplay_http_requests_total[5m])), 1)" } ]
+    },
+    {
+      "type": "stat", "title": "p95 latency (all routes)", "id": 4,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(hubplay_http_request_duration_seconds_bucket[5m])) by (le))" } ]
+    },
+    {
+      "type": "timeseries", "title": "Request rate by route", "id": 5,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(hubplay_http_requests_total[5m])) by (route)", "legendFormat": "{{route}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "HTTP latency percentiles (all routes)", "id": 6,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum(rate(hubplay_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(hubplay_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum(rate(hubplay_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Application errors by code", "id": 7,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(hubplay_http_errors_total[5m])) by (code)", "legendFormat": "{{code}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Transcode starts by outcome", "id": 8,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(hubplay_stream_transcode_starts_total[5m])) by (outcome)", "legendFormat": "{{outcome}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "IPTV transmux (starts + decode mode)", "id": 9,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(hubplay_iptv_transmux_starts_total[5m])) by (outcome)", "legendFormat": "start {{outcome}}" },
+        { "refId": "B", "expr": "sum(rate(hubplay_iptv_transmux_decode_mode_total[5m])) by (mode)", "legendFormat": "mode {{mode}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Goroutines & heap", "id": 10,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        { "refId": "A", "expr": "go_goroutines", "legendFormat": "goroutines" },
+        { "refId": "B", "expr": "go_memstats_heap_inuse_bytes", "legendFormat": "heap in-use (bytes)" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Process CPU & resident memory", "id": 11,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        { "refId": "A", "expr": "rate(process_cpu_seconds_total[5m])", "legendFormat": "cpu cores" },
+        { "refId": "B", "expr": "process_resident_memory_bytes", "legendFormat": "RSS (bytes)" }
+      ]
+    }
+  ]
+}
