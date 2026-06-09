@@ -184,7 +184,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		Width  int    `json:"width"`
 		Height int    `json:"height"`
 	}
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body")
 		return
 	}
@@ -323,7 +323,7 @@ func (h *ImageHandler) SetLocked(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Locked bool `json:"locked"`
 	}
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}

@@ -215,7 +215,7 @@ type DBTestResponse struct {
 // found a problem", not "the test failed to run".
 func (h *AdminDBHandler) Test(w http.ResponseWriter, r *http.Request) {
 	var req DBTestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -365,7 +365,7 @@ type DBSaveRequest struct {
 // against the new driver within ~2-3 seconds.
 func (h *AdminDBHandler) Save(w http.ResponseWriter, r *http.Request) {
 	var req DBSaveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -455,7 +455,7 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		UseBundled bool   `json:"use_bundled,omitempty"`
 		Restart    bool   `json:"restart"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}

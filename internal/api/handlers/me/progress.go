@@ -1,7 +1,6 @@
 package me
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -115,7 +114,7 @@ func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req updateProgressRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}

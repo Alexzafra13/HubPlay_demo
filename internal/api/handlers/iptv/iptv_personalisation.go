@@ -2,7 +2,6 @@ package iptvhandler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -75,7 +74,7 @@ func (h *iptvPersonalisationHandler) ReplaceChannelOrder(w http.ResponseWriter, 
 		return
 	}
 	var req meIPTVChannelOrderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -117,7 +116,7 @@ func (h *iptvPersonalisationHandler) SetChannelVisibility(w http.ResponseWriter,
 		return
 	}
 	var req meIPTVVisibilityRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}

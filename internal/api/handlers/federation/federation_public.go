@@ -84,7 +84,7 @@ type pairingRequestResponse struct {
 // del router para evitar spam de peers desconocidos.
 func (h *FederationPublicHandler) ReceivePairingRequest(w http.ResponseWriter, r *http.Request) {
 	var body pairingRequestWire
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -135,7 +135,7 @@ func (h *FederationPublicHandler) ReceivePairingCallback(w http.ResponseWriter, 
 		return
 	}
 	var body pairingCallbackWire
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -171,7 +171,7 @@ func (h *FederationPublicHandler) ReceivePairingCancel(w http.ResponseWriter, r 
 		return
 	}
 	var body pairingCancelWire
-	if err := handlers.DecodeJSON(r, &body); err != nil {
+	if err := handlers.DecodeJSON(w, r, &body); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -412,7 +412,7 @@ type handshakeRequestWire struct {
 // so they can persist us.
 func (h *FederationPublicHandler) Handshake(w http.ResponseWriter, r *http.Request) {
 	var req handshakeRequestWire
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}

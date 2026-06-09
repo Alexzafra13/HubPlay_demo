@@ -2,7 +2,6 @@ package system
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -128,7 +127,7 @@ type AddCorsOriginRequest struct {
 // que List) para que el frontend repintene sin pedir GET separado.
 func (h *CorsOriginsHandler) Add(w http.ResponseWriter, r *http.Request) {
 	var req AddCorsOriginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "BAD_BODY", err.Error())
 		return
 	}

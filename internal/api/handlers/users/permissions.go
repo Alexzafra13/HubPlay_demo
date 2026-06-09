@@ -2,7 +2,6 @@ package users
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -151,7 +150,7 @@ func (h *PermissionsHandler) PutPermissions(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req SetPermissionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "BAD_BODY", err.Error())
 		return
 	}

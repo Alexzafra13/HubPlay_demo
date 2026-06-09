@@ -4,11 +4,57 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/db"
 )
+
+// memStatsTTL throttles runtime.ReadMemStats. /health is polled
+// constantly (load balancers, k8s liveness, monitoring), and
+// ReadMemStats triggers a stop-the-world pause — live profiling showed it
+// at ~18% of CPU and ~49% of allocations under a health-check load.
+const memStatsTTL = 5 * time.Second
+
+type memSnap struct {
+	allocMB int
+	sysMB   int
+	at      time.Time
+}
+
+// memStatsCache serves Go heap figures for /health without paying a
+// stop-the-world ReadMemStats on every request: at most one caller
+// refreshes per memStatsTTL and every other reads the last snapshot
+// lock-free.
+type memStatsCache struct {
+	snap       atomic.Pointer[memSnap]
+	refreshing atomic.Bool
+}
+
+func (c *memStatsCache) get() (allocMB, sysMB int) {
+	if s := c.snap.Load(); s != nil && time.Since(s.at) < memStatsTTL {
+		return s.allocMB, s.sysMB
+	}
+	// Stale or cold: exactly one caller pays the ReadMemStats cost; the
+	// rest return the previous snapshot (or zeros on a cold start).
+	if c.refreshing.CompareAndSwap(false, true) {
+		defer c.refreshing.Store(false)
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		s := &memSnap{
+			allocMB: int(m.Alloc / 1024 / 1024),
+			sysMB:   int(m.Sys / 1024 / 1024),
+			at:      time.Now(),
+		}
+		c.snap.Store(s)
+		return s.allocMB, s.sysMB
+	}
+	if s := c.snap.Load(); s != nil {
+		return s.allocMB, s.sysMB
+	}
+	return 0, 0
+}
 
 // minReadyFreeBytes is the floor below which /health/ready turns red.
 // 1 GiB is enough headroom for thumbnails + transcode segments + DB
@@ -28,6 +74,8 @@ type HealthHandler struct {
 	// transcode cache all sit on the same volume in the default
 	// deployment, so one statfs covers all three.
 	dbPath string
+	// memStats throttles the stop-the-world ReadMemStats for /health.
+	memStats memStatsCache
 }
 
 // NewHealthHandler consume db.HealthChecker en lugar de `*sql.DB`. El
@@ -133,8 +181,7 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		activeStreams = h.streamManager.ActiveSessions()
 	}
 
-	var mem runtime.MemStats
-	runtime.ReadMemStats(&mem)
+	allocMB, sysMB := h.memStats.get()
 
 	uptime := time.Since(h.startedAt)
 
@@ -153,8 +200,8 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		"ffmpeg":          ffmpegStatus,
 		"active_streams":  activeStreams,
 		"goroutines":      runtime.NumGoroutine(),
-		"memory_alloc_mb": int(mem.Alloc / 1024 / 1024),
-		"memory_sys_mb":   int(mem.Sys / 1024 / 1024),
+		"memory_alloc_mb": allocMB,
+		"memory_sys_mb":   sysMB,
 	})
 }
 

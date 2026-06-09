@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -87,7 +86,7 @@ func (h *AdminAuthHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// An empty body is valid — callers often want the default overlap. Any
 	// JSON shape other than the expected one is rejected cleanly.
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handlers.DecodeJSON(w, r, &req); err != nil {
 			handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 			return
 		}
@@ -130,7 +129,7 @@ type pruneRequest struct {
 func (h *AdminAuthHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	var req pruneRequest
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := handlers.DecodeJSON(w, r, &req); err != nil {
 			handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 			return
 		}

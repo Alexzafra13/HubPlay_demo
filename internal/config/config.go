@@ -138,6 +138,11 @@ type ObservabilityConfig struct {
 	MetricsEnabled bool   `yaml:"metrics_enabled"`
 	MetricsPath    string `yaml:"metrics_path"`
 	MetricsToken   string `yaml:"metrics_token"`
+	// PprofEnabled exposes the net/http/pprof profiling endpoints under
+	// /debug/pprof. Off by default and, when on, served ONLY behind the
+	// metrics_token (heap dumps leak memory contents and CPU/trace
+	// profiles are a DoS lever, so it fails closed without a token).
+	PprofEnabled bool `yaml:"pprof_enabled"`
 }
 
 type StreamingConfig struct {

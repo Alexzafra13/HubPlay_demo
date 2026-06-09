@@ -137,7 +137,7 @@ func (h *LibraryHandler) accessibleLibraryIDs(r *http.Request) (ids []string, un
 
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req library.CreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -212,7 +212,7 @@ func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req library.UpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}

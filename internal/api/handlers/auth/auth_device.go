@@ -93,7 +93,7 @@ type deviceStartResponse struct {
 // (verification_url alongside verification_uri for older client libs).
 func (h *DeviceAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 	var req deviceStartRequest
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		// Empty body is fine — device_name is optional.
 		req = deviceStartRequest{}
 	}
@@ -150,7 +150,7 @@ type devicePollRequest struct {
 // for protocol errors, 200 + tokens for success).
 func (h *DeviceAuthHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	var req devicePollRequest
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
@@ -225,7 +225,7 @@ func (h *DeviceAuthHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req deviceApproveRequest
-	if err := handlers.DecodeJSON(r, &req); err != nil {
+	if err := handlers.DecodeJSON(w, r, &req); err != nil {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
