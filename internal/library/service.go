@@ -116,6 +116,15 @@ type Service struct {
 	mu       sync.Mutex
 	scanning map[string]bool
 
+	// scanTimeout bounds a single ScanLibrary run. Zero (the default)
+	// means "no per-scan cap" — the scan is bounded only by bgCtx
+	// (process lifetime / shutdown), which is what a first scan of a
+	// very large library needs: the previous fixed 30-minute cap killed
+	// such scans mid-index, leaving the library permanently half-built.
+	// The walk is cooperatively cancellable (it checks ctx on every
+	// entry), so an operator can still set a cap via SetScanTimeout.
+	scanTimeout time.Duration
+
 	// Background-goroutine lifecycle. bgCtx is cancelled by Shutdown, bgWG
 	// waits for every auto-scan / manual scan goroutine to unwind. Without
 	// this, a goroutine started by Create would keep hitting the (already
@@ -156,6 +165,24 @@ func NewService(
 		bgCtx:     bgCtx,
 		bgCancel:  bgCancel,
 	}
+}
+
+// SetScanTimeout sets an optional per-scan deadline. Zero (the default)
+// leaves scans bounded only by the service's background context. Call
+// before any scan is triggered (e.g. from the composition root after
+// reading config).
+func (s *Service) SetScanTimeout(d time.Duration) {
+	s.scanTimeout = d
+}
+
+// scanContext derives the context for a single scan run from bgCtx,
+// applying the optional per-scan timeout. The caller must always call
+// the returned cancel func.
+func (s *Service) scanContext() (context.Context, context.CancelFunc) {
+	if s.scanTimeout > 0 {
+		return context.WithTimeout(s.bgCtx, s.scanTimeout)
+	}
+	return context.WithCancel(s.bgCtx)
 }
 
 // Shutdown cancels any in-flight background scans and blocks until every
@@ -236,7 +263,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.
 		s.bgWG.Add(1)
 		go func() {
 			defer s.bgWG.Done()
-			scanCtx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
+			scanCtx, cancel := s.scanContext()
 			defer cancel()
 			if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 				log.Error("auto-scan after creation failed", "error", err)
@@ -415,7 +442,7 @@ func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) 
 			s.mu.Unlock()
 		}()
 
-		scanCtx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
+		scanCtx, cancel := s.scanContext()
 		defer cancel()
 		if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 			log.Error("scan failed", "error", err)
