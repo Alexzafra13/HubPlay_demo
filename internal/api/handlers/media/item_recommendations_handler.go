@@ -25,14 +25,16 @@ type RecommendationsHandler struct {
 	lib         itemGetter
 	externalIDs handlers.ExternalIDsRepository
 	providers   handlers.ProviderManager
+	access      handlers.LibraryAccessService
 	logger      *slog.Logger
 }
 
-func newRecommendationsHandler(lib itemGetter, externalIDs handlers.ExternalIDsRepository, providers handlers.ProviderManager, logger *slog.Logger) *RecommendationsHandler {
+func newRecommendationsHandler(lib itemGetter, externalIDs handlers.ExternalIDsRepository, providers handlers.ProviderManager, access handlers.LibraryAccessService, logger *slog.Logger) *RecommendationsHandler {
 	return &RecommendationsHandler{
 		lib:         lib,
 		externalIDs: externalIDs,
 		providers:   providers,
+		access:      access,
 		logger:      logger,
 	}
 }
@@ -63,6 +65,10 @@ func (h *RecommendationsHandler) Recommendations(w http.ResponseWriter, r *http.
 		return
 	}
 	if item == nil {
+		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
+		return
+	}
+	if !itemLibraryAuthorized(r, h.access, h.logger, item.LibraryID) {
 		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
 		return
 	}

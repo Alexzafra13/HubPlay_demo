@@ -94,6 +94,13 @@ func (r *fakeChapterRepo) ListByItem(_ context.Context, itemID string) ([]*libra
 }
 
 func newItemTestEnv(t *testing.T) *itemTestEnv {
+	return newItemTestEnvWithAccess(t, nil)
+}
+
+// newItemTestEnvWithAccess builds the item-handler test env with an
+// optional per-library ACL wired. nil access (the default) disables the
+// gate so the bulk of the existing tests stay unaffected.
+func newItemTestEnvWithAccess(t *testing.T, access LibraryACL) *itemTestEnv {
 	t.Helper()
 	env := &itemTestEnv{
 		t:      t,
@@ -119,6 +126,7 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 		Chapters:    env.chapters,
 		ExternalIDs: env.extIDs,
 		People:      env.people,
+		Access:      access,
 		Logger:      testutil.NopLogger(),
 	})
 

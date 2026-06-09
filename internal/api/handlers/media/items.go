@@ -74,16 +74,20 @@ type ItemHandlerDeps struct {
 	Identifier   MetadataIdentifier
 	TrickplayDir string
 	Audit        handlers.AuditEmitter
-	Logger       *slog.Logger
+	// Access enforces the per-library ACL on the item-detail, children,
+	// recommendations and search surfaces. nil (minimal test builds)
+	// disables the gate. Production wires deps.Catalog.Libraries.
+	Access LibraryACL
+	Logger *slog.Logger
 }
 
 // NewItemHandler construye el facade + cada uno de los 5 sub-handlers.
 func NewItemHandler(deps ItemHandlerDeps) *ItemHandler {
 	return &ItemHandler{
-		ItemDetailHandler:      newItemDetailHandler(deps.Lib, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.Segments, deps.ExternalIDs, deps.People, deps.Collections, deps.Identifier, deps.Logger),
+		ItemDetailHandler:      newItemDetailHandler(deps.Lib, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.Segments, deps.ExternalIDs, deps.People, deps.Collections, deps.Identifier, deps.Access, deps.Logger),
 		TrickplayHandler:       newTrickplayHandler(deps.Lib, deps.TrickplayDir, deps.Logger),
-		SearchHandler:          newSearchHandler(deps.Lib, deps.Images, deps.UserData, deps.Users, deps.Logger),
-		RecommendationsHandler: newRecommendationsHandler(deps.Lib, deps.ExternalIDs, deps.Providers, deps.Logger),
+		SearchHandler:          newSearchHandler(deps.Lib, deps.Images, deps.UserData, deps.Users, deps.Access, deps.Logger),
+		RecommendationsHandler: newRecommendationsHandler(deps.Lib, deps.ExternalIDs, deps.Providers, deps.Access, deps.Logger),
 		MetadataHandler:        newMetadataHandler(deps.Identifier, deps.Audit, deps.Logger),
 	}
 }

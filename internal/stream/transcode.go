@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"hubplay/internal/procutil"
 )
 
 // Session representa un proceso ffmpeg activo. Los campos cmd/cancel/done
@@ -106,6 +108,14 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 	args := BuildFFmpegArgs(req)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
+	// Run ffmpeg in its own process group and kill the whole group on
+	// ctx-cancel (Stop / timeout), so VAAPI/NVENC or protocol helper
+	// subprocesses can't outlive the session as orphans holding a slot
+	// or a GPU context. WaitDelay bounds cmd.Wait() in case a grandchild
+	// keeps an output pipe open after the group SIGKILL.
+	procutil.SetProcessGroup(cmd)
+	cmd.Cancel = func() error { return procutil.KillProcessGroup(cmd) }
+	cmd.WaitDelay = 10 * time.Second
 
 	session := &Session{
 		ID:        sessionID,
@@ -164,6 +174,10 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 	args := BuildFFmpegArgs(req)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
+	// Same process-group teardown as Start (see rationale there).
+	procutil.SetProcessGroup(cmd)
+	cmd.Cancel = func() error { return procutil.KillProcessGroup(cmd) }
+	cmd.WaitDelay = 10 * time.Second
 
 	session := &Session{
 		ID:        sessionID,

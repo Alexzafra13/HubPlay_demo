@@ -17,6 +17,7 @@ import (
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
 	"hubplay/internal/stream"
 )
@@ -31,6 +32,7 @@ type StreamHandler struct {
 	streams        handlers.MediaStreamRepository
 	externalIDs    handlers.ExternalIDRepository
 	providers      handlers.ProviderManager
+	access         handlers.LibraryAccessService
 	settings       settingsReader
 	baseURLDefault string
 	logger         *slog.Logger
@@ -47,12 +49,19 @@ type StreamHandler struct {
 // handler falls back to the boot-time `baseURL` exclusively, which is
 // what tests rely on. `baseURL` itself is the YAML / env default that
 // survives a missing or empty DB row.
+//
+// `access` enforces the per-library ACL on every content-exposing
+// endpoint (playback info, HLS playlists, direct play, subtitles).
+// Production always wires it; when nil (minimal test builds) the gate
+// passes through, mirroring the nil-guard idiom used for the optional
+// collaborators above.
 func NewStreamHandler(
 	manager handlers.StreamManagerService,
 	items handlers.ItemRepository,
 	streams handlers.MediaStreamRepository,
 	externalIDs handlers.ExternalIDRepository,
 	providers handlers.ProviderManager,
+	access handlers.LibraryAccessService,
 	settings settingsReader,
 	baseURL string,
 	logger *slog.Logger,
@@ -63,10 +72,32 @@ func NewStreamHandler(
 		streams:        streams,
 		externalIDs:    externalIDs,
 		providers:      providers,
+		access:         access,
 		settings:       settings,
 		baseURLDefault: strings.TrimRight(baseURL, "/"),
 		logger:         logger.With("module", "stream-handler"),
 	}
+}
+
+// authorizeItem enforces the per-library ACL for the authenticated
+// caller against the item's library. On denial it writes a 404
+// (enumeration-safe — same as the federation stream surface, so a
+// caller can't distinguish "no access" from "doesn't exist") and
+// returns false; the caller must stop. When the access service isn't
+// wired (nil) the gate passes through.
+//
+// Closes the broken-access-control gap where the library ACL was
+// enforced for IPTV and federation streaming but not for local VOD /
+// HLS playback, letting any authenticated user stream any item by ID.
+func (h *StreamHandler) authorizeItem(w http.ResponseWriter, r *http.Request, item *librarymodel.Item) bool {
+	if h.access == nil {
+		return true
+	}
+	if handlers.CanAccessLibrary(r, h.access, h.logger, item.LibraryID) {
+		return true
+	}
+	handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
+	return false
 }
 
 // effectiveBaseURL resolves the runtime base URL: app_settings override
@@ -95,6 +126,9 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
 		handlers.HandleServiceError(w, r, err)
+		return
+	}
+	if !h.authorizeItem(w, r, item) {
 		return
 	}
 
@@ -144,9 +178,13 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify item exists
-	if _, err := h.items.GetByID(r.Context(), itemID); err != nil {
+	// Verify item exists and the caller may access its library.
+	item, err := h.items.GetByID(r.Context(), itemID)
+	if err != nil {
 		handlers.HandleServiceError(w, r, err)
+		return
+	}
+	if !h.authorizeItem(w, r, item) {
 		return
 	}
 
@@ -200,6 +238,19 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		handlers.RespondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	// Resolve + authorize the item BEFORE starting a session: otherwise
+	// an unauthorised caller would spawn a transcode session (resource
+	// burn) that the segment handler — which only checks the session
+	// exists — would then happily serve, defeating the ACL.
+	item, err := h.items.GetByID(r.Context(), itemID)
+	if err != nil {
+		handlers.HandleServiceError(w, r, err)
+		return
+	}
+	if !h.authorizeItem(w, r, item) {
 		return
 	}
 
@@ -271,9 +322,9 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// a scan-in-progress item), fall back to the legacy behaviour of
 	// serving ffmpeg's own progressively-grown manifest. The user
 	// loses free seeking on those items, which is the best we can
-	// do without knowing how long the stream is.
-	item, err := h.items.GetByID(r.Context(), itemID)
-	if err == nil && item != nil && item.DurationTicks > 0 {
+	// do without knowing how long the stream is. `item` was already
+	// resolved + authorized above.
+	if item.DurationTicks > 0 {
 		duration := float64(item.DurationTicks) / 10_000_000
 		// Carry the audio + subtitle params forward into segment URLs
 		// so hls.js keeps the same dub AND burned-in subtitle on every
@@ -471,6 +522,9 @@ func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
 		handlers.HandleServiceError(w, r, err)
 		return
 	}
+	if !h.authorizeItem(w, r, item) {
+		return
+	}
 
 	if item.Path == "" || !item.IsAvailable {
 		handlers.RespondError(w, r, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
@@ -554,6 +608,16 @@ func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Authorize against the item's library before listing its tracks.
+	item, err := h.items.GetByID(r.Context(), itemID)
+	if err != nil {
+		handlers.HandleServiceError(w, r, err)
+		return
+	}
+	if !h.authorizeItem(w, r, item) {
+		return
+	}
+
 	mediaStreams, err := h.streams.ListByItem(r.Context(), itemID)
 	if err != nil {
 		handlers.HandleServiceError(w, r, err)
@@ -600,6 +664,9 @@ func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.R
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
 		handlers.HandleServiceError(w, r, err)
+		return
+	}
+	if !h.authorizeItem(w, r, item) {
 		return
 	}
 
@@ -732,6 +799,9 @@ func (h *StreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
 		handlers.HandleServiceError(w, r, err)
+		return
+	}
+	if !h.authorizeItem(w, r, item) {
 		return
 	}
 

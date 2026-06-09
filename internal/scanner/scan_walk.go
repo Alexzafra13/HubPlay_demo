@@ -121,22 +121,21 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		IsAvailable:   true,
 	}
 
-	if err := s.items.Create(ctx, item); err != nil {
-		return fmt.Errorf("creating item: %w", err)
-	}
-
 	streams := probeResultToStreams(itemID, probeResult)
-	if len(streams) > 0 {
-		if err := s.streams.ReplaceForItem(ctx, itemID, streams); err != nil {
-			log.Warn("failed to store streams", "error", err)
-		}
+	// El repositorio de capítulos es opcional (tests viejos no lo cablean);
+	// conservamos esa condición para decidir si poblamos capítulos.
+	var chapters []librarymodel.Chapter
+	if s.chapters != nil && len(probeResult.Chapters) > 0 {
+		chapters = probeResultToChapters(probeResult)
 	}
 
-	// El repositorio de capítulos es opcional (tests viejos no lo cablean).
-	if s.chapters != nil && len(probeResult.Chapters) > 0 {
-		if err := s.chapters.Replace(ctx, itemID, probeResultToChapters(probeResult)); err != nil {
-			log.Warn("failed to store chapters", "error", err)
-		}
+	// Una sola transacción para item + streams + chapters: un fsync y una
+	// adquisición del write-lock por fichero en vez de tres. En bibliotecas
+	// grandes sobre SQLite (single-writer) este es el cuello dominante del
+	// throughput de scan. El fallo hace rollback del item completo — el
+	// fichero se reintenta en el siguiente scan (no queda a medias).
+	if err := s.items.IngestItem(ctx, item, streams, chapters); err != nil {
+		return fmt.Errorf("creating item: %w", err)
 	}
 
 	result.Added++

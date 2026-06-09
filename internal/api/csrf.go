@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"log/slog"
 	"net/http"
@@ -78,9 +79,12 @@ func CSRFProtect(next http.Handler) http.Handler {
 			return
 		}
 
-		// Validate: header must match cookie
+		// Validate: header must match cookie. Constant-time compare for
+		// consistency with the other token checks (e.g. the /metrics
+		// gate) — the double-submit token isn't a high-value secret, but
+		// there's no reason to leave a timing signal on the table.
 		headerToken := r.Header.Get(csrfHeaderName)
-		if headerToken == "" || headerToken != token {
+		if headerToken == "" || subtle.ConstantTimeCompare([]byte(headerToken), []byte(token)) != 1 {
 			apperror.Write(w, r.Context(), &domain.AppError{
 				Code:       "CSRF_FAILED",
 				HTTPStatus: http.StatusForbidden,

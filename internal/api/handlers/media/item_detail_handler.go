@@ -45,6 +45,7 @@ type ItemDetailHandler struct {
 	// vive en MetadataHandler. La referencia es el mismo puntero
 	// inyectado en el constructor de ambos handlers.
 	identifier MetadataIdentifier
+	access     handlers.LibraryAccessService
 	logger     *slog.Logger
 }
 
@@ -60,6 +61,7 @@ func newItemDetailHandler(
 	people handlers.PeopleRepoForItems,
 	collections handlers.CollectionRepoForItems,
 	identifier MetadataIdentifier,
+	access handlers.LibraryAccessService,
 	logger *slog.Logger,
 ) *ItemDetailHandler {
 	return &ItemDetailHandler{
@@ -74,8 +76,30 @@ func newItemDetailHandler(
 		people:      people,
 		collections: collections,
 		identifier:  identifier,
+		access:      access,
 		logger:      logger,
 	}
+}
+
+// authorizeItem resolves the item's library and enforces the per-library
+// ACL. On denial it writes a 404 (enumeration-safe) and returns false.
+// nil access (test rigs) passes through; the lookup is skipped entirely
+// in that case so the detail path pays no extra fetch when the ACL isn't
+// wired.
+func (h *ItemDetailHandler) authorizeItem(w http.ResponseWriter, r *http.Request, id string) bool {
+	if h.access == nil {
+		return true
+	}
+	item, err := h.lib.GetItem(r.Context(), id)
+	if err != nil {
+		handlers.HandleServiceError(w, r, err)
+		return false
+	}
+	if itemLibraryAuthorized(r, h.access, h.logger, item.LibraryID) {
+		return true
+	}
+	handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
+	return false
 }
 
 // callerCapRating mirrors the LibraryHandler helper. nil-safe: cuando
@@ -106,6 +130,9 @@ func (h *ItemDetailHandler) callerCapRating(ctx context.Context) string {
 func (h *ItemDetailHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := handlers.RequireParam(w, r, "id")
 	if id == "" {
+		return
+	}
+	if !h.authorizeItem(w, r, id) {
 		return
 	}
 	userID := ""
@@ -534,6 +561,9 @@ func (h *ItemDetailHandler) attachSeriesContextFromSeries(ctx context.Context, r
 func (h *ItemDetailHandler) Children(w http.ResponseWriter, r *http.Request) {
 	id := handlers.RequireParam(w, r, "id")
 	if id == "" {
+		return
+	}
+	if !h.authorizeItem(w, r, id) {
 		return
 	}
 	children, err := h.lib.GetItemChildren(r.Context(), id)

@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"hubplay/internal/clock"
+	"hubplay/internal/procutil"
 )
 
 // ErrTooManySessions se devuelve cuando el manager está al límite.
@@ -580,6 +581,14 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 	)
 	cmd := exec.CommandContext(ctx, m.cfg.FFmpegPath, args...)
 	cmd.Dir = workDir
+	// Run ffmpeg in its own process group and kill the whole group on
+	// ctx-cancel (terminate / idle reap / shutdown), so reencode-mode
+	// hwaccel helper subprocesses can't outlive the session as orphans
+	// holding a reencode slot or GPU context. WaitDelay bounds cmd.Wait()
+	// if a grandchild keeps the stderr pipe open past the group SIGKILL.
+	procutil.SetProcessGroup(cmd)
+	cmd.Cancel = func() error { return procutil.KillProcessGroup(cmd) }
+	cmd.WaitDelay = 10 * time.Second
 	if m.cfg.Metrics != nil {
 		m.cfg.Metrics.IncDecodeMode(mode.String())
 	}

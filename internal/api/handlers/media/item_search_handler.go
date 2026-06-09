@@ -28,15 +28,17 @@ type SearchHandler struct {
 	images   handlers.ImageRepository
 	userData handlers.UserDataRepository
 	users    userProfileLookup
+	access   LibraryACL
 	logger   *slog.Logger
 }
 
-func newSearchHandler(lib itemSearcher, images handlers.ImageRepository, userData handlers.UserDataRepository, users userProfileLookup, logger *slog.Logger) *SearchHandler {
+func newSearchHandler(lib itemSearcher, images handlers.ImageRepository, userData handlers.UserDataRepository, users userProfileLookup, access LibraryACL, logger *slog.Logger) *SearchHandler {
 	return &SearchHandler{
 		lib:      lib,
 		images:   images,
 		userData: userData,
 		users:    users,
+		access:   access,
 		logger:   logger,
 	}
 }
@@ -88,8 +90,24 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 	// kid mode entero.
 	cap := h.callerCapRating(r.Context())
 
+	// Per-library ACL: scope the search to the caller's granted
+	// libraries so a non-admin can't surface items from libraries they
+	// were never granted by typing the exact title. Admins / claim-less
+	// rigs run unrestricted; a caller with zero grants gets an empty
+	// result without touching the catalogue.
+	accessIDs, unrestricted := accessibleLibraryIDs(r, h.access, h.logger)
+	if !unrestricted && len(accessIDs) == 0 {
+		handlers.RespondJSON(w, http.StatusOK, map[string]any{"data": []any{}, "total": 0})
+		return
+	}
+	var libraryIDs []string
+	if !unrestricted {
+		libraryIDs = accessIDs
+	}
+
 	items, total, err := h.lib.ListItems(r.Context(), librarymodel.ItemFilter{
 		LibraryID:             libraryID,
+		LibraryIDs:            libraryIDs,
 		Type:                  itemType,
 		Query:                 query,
 		Genre:                 genre,

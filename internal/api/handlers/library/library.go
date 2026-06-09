@@ -28,6 +28,7 @@ type libraryOps interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
 	List(ctx context.Context) ([]*librarymodel.Library, error)
 	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
+	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 	Update(ctx context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error)
 	Delete(ctx context.Context, id string) error
 	Scan(ctx context.Context, id string, refreshMetadata ...bool) error
@@ -85,6 +86,55 @@ func (h *LibraryHandler) callerCapRating(ctx context.Context) string {
 	return u.MaxContentRating
 }
 
+// authorizeLibrary enforces the per-library ACL for the authenticated
+// caller. Admins pass; non-admins must have an explicit/implicit grant;
+// ACL-lookup errors fail closed. Requests without claims pass through —
+// the auth middleware guarantees claims in production, so a claim-less
+// request only ever happens in a test rig (mirrors callerCapRating's
+// nil-claims handling). On denial the caller must 404 (don't leak that
+// the library exists).
+func (h *LibraryHandler) authorizeLibrary(r *http.Request, libraryID string) bool {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		return true
+	}
+	if claims.Role == "admin" {
+		return true
+	}
+	ok, err := h.lib.UserHasAccess(r.Context(), claims.UserID, libraryID)
+	if err != nil {
+		h.logger.Error("library access check failed",
+			"user", claims.UserID, "library", libraryID, "error", err)
+		return false
+	}
+	return ok
+}
+
+// accessibleLibraryIDs returns the library IDs the caller may read, and
+// unrestricted=true when no filtering should be applied (admin, or a
+// claim-less test rig). Used by the cross-library list endpoints to
+// scope results to the caller's grants. An empty, non-nil slice with
+// unrestricted=false means "no access to anything".
+func (h *LibraryHandler) accessibleLibraryIDs(r *http.Request) (ids []string, unrestricted bool) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		return nil, true
+	}
+	if claims.Role == "admin" {
+		return nil, true
+	}
+	libs, err := h.lib.ListForUser(r.Context(), claims.UserID)
+	if err != nil {
+		h.logger.Error("list accessible libraries failed", "user", claims.UserID, "error", err)
+		return []string{}, false
+	}
+	ids = make([]string, len(libs))
+	for i, l := range libs {
+		ids[i] = l.ID
+	}
+	return ids, false
+}
+
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req library.CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -136,6 +186,10 @@ func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := handlers.RequireParam(w, r, "id")
 	if id == "" {
+		return
+	}
+	if !h.authorizeLibrary(r, id) {
+		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "library not found")
 		return
 	}
 	lib, err := h.lib.GetByID(r.Context(), id)
@@ -282,6 +336,10 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		return
 	}
+	if !h.authorizeLibrary(r, id) {
+		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "library not found")
+		return
+	}
 	offset, limit, _ := handlers.ParsePagination(w, r)
 	sortBy := r.URL.Query().Get("sort_by")
 	sortOrder := r.URL.Query().Get("sort_order")
@@ -348,7 +406,23 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	yearTo, _ := strconv.Atoi(q.Get("year_to"))
 	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 
+	// Per-library ACL: scope the cross-library catalogue to the caller's
+	// granted libraries. Admins / claim-less rigs run unrestricted; a
+	// caller with zero grants gets an empty page.
+	accessIDs, unrestricted := h.accessibleLibraryIDs(r)
+	if !unrestricted && len(accessIDs) == 0 {
+		handlers.RespondData(w, http.StatusOK, map[string]any{
+			"items": []any{}, "total": 0, "offset": offset, "limit": limit,
+		})
+		return
+	}
+	var libraryIDs []string
+	if !unrestricted {
+		libraryIDs = accessIDs
+	}
+
 	items, total, err := h.lib.ListItems(r.Context(), librarymodel.ItemFilter{
+		LibraryIDs:            libraryIDs,
 		ParentID:              parentID,
 		Type:                  itemType,
 		Query:                 queryStr,
@@ -411,6 +485,17 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	_, limit, _ := handlers.ParsePagination(w, r)
 	cap := h.callerCapRating(r.Context())
 
+	// Per-library ACL. A specific-library request the caller can't
+	// access returns an empty rail (no leak); a cross-library request
+	// (no library_id) is post-filtered to the accessible set below.
+	accessIDs, unrestricted := h.accessibleLibraryIDs(r)
+	if libraryID != "" && !unrestricted && !containsString(accessIDs, libraryID) {
+		handlers.RespondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{"items": []any{}, "total": 0, "offset": 0, "limit": limit},
+		})
+		return
+	}
+
 	// Activity-aware shows rail: when the caller asks for the latest
 	// series scoped to one library, we route to a dedicated query
 	// that orders by recent episode activity and includes the
@@ -471,6 +556,11 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 		handlers.HandleServiceError(w, r, err)
 		return
 	}
+	// Cross-library request: drop items from libraries the caller can't
+	// access. Single-library requests were already authorized above.
+	if libraryID == "" && !unrestricted {
+		items = filterItemsByLibrary(items, accessIDs)
+	}
 
 	data := h.enrichItemSummaries(r, items)
 
@@ -482,6 +572,31 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 			"limit":  limit,
 		},
 	})
+}
+
+// containsString reports whether s is in list.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// filterItemsByLibrary keeps only items whose LibraryID is in allowed.
+func filterItemsByLibrary(items []*librarymodel.Item, allowed []string) []*librarymodel.Item {
+	set := make(map[string]bool, len(allowed))
+	for _, id := range allowed {
+		set[id] = true
+	}
+	out := items[:0]
+	for _, it := range items {
+		if set[it.LibraryID] {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // AdminRecentlyAdded — GET /admin/system/recently-added. Lo que el

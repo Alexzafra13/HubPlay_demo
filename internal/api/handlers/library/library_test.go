@@ -49,6 +49,7 @@ type libFakeService struct {
 	getItemImagesFn func(ctx context.Context, id string) ([]*librarymodel.Image, error)
 	genres          []librarymodel.GenreCount
 	// Access surface — used by the admin user-libraries matrix tests.
+	userHasAccessFn    func(ctx context.Context, userID, libraryID string) (bool, error)
 	grantAccessFn      func(ctx context.Context, userID, libraryID string) error
 	revokeAccessFn     func(ctx context.Context, userID, libraryID string) error
 	listAccessFn       func(ctx context.Context, userID string) ([]string, error)
@@ -180,7 +181,10 @@ func (s *libFakeService) ItemCount(ctx context.Context, libraryID string) (int, 
 	return 0, nil
 }
 
-func (s *libFakeService) UserHasAccess(_ context.Context, _, _ string) (bool, error) {
+func (s *libFakeService) UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error) {
+	if s.userHasAccessFn != nil {
+		return s.userHasAccessFn(ctx, userID, libraryID)
+	}
 	return true, nil
 }
 
@@ -288,6 +292,8 @@ func newLibTestEnv(t *testing.T) *libTestEnv {
 		r.Post("/libraries/{id}/scan", env.handler.Scan)
 		r.Get("/libraries/browse", env.handler.Browse)
 		r.Get("/libraries/{id}/items", env.handler.Items)
+		// Cross-library catalogue (mounted at /items in production).
+		r.Get("/items", env.handler.AllItems)
 	})
 	env.router = r
 	return env

@@ -158,9 +158,18 @@ func run(configPath string) error {
 
 	// ═══ Phase 4d: Providers (TMDb, Fanart.tv, OpenSubtitles) ═══
 	providerManager := provider.NewManager(repos.Providers, logger)
-	_ = providerManager.Register(ctx, provider.NewTMDbProvider())
-	_ = providerManager.Register(ctx, provider.NewFanartProvider())
-	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
+	// Registration only fails on a programmer error (duplicate name); log
+	// it instead of dropping silently — a missing provider otherwise
+	// surfaces much later as confusing "no metadata" behaviour.
+	for _, p := range []provider.Provider{
+		provider.NewTMDbProvider(),
+		provider.NewFanartProvider(),
+		provider.NewOpenSubtitlesProvider(),
+	} {
+		if err := providerManager.Register(ctx, p); err != nil {
+			logger.Warn("provider registration failed", "provider", p.Name(), "error", err)
+		}
+	}
 
 	// Image storage shared with the HTTP image handler/refresher: el
 	// scanner descarga aquí cada poster/backdrop, los re-scans y los
