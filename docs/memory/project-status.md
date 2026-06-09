@@ -58,8 +58,14 @@ así que la DB ya caía en el volumen. Aun así se añadió la defensa en
 ### Bloque 2 — quick wins de mayor retorno
 | Item | Resultado |
 |---|---|
-| A11 ✅ | Error boundary por ruta en `AppLayout` (`key={pathname}`): un crash de página ya no tira el shell/navegación. Test `ErrorBoundary.test.tsx`; suite frontend 721/721; `tsc -b` limpio. |
+| A11 ✅ | Error boundary por ruta en `AppLayout` (`key={pathname}`): un crash de página ya no tira el shell/navegación. Test `ErrorBoundary.test.tsx`. |
+| A12 ✅ | `MediaGrid` virtualizado (window scroll, `@tanstack/react-virtual`). DOM acotado: pico ~72 tarjetas para 5000 ítems (vs 5000), verificado en Chromium real (arnés `web/verify/` con Playwright + capturas). Filas de altura fija (título/meta 1 línea), columnas responsive idénticas. Lleva `"use no memo"` (el compiler v1.0 sobre-memoizaba el store del virtualizador y rompía el reciclado); override de eslint en ese fichero por desfase del plugin de lint (rc2, sin 1.x). Guardia jsdom + stub `ResizeObserver` en setup. |
 | M22 | **No-issue**: la `JWTSecret` auto-gen solo siembra el keystore en el 1er arranque (`Bootstrap` solo si la tabla está vacía); luego las claves viven en DB (persistidas) y son la fuente de verdad. Con DB compartida las réplicas comparten clave → ya mitigado. No se toca. |
+
+**Verificación en navegador real (nuevo en el repo):** `web/verify/` —
+arnés standalone (`grid-harness.*`) + script Playwright (`measure-grid.mjs`,
+usa `PW_CHROME`) que mide cuántas `PosterCard` hay en el DOM y comprueba
+que la virtualización recicla. No entra en build ni CI (manual). `playwright-core` añadido como devDep.
 
 **Pendiente (no bloquea plug-and-play):** Fase 2 supply-chain (SHA-pin
 de actions, provenance/firma, checksum FFmpeg), Fase 3 observabilidad
