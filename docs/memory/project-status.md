@@ -47,6 +47,13 @@ ver/reproducir esa biblioteca). Contenido de la PR:
   stack Prometheus+Grafana turnkey (`deploy/observability/`) sobre las
   métricas RED ya existentes; script k6 (`scripts/perf/`); herramientas dev
   `cmd/hpseed` + `cmd/hploadgen`; runbook `docs/perf-measurement.md`.
+  ⚠️ **OJO: el stack Grafana/Prometheus está EMPAQUETADO pero NO levantado
+  ni hay datos en vivo.** Son ficheros de config en el repo; el operador lo
+  arranca aparte (`docker compose -f deploy/observability/docker-compose.observability.yml up`)
+  contra un HubPlay corriendo con `metrics_token`. Grafana es un programa
+  SEPARADO (puerto 3000), solo para el operador; NO es parte de la web ni
+  se despliega con el binario. `/metrics` (los datos crudos) sí existe ya
+  en el binario, pero por sí solo no "se ve" — necesita el scraper+dashboard.
 
 **Aprendizajes de la sesión:**
 - `runtime.NumCPU()` NO respeta la cuota CFS (`--cpus`), solo afinidad
