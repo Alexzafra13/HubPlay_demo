@@ -105,13 +105,12 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 ## Memoria de proyecto
 
 Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
-- `project-status.md` — estado actual, PRs abiertas, cola priorizada. **Entrypoint.**
+- `project-status.md` — estado actual, trabajo abierto, próximos pasos. **Entrypoint.**
 - `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
-- `audit-2026-05-14-go-backend-review.md` + `intervention-2026-05-14.md` — review arquitectónico vivo (iteraciones 4-7 pendientes)
+- `audit-2026-06-08-production-readiness.md` — roadmap activo (Fases 0/1 + Bloques 1/2 cerrados; Fases 2–5 abiertas)
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
-- `per-user-channel-order-pending.md` — spec de feature pendiente Live TV
-- `archive/` — sesiones cerradas (audits viejos, snapshots históricos)
+- `archive/` — sesiones y audits cerrados (no se lee al inicio; solo arqueología)
 - `README.md` — política de docs/memory/
 
 **Leer `docs/memory/project-status.md` al inicio de cada sesión** para retomar contexto.
