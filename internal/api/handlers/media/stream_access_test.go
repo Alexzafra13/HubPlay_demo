@@ -29,6 +29,21 @@ func (f *fakeLibraryAccess) UserHasAccess(_ context.Context, userID, libraryID s
 	return f.allow[userID][libraryID], nil
 }
 
+// ListForUser lets fakeLibraryAccess double as a media.LibraryACL for the
+// cross-library list/search tests.
+func (f *fakeLibraryAccess) ListForUser(_ context.Context, userID string) ([]*librarymodel.Library, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []*librarymodel.Library
+	for lib, ok := range f.allow[userID] {
+		if ok {
+			out = append(out, &librarymodel.Library{ID: lib})
+		}
+	}
+	return out, nil
+}
+
 // aclTestEnv wires a StreamHandler with a real access gate and a single
 // item that lives in "lib-restricted".
 type aclTestEnv struct {

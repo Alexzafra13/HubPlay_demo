@@ -83,6 +83,7 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 		Identifier:   identifier,
 		TrickplayDir: trickplayDir,
 		Audit:        deps.Infra.Audit,
+		Access:       deps.Catalog.Libraries,
 		Logger:       deps.Infra.Logger,
 	})
 

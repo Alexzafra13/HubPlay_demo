@@ -76,7 +76,13 @@ type Item struct {
 // profile o cap unknown — fail-open).
 type ItemFilter struct {
 	LibraryID string
-	ParentID  string // filter by parent (e.g., episodes of a season)
+	// LibraryIDs, when non-empty, restricts the result set to items in
+	// any of these libraries (library_id IN (...)). Built upstream from
+	// the caller's library_access grants so the cross-library list /
+	// search endpoints can't surface items from libraries the caller was
+	// never granted. nil/empty = no restriction (admin or no ACL).
+	LibraryIDs []string
+	ParentID   string // filter by parent (e.g., episodes of a season)
 	Type      string // filter by type
 	Query     string // FTS search
 	Genre     string // genre name (case-insensitive); resolved against item_values

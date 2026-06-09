@@ -230,6 +230,14 @@ func (r *ItemRepository) List(ctx context.Context, filter librarymodel.ItemFilte
 		conds = append(conds, "library_id = ?")
 		args = append(args, filter.LibraryID)
 	}
+	// Per-caller library allow-list: restricts cross-library list /
+	// search to the caller's granted libraries. Empty = no restriction.
+	if len(filter.LibraryIDs) > 0 {
+		conds = append(conds, "library_id IN ("+sqlPlaceholders(len(filter.LibraryIDs))+")")
+		for _, v := range filter.LibraryIDs {
+			args = append(args, v)
+		}
+	}
 	if filter.ParentID != "" {
 		conds = append(conds, "parent_id = ?")
 		args = append(args, filter.ParentID)

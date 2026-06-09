@@ -341,6 +341,12 @@ func TestIntegration_Items_ContentRatingCap(t *testing.T) {
 	// Perfil "kid" con cap PG: la cláusula IN debe excluir R y los
 	// items sin content_rating (NULL no entra en IN cuando hay cap).
 	env.createUser("kid", "user", "PG")
+	// Grant the kid library access — the items endpoint now enforces the
+	// per-library ACL, so without a grant the request 404s before the
+	// content-rating cap (which is what this test exercises) is reached.
+	if err := env.svc.GrantAccess(context.Background(), "kid", lib.ID); err != nil {
+		t.Fatalf("grant access: %v", err)
+	}
 	rr := env.do(http.MethodGet, "/api/v1/libraries/"+lib.ID+"/items?limit=50", "",
 		&auth.Claims{UserID: "kid", Role: "user"})
 	if rr.Code != http.StatusOK {
