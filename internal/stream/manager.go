@@ -147,11 +147,15 @@ func NewManager(deps Deps) *Manager {
 	}
 
 	// Auto-tune después de detección para que la recomendación se
-	// ajuste al acelerador real. runtime.NumCPU() lee el límite cgroup.
-	tuned := AutoTuneStreaming(cfg, hwAccel, runtime.NumCPU())
+	// ajuste al acelerador real. Usamos GOMAXPROCS (no NumCPU) porque
+	// runtimetune.Configure ya lo bajó a la cuota cgroup real cuando el
+	// contenedor está CPU-limitado — NumCPU ignora la cuota CFS y
+	// sobre-provisionaría sesiones en un host grande con `--cpus`.
+	cpuCount := runtime.GOMAXPROCS(0)
+	tuned := AutoTuneStreaming(cfg, hwAccel, cpuCount)
 	logger.Info("streaming auto-tune applied",
 		"hw_accel", hwAccel,
-		"cpu_count", runtime.NumCPU(),
+		"cpu_count", cpuCount,
 		"max_sessions", tuned.MaxTranscodeSessions,
 		"max_sessions_per_user", tuned.MaxTranscodeSessionsPerUser,
 		"libx264_preset", tuned.TranscodePreset,

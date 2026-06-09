@@ -10,6 +10,7 @@ import (
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/logging"
+	"hubplay/internal/runtimetune"
 )
 
 // foundation agrupa los componentes de arranque que el resto de fases
@@ -36,6 +37,12 @@ func buildFoundation(configPath string) (*foundation, error) {
 	clk := clock.New()
 
 	logger.Info("starting HubPlay", "version", version, "commit", commit, "addr", cfg.Server.Addr())
+
+	// Align the Go runtime (GOMAXPROCS / GOMEMLIMIT) with the container's
+	// cgroup CPU/memory limits before anything spins up goroutines or the
+	// streaming autotuner reads GOMAXPROCS. No-op on bare metal / when the
+	// operator set the env vars.
+	runtimetune.Configure(logger)
 
 	prependBundledBinaries()
 
