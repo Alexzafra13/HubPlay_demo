@@ -138,11 +138,29 @@ func newStreamTestEnv(t *testing.T) *streamTestEnv {
 		items:   &streamFakeItemRepo{byID: map[string]*librarymodel.Item{}},
 		streams: &streamFakeMediaStreamRepo{byItem: map[string][]*librarymodel.MediaStream{}},
 	}
+	// Baseline item every endpoint can resolve. The handlers now fetch
+	// the item up front to enforce the per-library ACL, so it must exist
+	// (DurationTicks=0 keeps QualityPlaylist on the legacy-manifest path
+	// unless a test overrides it). Tests asserting "not found" use a
+	// different id. access is nil in this env so the gate passes through.
+	env.items.byID["item-1"] = &librarymodel.Item{
+		ID:          "item-1",
+		LibraryID:   "lib-1",
+		Type:        "movie",
+		Title:       "Test Item",
+		Path:        "/tmp/test-item.mkv",
+		Container:   "mkv",
+		IsAvailable: true,
+	}
 	// nil externalIDs + providers — existing stream tests don't hit
 	// the external-subtitle endpoints, so the new handlers short-
 	// circuit to 503 via their nil-guard. Tests that need them wire
 	// fakes locally.
-	env.handler = NewStreamHandler(env.manager, env.items, env.streams, nil, nil, nil, "http://test", testutil.NopLogger())
+	// access=nil → the per-library ACL gate passes through, so the
+	// existing endpoint behaviour tests below are unaffected. The ACL
+	// allow/deny paths are covered by stream_access_test.go, which wires
+	// a real access fake.
+	env.handler = NewStreamHandler(env.manager, env.items, env.streams, nil, nil, nil, nil, "http://test", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/stream/{itemId}", func(r chi.Router) {

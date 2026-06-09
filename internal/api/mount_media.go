@@ -21,7 +21,7 @@ func mountStreaming(r chi.Router, deps Dependencies) {
 	}
 	streamHandler := media.NewStreamHandler(
 		deps.Streaming.StreamManager, deps.Catalog.Items, deps.Catalog.MediaStreams,
-		deps.Catalog.ExternalIDs, deps.Providers.Manager,
+		deps.Catalog.ExternalIDs, deps.Providers.Manager, deps.Catalog.Libraries,
 		deps.Admin.Settings, deps.Server.ServerBaseURL, deps.Infra.Logger,
 	)
 
