@@ -7,6 +7,7 @@ import { MiniPlayer } from "@/components/livetv/MiniPlayer";
 import { usePlaylistRefreshEvents } from "@/hooks/usePlaylistRefreshEvents";
 import { useUserDataSync } from "@/hooks/useUserDataSync";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { ErrorBoundary } from "@/components/common";
 
 // ─── AppLayout ──────────────────────────────────────────────────────────────
 
@@ -92,7 +93,17 @@ export function AppLayout() {
         className="px-4 pb-4 md:px-6 md:pb-6"
         style={{ paddingTop: "var(--topbar-height)" }}
       >
-        <Outlet />
+        {/* Error boundary POR RUTA: un crash de render en una página se
+            contiene aquí dentro, así el shell (TopBar / drawer / mini-
+            player / navegación) sobrevive y el usuario puede irse a otra
+            sección en vez de quedarse con la app en blanco. El `key` por
+            pathname remonta el boundary al navegar, limpiando el error
+            automáticamente sin que el usuario tenga que pulsar "Try again".
+            El boundary global de App.tsx queda como red de seguridad para
+            crashes del propio shell. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
 
       {/* Mini-player — fixed bottom-right, lives at the shell level so
