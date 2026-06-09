@@ -55,58 +55,12 @@ func (r *ItemRepository) driver() string {
 
 func (r *ItemRepository) Create(ctx context.Context, item *librarymodel.Item) error {
 	if r.useSQLite() {
-		err := r.sq.CreateItem(ctx, sqlc.CreateItemParams{
-			ID:              item.ID,
-			LibraryID:       item.LibraryID,
-			ParentID:        nullableString(item.ParentID),
-			Type:            item.Type,
-			Title:           item.Title,
-			SortTitle:       item.SortTitle,
-			OriginalTitle:   nullableString(item.OriginalTitle),
-			Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
-			Path:            nullableString(item.Path),
-			Size:            sql.NullInt64{Int64: item.Size, Valid: true},
-			DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
-			Container:       nullableString(item.Container),
-			Fingerprint:     nullableString(item.Fingerprint),
-			SeasonNumber:    nullableIntPtr(item.SeasonNumber),
-			EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
-			CommunityRating: nullableFloat64Ptr(item.CommunityRating),
-			ContentRating:   nullableString(item.ContentRating),
-			PremiereDate:    nullableTimePtr(item.PremiereDate),
-			AddedAt:         item.AddedAt,
-			UpdatedAt:       item.UpdatedAt,
-			IsAvailable:     item.IsAvailable,
-		})
-		if err != nil {
+		if err := r.sq.CreateItem(ctx, sqliteCreateItemParams(item)); err != nil {
 			return fmt.Errorf("create item: %w", err)
 		}
 		return nil
 	}
-	err := r.pq.CreateItem(ctx, sqlc_pg.CreateItemParams{
-		ID:              item.ID,
-		LibraryID:       item.LibraryID,
-		ParentID:        nullableString(item.ParentID),
-		Type:            item.Type,
-		Title:           item.Title,
-		SortTitle:       item.SortTitle,
-		OriginalTitle:   nullableString(item.OriginalTitle),
-		Year:            sql.NullInt32{Int32: int32(item.Year), Valid: true},
-		Path:            nullableString(item.Path),
-		Size:            sql.NullInt64{Int64: item.Size, Valid: true},
-		DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
-		Container:       nullableString(item.Container),
-		Fingerprint:     nullableString(item.Fingerprint),
-		SeasonNumber:    nullableIntPtrInt32(item.SeasonNumber),
-		EpisodeNumber:   nullableIntPtrInt32(item.EpisodeNumber),
-		CommunityRating: nullableFloat64Ptr(item.CommunityRating),
-		ContentRating:   nullableString(item.ContentRating),
-		PremiereDate:    nullableTimePtr(item.PremiereDate),
-		AddedAt:         item.AddedAt,
-		UpdatedAt:       item.UpdatedAt,
-		IsAvailable:     item.IsAvailable,
-	})
-	if err != nil {
+	if err := r.pq.CreateItem(ctx, pgCreateItemParams(item)); err != nil {
 		return fmt.Errorf("create item: %w", err)
 	}
 	return nil
