@@ -6,17 +6,18 @@
 
 ---
 
-## 🔭 Estado actual (2026-06-09)
+## 🔭 Estado actual (2026-06-10)
 
 **Salud:** MVP funcional, cerca de early-production. Todo el trabajo
-reciente está **mergeado en `main`**.
+hasta el 2026-06-09 está **mergeado en `main`**; la Fase 2 (supply-chain)
+está en la rama `claude/project-review-8tznz4`.
 
 | Área | Estado |
 |---|---|
 | Tests backend | `go test ./...` verde (con `-race` en los paquetes tocados) |
 | Tests frontend | **718/718** vitest verdes; `tsc` y `eslint` (0 errores) limpios |
 | PRs abiertas | ninguna nuestra (#489 dependabot pendiente de revisar) |
-| Audit prod 2026-06-08 | Fases 0/1 + Bloques 1/2 ✅ shipped. **Fases 2–5 abiertas** |
+| Audit prod 2026-06-08 | Fases 0/1/2 + Bloques 1/2 ✅. **Fases 3–5 abiertas** |
 | Audits arquitectónicos previos | 2026-05-14 ✅ y 2026-05-27 (macro + per-package) ✅ — cerrados, archivados |
 
 **Endurecido de cara a internet** (2026-06-08, en `main`): token solo por
@@ -32,11 +33,20 @@ virtualizado. Detalle: `archive/2026-05-27-to-06-08.md`.
 ## 📋 Trabajo abierto
 
 **Roadmap principal:** `audit-2026-06-08-production-readiness.md` (Fases
-2–5). Ninguna bloquea el uso plug-and-play básico.
+3–5). Ninguna bloquea el uso plug-and-play básico.
+
+**Fase 2 — supply-chain / release: ✅ hecha (2026-06-10)** en
+`claude/project-review-8tznz4`: actions SHA-pineadas, SLSA provenance
+(attest-build-provenance) en releases + nightly, SBOM/provenance OCI en
+la imagen Docker, verificación sha256 de FFmpeg (API digest) y NSSM
+(opt-in por repo var), `.sha256` fatal en install.sh, Trivy bloqueante
+en tags, govulncheck pineado, jobs `sqlc-verify` + `pnpm build` en CI,
+dependabot docker + bases por digest. Detalle y acciones de operador
+pendientes (NSSM_EXPECTED_SHA256, SignPath): §"Fase 2 — implementación"
+del audit.
 
 | Prioridad | Tema | Items |
 |---|---|---|
-| Media-alta | **Fase 2 — supply-chain / release** | A9 (SHA-pin de GitHub Actions), A10 (provenance/firma de binarios + checksum FFmpeg + install.sh), M12–M17 (Trivy/govulncheck bloqueantes, SBOM, `pnpm build` y sqlc-verify en CI) |
 | Media | **Fase 3 — observabilidad / config** | M18–M21, M23, M24 (IP de cliente en logs, panics en métricas, validación de config, completar `example.yaml`). M22 ya descartado (no-issue). |
 | Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes). A11/A12 ya hechos. |
 | Baja | **Fase 5 — gobernanza** | README de despliegue, `SECURITY.md`, `CODEOWNERS` |

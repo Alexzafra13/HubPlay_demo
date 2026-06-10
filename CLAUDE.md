@@ -108,7 +108,7 @@ Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
 - `project-status.md` — estado actual, trabajo abierto, próximos pasos. **Entrypoint.**
 - `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
-- `audit-2026-06-08-production-readiness.md` — roadmap activo (Fases 0/1 + Bloques 1/2 cerrados; Fases 2–5 abiertas)
+- `audit-2026-06-08-production-readiness.md` — roadmap activo (Fases 0/1/2 + Bloques 1/2 cerrados; Fases 3–5 abiertas)
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
 - `archive/` — sesiones y audits cerrados (no se lee al inicio; solo arqueología)
 - `README.md` — política de docs/memory/
