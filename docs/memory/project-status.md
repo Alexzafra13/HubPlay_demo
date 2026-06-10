@@ -32,7 +32,18 @@ virtualizado. Detalle: `archive/2026-05-27-to-06-08.md`.
 
 ## 📋 Trabajo abierto
 
-**Roadmap principal:** `audit-2026-06-08-production-readiness.md` (Fases
+**Roadmap principal (nuevo):** `audit-2026-06-10-playback-chain.md` —
+audit focalizado de la cadena de playback (decisión de streaming, FFmpeg,
+probe, IPTV, player hls.js). 39 hallazgos, 4 críticos. **Es el trabajo de
+más valor de usuario pendiente** — todo lo demás son cimientos.
+
+| Prioridad | Tema | Items |
+|---|---|---|
+| **Alta** | **Playback P0 — rompe reproducción común** | PB-1 (MKV falso DirectPlay por alias webm), PB-2 (segmentos servidos a medio escribir), PB-3 (keyframes sin alinear al grid de 6s del seeking), PB-4 (sin listener de error del `<video>` en VOD) |
+| Alta | **Playback P1 (a-d)** | decisión/transcode (PB-6..9, 20, 21), trickplay+probe (PB-11..13, 24, 25 — PB-12 es ACL faltante), IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
+| Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
+
+**Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases
 3–5). Ninguna bloquea el uso plug-and-play básico.
 
 **Fase 2 — supply-chain / release: ✅ hecha (2026-06-10)** en
@@ -72,7 +83,9 @@ del audit.
   keystore, preflight, sqlc adapter, ADR-026 logs).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,
   comentarios en español, regeneración sqlc.
-- `audit-2026-06-08-production-readiness.md` — roadmap activo (Fases 2–5).
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo principal**
+  (cadena de playback: 39 hallazgos, plan P0–P3).
+- `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 3–5).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend.
 - `web/verify/` — arnés de verificación en navegador del grid virtualizado.
 
