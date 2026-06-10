@@ -41,7 +41,6 @@ function mount(overrides: Partial<Parameters<typeof useSubtitleSelection>[0]> = 
   const setActiveFederatedSubIndex = vi.fn();
   const setActiveLocalSubIndex = vi.fn();
   const onBurnSubtitleSelected = vi.fn();
-  const clearActiveExternalSub = vi.fn();
   const hook = renderHook(() =>
     useSubtitleSelection({
       videoRef: { current: video },
@@ -56,7 +55,6 @@ function mount(overrides: Partial<Parameters<typeof useSubtitleSelection>[0]> = 
       onBurnSubtitleSelected,
       activeLocalSubIndex: null,
       setActiveLocalSubIndex,
-      clearActiveExternalSub,
       ...overrides,
     }),
   );
@@ -66,7 +64,6 @@ function mount(overrides: Partial<Parameters<typeof useSubtitleSelection>[0]> = 
     setActiveLocalSubIndex,
     setActiveFederatedSubIndex,
     onBurnSubtitleSelected,
-    clearActiveExternalSub,
   };
 }
 
@@ -82,7 +79,7 @@ describe("useSubtitleSelection — pistas de texto locales (PB-41)", () => {
   });
 
   it("seleccionar una pista de texto activa su índice ABSOLUTO y suprime el resto de orígenes", () => {
-    const { hook, setHlsTrack, setActiveLocalSubIndex, clearActiveExternalSub } = mount();
+    const { hook, setHlsTrack, setActiveLocalSubIndex } = mount();
     const completos = hook.result.current.mergedSubtitleTracks.find(
       (t) => t.name === "Castellano Completos",
     )!;
@@ -95,7 +92,6 @@ describe("useSubtitleSelection — pistas de texto locales (PB-41)", () => {
     // la URL del extractor WebVTT del backend.
     expect(setActiveLocalSubIndex).toHaveBeenCalledWith(3);
     expect(setHlsTrack).toHaveBeenCalledWith(-1);
-    expect(clearActiveExternalSub).toHaveBeenCalled();
   });
 
   it("la pista local activa se refleja como seleccionada en el picker", () => {

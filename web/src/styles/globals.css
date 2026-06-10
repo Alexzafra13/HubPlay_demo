@@ -348,3 +348,51 @@ select:focus-visible {
     transform: translate3d(0, 0, 0);
   }
 }
+
+/* ─── Player: lenguaje de gestos de salto (sello HubPlay) ───────────
+   El feedback de ±10s no copia el círculo-ripple de YouTube ni el
+   toast de Jellyfin: una "marea" del acento teal respira desde el
+   borde del lado saltado, tres chevrons cascadean en la dirección del
+   salto y el total acumulado aparece en numerales tabulares con glow.
+   Coreografía única de ~750ms — un solo momento bien orquestado. */
+@keyframes hp-tide {
+  0% { opacity: 0; }
+  16% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes hp-chevron {
+  0% { opacity: 0; transform: translateX(0); }
+  28% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(var(--hp-chevron-shift, 10px)); }
+}
+@keyframes hp-count {
+  0% { opacity: 0; transform: scale(0.82) translateY(8px); }
+  22% { opacity: 1; transform: scale(1.08) translateY(0); }
+  36% { transform: scale(1); }
+  74% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.98) translateY(-6px); }
+}
+
+/* Botones ±10s de la barra: el arco del icono "gira" al pulsar, en la
+   dirección del salto. Re-disparado por key remount. */
+@keyframes hp-skip-nudge-back {
+  from { transform: rotate(-40deg); }
+  to { transform: rotate(0deg); }
+}
+@keyframes hp-skip-nudge-fwd {
+  from { transform: rotate(40deg); }
+  to { transform: rotate(0deg); }
+}
+
+/* Favorito: latido del corazón + anillo de pulso que se expande con
+   el glow del acento. */
+@keyframes hp-fav-burst {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.3); }
+  62% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+@keyframes hp-fav-ring {
+  0% { opacity: 0.9; transform: scale(0.5); }
+  100% { opacity: 0; transform: scale(2.1); }
+}

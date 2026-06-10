@@ -22,6 +22,7 @@ const baseProps = {
   onToggleFullscreen: vi.fn(),
   onAudioTrackChange: vi.fn(),
   onSubtitleTrackChange: vi.fn(),
+  onSkip: vi.fn(),
   onClose: vi.fn(),
 };
 
@@ -190,23 +191,19 @@ describe("PlayerControls — audio picker", () => {
 });
 
 describe("PlayerControls — subtitles picker", () => {
-  it("includes the Off row and surfaces external-subs search inside the picker", () => {
-    const onSearch = vi.fn();
+  it("lista la fila Ninguno y las pistas del fichero — sin búsqueda online", () => {
     render(
       <PlayerControls
         {...baseProps}
         subtitleTracks={[{ id: 0, name: "English", lang: "eng" }]}
-        onSearchExternalSubs={onSearch}
       />,
     );
     openPicker(/subtitles|subtítulos/i);
     expect(screen.getByText(/off|ninguno/i)).toBeInTheDocument();
-    // English row is present.
     expect(screen.getByText("English")).toBeInTheDocument();
-    // Search-online row lives inside the picker (no longer a sibling
-    // button on the bar).
-    fireEvent.click(screen.getByText(/search online|buscar.*online/i));
-    expect(onSearch).toHaveBeenCalledTimes(1);
+    // La búsqueda online se eliminó del producto (decisión del owner,
+    // 2026-06-10): el picker solo muestra lo que el fichero trae.
+    expect(screen.queryByText(/search online|buscar.*online/i)).toBeNull();
   });
 });
 
@@ -246,5 +243,48 @@ describe("PlayerControls — top bar", () => {
     if (topBar) {
       expect(within(topBar as HTMLElement).queryByText(/stream directo|direct stream|direct play/i)).toBeNull();
     }
+  });
+});
+
+describe("PlayerControls — saltos ±10s, PiP y favorito", () => {
+  it("los botones de salto llaman onSkip con ∓10", () => {
+    const onSkip = vi.fn();
+    render(<PlayerControls {...baseProps} onSkip={onSkip} />);
+    fireEvent.click(screen.getByRole("button", { name: /retroceder 10|back 10/i }));
+    expect(onSkip).toHaveBeenCalledWith(-10);
+    fireEvent.click(screen.getByRole("button", { name: /avanzar 10|forward 10/i }));
+    expect(onSkip).toHaveBeenCalledWith(10);
+  });
+
+  it("el botón PiP solo se monta cuando hay handler, y lo dispara", () => {
+    const { rerender } = render(<PlayerControls {...baseProps} />);
+    expect(screen.queryByRole("button", { name: /ventana flotante|picture in picture/i })).toBeNull();
+
+    const onTogglePiP = vi.fn();
+    rerender(<PlayerControls {...baseProps} onTogglePiP={onTogglePiP} />);
+    fireEvent.click(screen.getByRole("button", { name: /ventana flotante|picture in picture/i }));
+    expect(onTogglePiP).toHaveBeenCalled();
+  });
+
+  it("el corazón refleja el estado y conmuta el favorito", () => {
+    const onToggleFavorite = vi.fn();
+    const { rerender } = render(<PlayerControls {...baseProps} />);
+    // Sin handler (item peer): oculto.
+    expect(screen.queryByRole("button", { name: /favoritos|favorites/i })).toBeNull();
+
+    rerender(
+      <PlayerControls {...baseProps} isFavorite={false} onToggleFavorite={onToggleFavorite} />,
+    );
+    const heart = screen.getByRole("button", { name: /añadir a favoritos|add to favorites/i });
+    expect(heart).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(heart);
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <PlayerControls {...baseProps} isFavorite onToggleFavorite={onToggleFavorite} />,
+    );
+    expect(
+      screen.getByRole("button", { name: /quitar de favoritos|remove from favorites/i }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 });

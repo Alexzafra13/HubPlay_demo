@@ -25,6 +25,7 @@ import type {
   PersonDetail,
   LibraryEPGSource,
   MediaItem,
+  MediaStream,
   PaginatedResponse,
   PatchChannelRequest,
   PeerStreamSessionResponse,
@@ -66,7 +67,6 @@ import type {
   UploadBrowseResponse,
   UserData,
   ApiErrorBody,
-  ExternalSubtitleResult,
 } from "./types";
 import { ApiError } from "./types";
 import { getClientCapabilitiesHeader } from "./clientCapabilities";
@@ -122,6 +122,34 @@ type AuthEventListener = {
   onTokenRefresh?: (accessToken: string, refreshToken: string) => void;
   onAuthFailure?: () => void;
 };
+
+// Wire → tipo del cliente para media_streams. El backend emite
+// `stream_type`/`stream_index` y OMITE los campos vacíos; el tipo
+// MediaStream del cliente (y todos sus consumers) hablan `type`/`index`
+// con nulls explícitos. La conversión vive aquí, en la frontera, para
+// que ningún consumer conozca las dos formas — los filtros
+// `s.type === "audio"` del player recibían `undefined` con datos
+// reales y los pickers de audio/subtítulos salían siempre vacíos
+// (reporte de usuario 2026-06-10). El spread conserva los campos extra
+// del wire (profile, frame_rate, sample_rate…) que la sección de
+// info del fichero renderiza.
+function normalizeMediaStream(raw: Record<string, unknown>): MediaStream {
+  return {
+    ...raw,
+    index: (raw["stream_index"] ?? raw["index"] ?? 0) as number,
+    type: (raw["stream_type"] ?? raw["type"] ?? "") as MediaStream["type"],
+    codec: (raw["codec"] ?? "") as string,
+    language: (raw["language"] ?? null) as string | null,
+    title: (raw["title"] ?? null) as string | null,
+    channels: (raw["channels"] ?? null) as number | null,
+    width: (raw["width"] ?? null) as number | null,
+    height: (raw["height"] ?? null) as number | null,
+    bitrate: (raw["bitrate"] ?? null) as number | null,
+    is_default: !!raw["is_default"],
+    is_forced: !!raw["is_forced"],
+    hdr_type: (raw["hdr_type"] ?? null) as string | null,
+  };
+}
 
 export class ApiClient {
   private baseUrl: string;
@@ -939,7 +967,13 @@ export class ApiClient {
   }
 
   async getItem(id: string): Promise<ItemDetail> {
-    return this.request<ItemDetail>("GET", `/items/${id}`);
+    const item = await this.request<ItemDetail>("GET", `/items/${id}`);
+    if (Array.isArray(item.media_streams)) {
+      item.media_streams = item.media_streams.map((s) =>
+        normalizeMediaStream(s as unknown as Record<string, unknown>),
+      );
+    }
+    return item;
   }
 
   async getItemChildren(id: string): Promise<MediaItem[]> {
@@ -1311,30 +1345,11 @@ export class ApiClient {
     return this.request("GET", `/stream/${itemId}/info`);
   }
 
-  // ─── External subtitles (OpenSubtitles, …) ────────────────────────────
-  //
-  // The search endpoint returns candidates from every registered subtitle
-  // provider. The download endpoint isn't fronted here because the
-  // browser hits it directly via a `<track>` element — same-origin
-  // cookies carry auth, no need for a JS fetch.
-  async searchExternalSubtitles(itemId: string, langs?: string[]): Promise<ExternalSubtitleResult[]> {
-    const params = langs && langs.length > 0 ? { lang: langs.join(",") } : undefined;
-    return this.request<ExternalSubtitleResult[]>("GET", `/stream/${itemId}/subtitles/external`, { params });
-  }
-
-  /**
-   * Builds the URL for an external subtitle so a `<track>` element can
-   * fetch it directly. No JS fetch — the browser handles auth via
-   * same-origin cookies, which is exactly the auth model this app uses.
-   */
-  externalSubtitleURL(itemId: string, source: string, fileID: string): string {
-    return `${this.baseUrl}/stream/${itemId}/subtitles/external/${encodeURIComponent(fileID)}?source=${encodeURIComponent(source)}`;
-  }
-
   /**
    * URL del extractor WebVTT de una pista de subtitulos EMBEBIDA en el
    * fichero (SRT/mov_text). trackIndex es el indice ABSOLUTO del
    * stream (ffmpeg `0:N`), no el per-tipo — es lo que el backend mapea.
+   * La consume directamente un `<track>` (cookies same-origin).
    */
   subtitleTrackURL(itemId: string, trackIndex: number): string {
     return `${this.baseUrl}/stream/${itemId}/subtitles/${trackIndex}`;

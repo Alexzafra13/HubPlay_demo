@@ -10,11 +10,15 @@ import {
   BackIcon,
   ExitFullscreenIcon,
   FullscreenIcon,
+  HeartIcon,
   LargePauseIcon,
   LargePlayIcon,
   PauseIcon,
+  PiPIcon,
   PlayIcon,
   SettingsIcon,
+  SkipBackIcon,
+  SkipForwardIcon,
   SubtitleIcon,
   VolumeHighIcon,
   VolumeLowIcon,
@@ -127,10 +131,16 @@ interface PlayerControlsProps {
    *  while a sheet is up, so the 3-second auto-hide timer can't
    *  evict the sheet's containing overlay mid-interaction. */
   onMenuOpenChange?: (anyOpen: boolean) => void;
-  /** Optional: when provided, renders a "search online subs" action
-   *  inside the subtitle picker. The parent owns the modal and the
-   *  resulting `<track>` injection. */
-  onSearchExternalSubs?: () => void;
+  /** Salto relativo en segundos (los botones ±10s lo llaman con
+   *  -10/+10). El padre aplica el clamp y dispara el SeekTide. */
+  onSkip: (deltaSeconds: number) => void;
+  /** Picture-in-Picture. Ausente = navegador sin soporte (Firefox
+   *  sin flag, iframes sin allow) → el botón no se renderiza. */
+  onTogglePiP?: () => void;
+  /** Favorito del item en reproducción. Ausente onToggleFavorite =
+   *  superficie sin user-data (p. ej. peer) → corazón oculto. */
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
   onClose: () => void;
   title?: string;
   /**
@@ -893,7 +903,10 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onQualityChange,
   onPlaybackRateChange,
   onMenuOpenChange,
-  onSearchExternalSubs,
+  onSkip,
+  onTogglePiP,
+  isFavorite,
+  onToggleFavorite,
   onClose,
   title,
   logoUrl,
@@ -901,6 +914,12 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   transcodeProfileLabel,
 }) => {
   const { t } = useTranslation();
+
+  // Contadores de pulso para re-disparar las animaciones por remount
+  // (key): el arco de los botones ±10s gira en la dirección del salto;
+  // el corazón late + emite su anillo de glow.
+  const [skipPulse, setSkipPulse] = useState({ back: 0, fwd: 0 });
+  const [favPulse, setFavPulse] = useState(0);
 
   // Aggregate the open state of the three pickers (Audio, Subs,
   // Settings) into one boolean and bubble it up. The parent uses
@@ -949,26 +968,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
         })
       : undefined,
   }));
-
-  // External-subs row, appended to the subtitle picker. Lives inside
-  // the picker (not as its own button on the bar) — Plex pattern. The
-  // styling is intentionally distinct from the regular rows so users
-  // see it's an action, not a track selection.
-  const externalSubsRow = onSearchExternalSubs ? (
-    <button
-      type="button"
-      onClick={() => {
-        onSearchExternalSubs();
-      }}
-      className="w-full flex items-center gap-3 p-3 mt-1 rounded-[--radius-md] text-left text-sm text-accent hover:bg-accent/10 transition-colors cursor-pointer"
-    >
-      <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-        <circle cx="11" cy="11" r="7" />
-        <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
-      </svg>
-      <span className="flex-1 font-medium">{t("playerControls.subtitlesExternal")}</span>
-    </button>
-  ) : null;
 
   return (
     <div className="absolute inset-0 flex flex-col justify-between z-10">
@@ -1033,6 +1032,31 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             Search-online-subs moved INSIDE the subs picker (no longer
             a top-level button) — same pattern as Plex. */}
         <div className="flex items-center gap-1 sm:gap-2">
+          {/* Saltos ±10s. En touch eran imprescindibles (sin teclado,
+              la única forma de saltar era arrastrar la barra). El arco
+              del icono gira en la dirección del salto al pulsar —
+              remount por key con el contador de pulso. */}
+          <button
+            type="button"
+            onClick={() => {
+              onSkip(-10);
+              setSkipPulse((p) => ({ ...p, back: p.back + 1 }));
+            }}
+            className="p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            aria-label={t("playerControls.skipBack")}
+          >
+            <span
+              key={skipPulse.back}
+              className={
+                skipPulse.back > 0
+                  ? "inline-flex animate-[hp-skip-nudge-back_280ms_ease-out]"
+                  : "inline-flex"
+              }
+            >
+              <SkipBackIcon />
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={onPlayPause}
@@ -1042,9 +1066,67 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             {isPlaying ? <PauseIcon /> : <PlayIcon />}
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              onSkip(10);
+              setSkipPulse((p) => ({ ...p, fwd: p.fwd + 1 }));
+            }}
+            className="p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            aria-label={t("playerControls.skipForward")}
+          >
+            <span
+              key={skipPulse.fwd}
+              className={
+                skipPulse.fwd > 0
+                  ? "inline-flex animate-[hp-skip-nudge-fwd_280ms_ease-out]"
+                  : "inline-flex"
+              }
+            >
+              <SkipForwardIcon />
+            </span>
+          </button>
+
           <TimeDisplay currentTime={currentTime} duration={duration} />
 
           <div className="flex-1" />
+
+          {onToggleFavorite && (
+            <button
+              type="button"
+              onClick={() => {
+                setFavPulse((n) => n + 1);
+                onToggleFavorite();
+              }}
+              className="relative p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              style={isFavorite ? { color: "var(--color-accent-light)" } : undefined}
+              aria-label={
+                isFavorite
+                  ? t("playerControls.favoriteRemove")
+                  : t("playerControls.favoriteAdd")
+              }
+              aria-pressed={!!isFavorite}
+            >
+              {favPulse > 0 && (
+                <span
+                  key={`ring-${favPulse}`}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-1 rounded-full animate-[hp-fav-ring_520ms_ease-out_forwards]"
+                  style={{ boxShadow: "0 0 0 1.5px var(--color-accent), 0 0 14px var(--color-accent-glow)" }}
+                />
+              )}
+              <span
+                key={`heart-${favPulse}`}
+                className={
+                  favPulse > 0
+                    ? "inline-flex animate-[hp-fav-burst_450ms_ease-out]"
+                    : "inline-flex"
+                }
+              >
+                <HeartIcon filled={!!isFavorite} />
+              </span>
+            </button>
+          )}
 
           {audioOptions.length > 0 && (
             <TrackButton
@@ -1064,7 +1146,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             currentId={currentSubtitleTrack}
             offLabel={t("playerControls.subtitlesOff")}
             onSelect={onSubtitleTrackChange}
-            extra={externalSubsRow}
             onOpenChange={reportMenu("subs")}
           />
 
@@ -1085,6 +1166,17 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             onVolumeChange={onVolumeChange}
             onToggleMute={onToggleMute}
           />
+
+          {onTogglePiP && (
+            <button
+              type="button"
+              onClick={onTogglePiP}
+              className="p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              aria-label={t("playerControls.pip")}
+            >
+              <PiPIcon />
+            </button>
+          )}
 
           <button
             type="button"

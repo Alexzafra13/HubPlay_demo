@@ -344,6 +344,8 @@ export default function ItemDetail() {
               : undefined
           }
           nextUp={nextUpInfo}
+          isFavorite={!!surfaceItem.user_data?.is_favorite}
+          onToggleFavorite={() => toggleFavoriteMutation.mutate(surfaceItem.id)}
           chapters={chapterMarkers}
           segments={surfaceItem.segments}
           audioStreams={surfaceItem.media_streams?.filter((s) => s.type === "audio")}
