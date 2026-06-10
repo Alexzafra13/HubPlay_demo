@@ -80,12 +80,12 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 ---
 
-## Métricas rápidas (verificadas 2026-05-20)
+## Métricas rápidas (verificadas 2026-06-10)
 
-- **337** ficheros `.go` de producción en `internal/`+`cmd/` · **191** `_test.go` (~57%)
-- **85** test files en frontend, **622/622** vitest verdes — admin panels, auth y componentes comunes cubiertos; quedan páginas grandes (Home, LiveTV, Search, Movies, Series).
-- **30** docs de arquitectura en `docs/architecture/`
-- **272** rutas HTTP registradas en `internal/api/router.go`.
+- **400** ficheros `.go` de producción en `internal/`+`cmd/` · **224** `_test.go` (~56%)
+- **102** test files en frontend, **747/747** vitest verdes; `knip` como hard gate (0 dead code).
+- **31** docs de arquitectura en `docs/architecture/`
+- **272** rutas HTTP registradas (router + mounts), con guard de drift OpenAPI.
 
 ---
 
@@ -108,7 +108,7 @@ Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
 - `project-status.md` — estado actual, trabajo abierto, próximos pasos. **Entrypoint.**
 - `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
-- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback: decisión/FFmpeg/probe/IPTV/player; plan P0–P3)
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback; P0/P1 ✅, quedan P2–P3)
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 0/1/2 + Bloques 1/2 cerrados; Fases 3–5 abiertas)
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
 - `archive/` — sesiones y audits cerrados (no se lee al inicio; solo arqueología)

@@ -2,163 +2,61 @@
 
 > **Entrypoint de cada sesión.** Solo el estado vivo y lo que falta. El
 > detalle de sesiones cerradas vive en `archive/` (no se borra nada, solo
-> se reubica). Última limpieza: 2026-06-09.
+> se reubica). Última limpieza: 2026-06-10.
 
 ---
 
-## 🔭 Estado actual (2026-06-10)
+## 🔭 Estado actual (2026-06-10, fin de sesión)
 
-**Salud:** MVP funcional, cerca de early-production. Todo el trabajo
-hasta el 2026-06-09 está **mergeado en `main`**; la Fase 2 (supply-chain)
-está en la rama `claude/project-review-8tznz4`.
+**Salud:** MVP funcional, cerca de early-production.
 
 | Área | Estado |
 |---|---|
-| Tests backend | `go test ./...` verde (con `-race` en los paquetes tocados) |
-| Tests frontend | **718/718** vitest verdes; `tsc` y `eslint` (0 errores) limpios |
-| PRs abiertas | ninguna nuestra (#489 dependabot pendiente de revisar) |
-| Audit prod 2026-06-08 | Fases 0/1/2 + Bloques 1/2 ✅. **Fases 3–5 abiertas** |
-| Audits arquitectónicos previos | 2026-05-14 ✅ y 2026-05-27 (macro + per-package) ✅ — cerrados, archivados |
+| Tests backend | `go test ./...` verde (`-race` en stream/api/iptv) |
+| Tests frontend | **747/747** vitest; `tsc`, `eslint` (0 errores) y `knip` limpios |
+| Rama de trabajo | `claude/project-review-8tznz4` — **pendiente de PR final a main** |
+| Audit playback 2026-06-10 | P0 + P1a-d ✅ + PB-40..44 ✅. **Quedan P2 y P3** |
+| Audit prod 2026-06-08 | Fases 0/1/2 + B7 ✅. **Fases 3–5 abiertas** |
 
-**Endurecido de cara a internet** (2026-06-08, en `main`): token solo por
-Bearer/cookie, redacción de credenciales en logs, rate-limit de auth,
-lockout por (user,IP), firma HMAC del proxy IPTV, gate de `/metrics`,
-`X-Forwarded-Proto` de confianza, forzar cambio de pass, setup solo-LAN,
-Permissions-Policy, slowloris timeout; tini + stop_grace + persistencia
-SQLite + backup pre-migración; error boundary por ruta + grid
-virtualizado. Detalle: `archive/2026-05-27-to-06-08.md`.
+⚠️ **Al retomar:** (1) verificar que la PR final de la rama se mergeó y
+los 3 workflows de main están verdes (main estuvo roto por una
+resolución de squash que duplicó código — detalle en
+`archive/2026-06-10-supply-chain-and-playback.md`); (2) **empezar en
+rama NUEVA desde main** — los squash-merges repetidos de una rama viva
+generan conflictos en cascada.
 
 ---
 
 ## 📋 Trabajo abierto
 
-**Roadmap principal (nuevo):** `audit-2026-06-10-playback-chain.md` —
-audit focalizado de la cadena de playback (decisión de streaming, FFmpeg,
-probe, IPTV, player hls.js). 39 hallazgos, 4 críticos. **Es el trabajo de
-más valor de usuario pendiente** — todo lo demás son cimientos.
-
-**PB-40 ✅ (reporte de usuario, 2026-06-10):** el player se alimentaba
-del item de la página, no del que suena — reproducir desde la
-temporada/serie no mostraba selector de pistas ni "siguiente episodio",
-y el auto-advance dejaba datos stale. `usePlayback` ahora deriva todo
-del item en reproducción. Detalle: PB-40 en el audit de playback.
-
-**P0 ✅ hecha (2026-06-10)** en `claude/project-review-8tznz4`: PB-1
-(alias webm corregido con check de códecs WebM-reales en `Decide`), PB-2
-(`-hls_flags +temp_file`), PB-3 (`-force_key_frames` con forma
-`prev_forced_t` — la forma `n_forced*6` degeneraría con `-copyts` en los
-seek-restarts), PB-4 (listener de `error` del `<video>` en las rutas de
-src directo, guardado para no pisar el recovery de hls.js). Tests:
-2 nuevos en `decision_test.go`, 2 en `transcode_test.go`, y
-`useHls.test.ts` nuevo (7 tests — el núcleo VOD estaba sin cubrir).
-
-**P1a ✅ hecha (2026-06-10):** PB-6 (Decide evalúa la pista de audio
-seleccionada — `Decide` ahora recibe `audioStreamIndex`), PB-7 (mp4/mov
-remuxeables), PB-8 (gate de perfiles h264 High 10/4:2:2/4:4:4; HEVC
-Main 10 deliberadamente NO gateado), PB-9 (`reattachRestartedSession`
-mata el ffmpeg si la sesión fue retirada durante el restart), PB-20
-(validación 400 de `?audio=N` + watchdog `watchEarlyExit`/`reapDeadStart`
-que desregistra arranques muertos + stderr tail en el Warn de ffmpeg),
-PB-21 (sin `-tune zerolatency` en VOD). `/info` acepta `?audio=N`.
-
-**P1b ✅ hecha (2026-06-10):** PB-11 (timeout 60s default en `Probe` +
-2min en fpcalc/ffmpeg de fingerprint; `-v error` + stderr en el error),
-PB-12 (trickplay con gate ACL 404 antes incluso del cache + semáforo
-global de 2 generaciones concurrentes), PB-13 (negative-cache
-`failed.marker` con TTL 24h → 404 sin Retry-After), PB-24
-(`attached_pic` marcado en probe y filtrado en el scanner), PB-25
-(`os.Stat` antes de StartSession → 404 `media file` tipado, y antes de
-ServeFile en DirectPlay).
-
-**P1d ✅ hecha (2026-06-10):** PB-16 (recovery de hls.js acotado: 3
-reintentos por origen con reset en FRAG_LOADED sano, `swapAudioCodec`
-en el 2º media-error <3s — patrón hls.js — y error terminal con
-destroy), PB-17 (`ended` federado → `updatePeerItemProgress` con
-`completed:true`; el cleanup de sesión se salta en peers — el DELETE
-local 404eaba), PB-18 (progreso guardado en `pagehide` con keepalive y
-en `pause`), PB-32 (`fragLoadPolicy` con TTFB 30s solo en transcode —
-el restart frío de ffmpeg superaba el default de 10s), PB-34
-(`backBufferLength: 90` — el default era infinito), PB-35 (todos los
-errores del player vía i18n es/en, claves `player.errors.*`).
-
-**P1c ✅ hecha (2026-06-10):** PB-14 (`countingResponseWriter` → 502
-real si el upstream falló sin escribir nada, antes 200 vacío + ~15-20s
-de reintentos de hls.js), PB-15 (`upstreamStatusError`: los 4xx son
-permanentes — fallan YA sin quemar backoff — y el fallo de salud se
-registra UNA vez por request, no por intento: una request ya no abre
-el breaker ella sola), PB-27 (fuera `-bsf:v h264_mp4toannexb` del
-transmux direct — mataba HEVC y lo promovía a re-encode permanente),
-PB-28 (refcount de viewers en transmux: `?v=` en manifest +
-`DELETE /channels/{id}/hls/viewer`; el último viewer libera el slot al
-instante; el frontend manda la baja al zapear/pagehide con keepalive;
-clientes sin `?v=` conservan el idle reap). + Hotfix CI: GOTOOLCHAIN
-auto en sqlc-verify y checksum de evermeet en modo soft (403 a IPs de
-runners).
+**Roadmap principal:** `audit-2026-06-10-playback-chain.md` (cada item
+con ✅/pendiente y fix propuesto).
 
 | Prioridad | Tema | Items |
 |---|---|---|
-| Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
+| Media-alta | **Playback P2** | PB-5 (VAAPI real — hoy cae a software en silencio), PB-10 (ABR/sesión-por-calidad agota caps → 503), PB-22 (surround forzado a estéreo), PB-23 (Dolby Vision P5 mal detectado) |
+| Media | **Playback P3** | Smoke E2E Playwright (play→seek→resume, UpNext, dub-switch, LiveTV zap, server caído), PB-19/26/29-31/33/36-39 + gaps de test del audit |
+| Media | **Fase 3 — observabilidad/config** (audit prod) | M18–M21, M23, M24 (IP de cliente en logs, panics en métricas, validación de config, completar `example.yaml`) |
+| Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes) |
+| Baja | **Fase 5 — gobernanza** | README (no hay), `SECURITY.md`, `CODEOWNERS` |
+| Baja | **Bajos sueltos** | B2 (DNS-rebind TOCTOU — parte se arregla con PB-29/30), B3 (refresh TTL 30d), M6 (backup periódico) |
 
-**PB-44 ✅ (reporte de usuario, 2026-06-10):** subtítulos con render
-propio (`useSubtitleOverlay` + `.hp-cue`): pista en `hidden` y cues
-pintados en overlay con safe-area, que sube con los controles
-visibles. El render nativo los ponía en el borde del elemento de vídeo
-(pantalla completa): pisando controles, recortados y solapados en
-móvil. `useExternalSubMode` eliminado (superseded).
+**Features de producto (gap vs Jellyfin/Plex, no son bugs):**
+Chromecast, SyncPlay, control remoto de sesiones, ajustes de
+apariencia/offset de subtítulos (fácil ahora: el render es propio —
+`useSubtitleOverlay`), audio boost. Y retirar del backend los endpoints
+de subtítulos online que ya no tienen consumer
+(`/subtitles/external*` + provider OpenSubtitles).
 
-**Quick wins del player ✅ (2026-06-10):** botones ±10s con icono
-propio (arco que gira al pulsar), doble-tap por zonas en móvil
-(encadenable), feedback "SeekTide" de marca (marea teal + chevrons en
-cascada + total acumulado — componente `SeekTide.tsx`), botón PiP
-(gated por soporte del navegador), toggle total↔restante persistido en
-el contador, y corazón de favorito con latido + anillo de glow. Gap
-analysis vs Jellyfin/Plex hecho: faltan (producto, roadmap) Chromecast,
-SyncPlay, control remoto de sesiones, ajustes de apariencia/offset de
-subtítulos.
+**Acciones de OPERADOR (no de código):**
+- `NSSM_EXPECTED_SHA256`: tras la próxima release, copiar el sha256
+  logueado, contrastarlo y fijar la repo variable.
+- SignPath: aplicar en signpath.org + `vars.HUBPLAY_SIGNING_ENABLED`.
+  Guía: `docs/architecture/windows-installer-signing.md`.
 
-**Imagen Docker + CI (2026-06-10, pregunta del owner):** la imagen
-default ya es ligera (~105MB: alpine + ffmpeg ~65MB + binario 28MB con
-frontend embebido); Grafana/Prometheus NO van dentro — son sidecars
-opt-in de `deploy/observability/` (decisión: se quedan como opcionales,
-pineados por digest). El CI de Docker tardaba ~20min porque el build
-arm64 corría ENTERO bajo QEMU: ahora los stages de build usan
-`--platform=$BUILDPLATFORM` y cross-compilan (`GOOS/GOARCH` de
-TARGETARCH) — solo el `apk add` del runtime se emula. B7 cerrado:
-`push: [main]` + `concurrency` con cancel en ci/docker (release
-serializa sin cancelar). Esperado: docker ~20min → ~6-8min y mitad de
-runs de CI.
-
-**Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases
-3–5). Ninguna bloquea el uso plug-and-play básico.
-
-**Fase 2 — supply-chain / release: ✅ hecha (2026-06-10)** en
-`claude/project-review-8tznz4`: actions SHA-pineadas, SLSA provenance
-(attest-build-provenance) en releases + nightly, SBOM/provenance OCI en
-la imagen Docker, verificación sha256 de FFmpeg (API digest) y NSSM
-(opt-in por repo var), `.sha256` fatal en install.sh, Trivy bloqueante
-en tags, govulncheck pineado, jobs `sqlc-verify` + `pnpm build` en CI,
-dependabot docker + bases por digest. Detalle y acciones de operador
-pendientes (NSSM_EXPECTED_SHA256, SignPath): §"Fase 2 — implementación"
-del audit.
-
-| Prioridad | Tema | Items |
-|---|---|---|
-| Media | **Fase 3 — observabilidad / config** | M18–M21, M23, M24 (IP de cliente en logs, panics en métricas, validación de config, completar `example.yaml`). M22 ya descartado (no-issue). |
-| Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes). A11/A12 ya hechos. |
-| Baja | **Fase 5 — gobernanza** | README de despliegue, `SECURITY.md`, `CODEOWNERS` |
-| Baja | **Bajos sueltos** | B2 (DNS-rebind TOCTOU), B3 (refresh TTL 30d), M6 (backup periódico) |
-
-**Pendientes menores (de audits cerrados):**
-- **TT-8 (resto)** — traducir comentarios en inglés en los sub-paquetes de
-  `handlers/` (admin, auth, federation, iptv, me, media, system). El root
-  ya está en español. Incremental, al tocar cada fichero. Cosmético.
-- **F15-10/11/12** — polish opcional (fakes compartidos, naming,
-  concurrency tests).
-- **Distribución avanzada** — auto-update, TLS LAN, macOS notarized,
-  AppImage. Producto, sesión grande.
-- **SignPath** (operador): aplicar en signpath.org + activar
-  `vars.HUBPLAY_SIGNING_ENABLED`. Guía:
-  `docs/architecture/windows-installer-signing.md`.
+**Pendientes menores (de audits cerrados):** TT-8 resto (comentarios en
+inglés en sub-paquetes de handlers, incremental), F15-10/11/12 (polish),
+distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
 
 ---
 
@@ -168,21 +66,24 @@ del audit.
   keystore, preflight, sqlc adapter, ADR-026 logs).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,
   comentarios en español, regeneración sqlc.
-- `audit-2026-06-10-playback-chain.md` — **roadmap activo principal**
-  (cadena de playback: 39 hallazgos, plan P0–P3).
-- `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 3–5).
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback;
+  P0/P1 ✅, P2/P3 abiertas; PB-40..44 de reportes de usuario ✅).
+- `audit-2026-06-08-production-readiness.md` — roadmap secundario
+  (Fases 3–5 abiertas).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend.
-- `web/verify/` — arnés de verificación en navegador del grid virtualizado.
+- `web/verify/` — arnés de verificación en navegador (layout real).
 
 ## 📦 Archivo (`archive/`, no se lee al inicio)
 
-- `2026-05-27-to-06-08.md` — endurecimiento prod (Fases 0/1 + Bloques 1/2),
-  F15-5, TT-8 root, audits 2026-05-27 cerrados.
+- `2026-06-10-supply-chain-and-playback.md` — **esta sesión**: Fase 2
+  supply-chain, audit playback + P0–P1, PB-40..44, quick wins del
+  player, Docker/CI, incidencias de squash-merges.
+- `2026-05-27-to-06-08.md` — endurecimiento prod (Fases 0/1 + Bloques
+  1/2), F15-5, TT-8 root, audits 2026-05-27 cerrados.
 - `2026-05-19-to-05-27.md` y anteriores — sesiones históricas.
-- `audit-2026-05-14-go-backend-review.md` + `intervention-2026-05-14.md` —
-  audit original (cerrado).
-- `audit-2026-05-27-architecture-macro.md` +
-  `audit-2026-05-27-per-package-review.md` — audits estructurales (cerrados).
+- `audit-2026-05-14-go-backend-review.md` + `intervention-2026-05-14.md`,
+  `audit-2026-05-27-architecture-macro.md` +
+  `audit-2026-05-27-per-package-review.md` — audits cerrados.
 - `per-user-channel-order-spec-shipped.md` y audits 2026-04/05 antiguos.
 
 ---
@@ -202,18 +103,26 @@ Patrones consolidados que vale la pena replicar:
 - **Adapter en la frontera** para no importar `db` en paquetes de dominio
   (structs espejo + conversión en el composition root).
 - **Opt-in via repo variable** (`vars.X_ENABLED`) para features de CI con
-  setup externo del operador.
+  setup externo del operador (SignPath, NSSM_EXPECTED_SHA256).
 - **Cerrar por análisis** cuando el runtime moderno resuelve el problema
-  teórico (F15-9 / Go 1.23+). No refactorizar sin bug observable.
-- **Leer el código existente antes de implementar del backlog** (el
-  installer Windows ya existía; solo faltaba firmar).
-- **Fix centralizado vs audit por paquete** (ej. `handleServiceError`,
-  redactor de slog central, middleware XFP) — un punto en vez de N.
-- **Verificación en navegador real para cambios visuales/de layout**: los
-  tests jsdom no ven el layout. El arnés Playwright (`web/verify/`)
-  detectó que el React Compiler rompía el reciclado del grid — algo que
-  ningún test jsdom podía pillar.
-- **React Compiler + stores externos mutables** (`@tanstack/react-virtual`):
-  sobre-memoiza y rompe updates; aislar en un subcomponente con
-  `"use no memo"`. La regla `incompatible-library` solo reconoce
-  `useVirtualizer`, no `useWindowVirtualizer`.
+  teórico. No refactorizar sin bug observable.
+- **Fix centralizado vs audit por paquete** — un punto en vez de N.
+- **Verificación en navegador real para cambios visuales/de layout**:
+  jsdom no ve layout (PB-42/PB-44 eran invisibles para los tests).
+- **React Compiler + stores externos mutables**: aislar con
+  `"use no memo"`; refs no se leen en render (usar useState
+  initializer para valores congelados por montaje).
+- **(Nuevo) El tipo TS puede mentir sobre el wire** (PB-43): los
+  fixtures de test deben tener la forma del WIRE, no del tipo; la
+  conversión vive en la frontera del cliente (`normalizeMediaStream`).
+  Si un helper tolera dos formas (`stream_type ?? type`), es señal de
+  un desajuste sin resolver.
+- **(Nuevo) Squash-merge de rama viva = conflictos en cascada** y
+  resoluciones manuales peligrosas (main acabó con código duplicado).
+  Rama nueva tras cada merge, o merge-commit para ramas largas.
+- **(Nuevo) Multi-arch sin QEMU**: stages de build con
+  `--platform=$BUILDPLATFORM` + `GOOS/GOARCH=$TARGETARCH`
+  (CGO_ENABLED=0). 20min → ~6-8min.
+- **(Nuevo) Guards de drift** (OpenAPI router coverage, sqlc-verify)
+  cazan lo que el dev olvida — correr `go test ./...` COMPLETO antes de
+  cada push, no solo los paquetes tocados.
