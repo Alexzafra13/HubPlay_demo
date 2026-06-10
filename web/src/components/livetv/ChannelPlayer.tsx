@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
 import { useRecordChannelWatch } from "@/api/hooks";
@@ -23,6 +23,39 @@ export function ChannelPlayer({ channel }: ChannelPlayerProps) {
   // beacon automatically; useLiveHls tears down + re-attaches on
   // streamUrl change and re-arms its beacon flag.
   const channelId = channel.id;
+
+  // PB-28: id de viewer efímero por montaje. Viaja como `?v=` en la
+  // URL del stream (el 302 al transmux lo propaga y el manifest
+  // registra al viewer); al zapear/desmontar, la baja explícita libera
+  // el slot de ffmpeg al instante en vez de esperar al idle reap de
+  // 30s — visitar >MaxSessions canales en <30s daba TRANSMUX_BUSY.
+  // Id efímero congelado por montaje vía useState-initializer (los
+  // refs no pueden leerse en render bajo el React Compiler). Debe
+  // existir en el PRIMER render — la URL del stream lo lleva — así
+  // que generarlo en un effect re-montaría el stream entero.
+  const [viewerId] = useState<string>(
+    () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+  );
+  const streamUrl = useMemo(() => {
+    const sep = channel.stream_url.includes("?") ? "&" : "?";
+    return `${channel.stream_url}${sep}v=${encodeURIComponent(viewerId)}`;
+  }, [channel.stream_url, viewerId]);
+
+  useEffect(() => {
+    const leave = () => {
+      api.leaveChannelStream(channelId, viewerId).catch(() => {
+        // Best-effort: el idle reap del server es el backstop.
+      });
+    };
+    // pagehide cubre cierre de pestaña/navegación dura; el cleanup del
+    // effect cubre el zapping dentro de la SPA (cambia channelId).
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [channelId, viewerId]);
+
   const onFirstPlay = useCallback(() => {
     recordWatch.mutate(channelId, {
       onError: (err) => {
@@ -52,7 +85,7 @@ export function ChannelPlayer({ channel }: ChannelPlayerProps) {
 
   const { error, loading, reload } = useLiveHls({
     videoRef,
-    streamUrl: channel.stream_url,
+    streamUrl,
     unavailableMessage: t("liveTV.channelUnavailable"),
     onFirstPlay,
     onFatalError,

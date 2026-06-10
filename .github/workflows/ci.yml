@@ -206,6 +206,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Verify sqlc-generated code is in sync
+        env:
+          # setup-go fija GOTOOLCHAIN=local; sqlc v1.31.1 exige go>=1.26
+          # mientras go.mod va en 1.25 — auto deja que `go install`
+          # descargue el toolchain que el módulo de sqlc declara.
+          GOTOOLCHAIN: auto
         run: make sqlc-verify
 
   lint:

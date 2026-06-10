@@ -11,8 +11,13 @@ import { api } from "@/api/client";
  * sobreviva al unload. El reaper idle del servidor sigue ahí como
  * backstop si incluso keepalive cae.
  */
-export function useStreamSessionCleanup(itemId: string): void {
+export function useStreamSessionCleanup(itemId: string, peerId?: string): void {
   useEffect(() => {
+    // Federado: itemId es el id REMOTO — el DELETE local 404eaba y la
+    // sesión de transcode del peer quedaba viva hasta su reaper. No
+    // hay endpoint de stop remoto (decisión: el origen no sabe quién
+    // mira); el idle-reaper del peer es el mecanismo correcto (PB-17).
+    if (peerId) return;
     const onPageHide = () => {
       void api.stopStreamSession(itemId).catch(() => {
         // Best-effort: el navegador puede haber tirado fetch ya.
@@ -20,5 +25,5 @@ export function useStreamSessionCleanup(itemId: string): void {
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
-  }, [itemId]);
+  }, [itemId, peerId]);
 }

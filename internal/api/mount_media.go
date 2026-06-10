@@ -215,6 +215,10 @@ func mountIPTVChannels(r chi.Router, deps Dependencies, fedImageDir string) {
 		// reload del manifest.
 		r.Get("/hls/index.m3u8", iptvHandler.HLSManifest)
 		r.Get("/hls/{segment}", iptvHandler.HLSSegment)
+		// Baja explícita del viewer (PB-28): el player la lanza al
+		// zapear/desmontar para liberar el slot de transmux sin
+		// esperar al idle reap.
+		r.Delete("/hls/viewer", iptvHandler.HLSLeaveViewer)
 		// Same-origin proxy para el tvg-logo del canal.
 		// Mirrors la upstream image a disco + sirve desde el
 		// local cache, así CSP puede quedarse locked a

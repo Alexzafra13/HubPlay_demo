@@ -48,6 +48,55 @@ export function useProgressReporter(
     return () => clearInterval(progressTimerRef.current);
   }, [videoRef, itemId, peerId]);
 
+  // PB-18: el cleanup de unmount de React NO corre al cerrar la
+  // pestaña o navegar fuera de la SPA — se perdían hasta 10s siempre,
+  // y "pauso → seekeo → cierro" perdía el seek entero (el interval
+  // salta las muestras en pausa). Dos disparadores extra con la misma
+  // escritura: `pagehide` (con keepalive, sobrevive al unload — el
+  // mismo patrón que useStreamSessionCleanup) y `pause` (ancla la
+  // posición en cuanto el usuario suelta el play; ahí video.paused ya
+  // es true así que el interval nunca la habría guardado).
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const saveNow = (keepalive: boolean) => {
+      if (video.currentTime <= 0 || video.seeking) return;
+      const positionTicks = Math.floor(video.currentTime * TICKS_PER_SECOND);
+      const durationTicks =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? Math.floor(video.duration * TICKS_PER_SECOND)
+          : 0;
+      if (peerId) {
+        api
+          .updatePeerItemProgress(
+            peerId,
+            itemId,
+            { position_ticks: positionTicks, duration_ticks: durationTicks },
+            keepalive ? { keepalive: true } : undefined,
+          )
+          .catch(() => {});
+      } else {
+        api
+          .updateProgress(
+            itemId,
+            { position_ticks: positionTicks },
+            keepalive ? { keepalive: true } : undefined,
+          )
+          .catch(() => {});
+      }
+    };
+
+    const onPageHide = () => saveNow(true);
+    const onPause = () => saveNow(false);
+    window.addEventListener("pagehide", onPageHide);
+    video.addEventListener("pause", onPause);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      video.removeEventListener("pause", onPause);
+    };
+  }, [videoRef, itemId, peerId]);
+
   // Save final progress on unmount. videoRef.current must be captured at
   // effect-mount time (per react-hooks/exhaustive-deps) — by the time the
   // cleanup runs, React may have already nulled the ref. Since the parent

@@ -295,6 +295,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   } = useVideoPlaybackEvents({
     videoRef,
     itemId,
+    peerId,
     knownDuration,
     onProgress: updateTime,
     onEnded: handleVideoEnded,
@@ -373,7 +374,59 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onClose,
   });
 
-  useStreamSessionCleanup(itemId);
+  useStreamSessionCleanup(itemId, peerId);
+
+  // ─── Saltos ±10s + marea visual (sello HubPlay) ──────────────────────────
+  // El total ACUMULA mientras la marea siga viva (pulsos < 900ms):
+  // tres toques rápidos leen "−30 s", no tres animaciones sueltas.
+  const [tide, setTide] = useState<{
+    dir: "back" | "fwd";
+    total: number;
+    seq: number;
+  } | null>(null);
+  const tideTimerRef = useRef<number | null>(null);
+
+  const skipBy = useCallback(
+    (delta: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const max = Number.isFinite(video.duration)
+        ? video.duration
+        : Number.POSITIVE_INFINITY;
+      handleSeek(Math.min(Math.max(0, video.currentTime + delta), max));
+      const dir: "back" | "fwd" = delta < 0 ? "back" : "fwd";
+      setTide((prev) =>
+        prev && prev.dir === dir
+          ? { dir, total: prev.total + Math.abs(delta), seq: prev.seq + 1 }
+          : { dir, total: Math.abs(delta), seq: (prev?.seq ?? 0) + 1 },
+      );
+      if (tideTimerRef.current !== null) {
+        window.clearTimeout(tideTimerRef.current);
+      }
+      tideTimerRef.current = window.setTimeout(() => {
+        tideTimerRef.current = null;
+        setTide(null);
+      }, 900);
+    },
+    [videoRef, handleSeek],
+  );
+
+  useEffect(
+    () => () => {
+      if (tideTimerRef.current !== null) {
+        window.clearTimeout(tideTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  // Doble-tap en los tercios laterales (móvil) → saltar. El tap simple
+  // conserva el toggle de controles; en desktop el click no cambia.
+  const { handleSurfaceClick } = useTapSeekGestures({
+    isMobile,
+    onSingleTap: handleSurfaceTap,
+    onZoneSkip: (dir) => skipBy(dir === "back" ? -10 : 10),
+  });
 
   // ─── Saltos ±10s + marea visual (sello HubPlay) ──────────────────────────
   // El total ACUMULA mientras la marea siga viva (pulsos < 900ms):

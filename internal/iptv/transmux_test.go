@@ -1244,3 +1244,51 @@ func TestTransmuxManager_PreSpawnFailureCountsAsSpawnError(t *testing.T) {
 		t.Errorf("crash counter must not fire on pre-spawn failure: got %d", got)
 	}
 }
+
+// ─── PB-28: refcount de viewers — liberar el slot al zapear ───
+
+func TestTransmux_LastViewerLeaveStopsSession(t *testing.T) {
+	m := newTestManager(t, "ok", 100*time.Millisecond)
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := m.GetOrStart(ctx, "ch-zap", "http://upstream/a"); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	m.JoinViewer("ch-zap", "viewer-1")
+	m.JoinViewer("ch-zap", "viewer-2")
+
+	// Con otro viewer registrado la sesión sobrevive.
+	m.LeaveViewer("ch-zap", "viewer-1")
+	if m.ActiveSessions() != 1 {
+		t.Fatal("session must survive while another viewer is registered")
+	}
+
+	// El último viewer libera el slot inmediatamente (sin idle reap).
+	m.LeaveViewer("ch-zap", "viewer-2")
+	if !m.WaitForActiveSessions(0, 2*time.Second) {
+		t.Fatal("session must stop when the last registered viewer leaves")
+	}
+}
+
+// Un Leave con un id NUNCA registrado no puede tumbar la sesión de un
+// cliente legacy (que no manda ?v=).
+func TestTransmux_LeaveUnknownViewerIsNoOp(t *testing.T) {
+	m := newTestManager(t, "ok", 100*time.Millisecond)
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := m.GetOrStart(ctx, "ch-legacy", "http://upstream/a"); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	m.LeaveViewer("ch-legacy", "nunca-registrado")
+	m.LeaveViewer("ch-legacy", "")
+
+	if m.ActiveSessions() != 1 {
+		t.Fatal("leave of an unregistered viewer must not stop the session")
+	}
+}

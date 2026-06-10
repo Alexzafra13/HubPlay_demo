@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import "@/i18n";
 import { useHls } from "./useHls";
 
 // Stand-in mínimo de hls.js, mismo patrón que useLiveHls.test.ts:
@@ -68,6 +69,10 @@ const { FakeHls } = vi.hoisted(() => {
     }
     recoverMediaError() {
       this.recoverMediaCalls += 1;
+    }
+    swapAudioCodecCalls = 0;
+    swapAudioCodec() {
+      this.swapAudioCodecCalls += 1;
     }
     emit(event: string, data: Record<string, unknown>) {
       this.listeners.get(event)?.forEach((h) => h(event, data));
@@ -141,7 +146,7 @@ describe("useHls — <video> error listener (PB-4)", () => {
       video.dispatchEvent(new Event("error"));
     });
 
-    expect(hook.result.current.error).toMatch(/decoded/i);
+    expect(hook.result.current.error).toMatch(/decodificar|decoded/i);
   });
 
   it("direct_play: src-not-supported (code 4) surfaces a format message", () => {
@@ -155,7 +160,7 @@ describe("useHls — <video> error listener (PB-4)", () => {
       video.dispatchEvent(new Event("error"));
     });
 
-    expect(hook.result.current.error).toMatch(/not supported/i);
+    expect(hook.result.current.error).toMatch(/no está soportado|not supported/i);
   });
 
   it("direct_play: abort (code 1) is ignored — teardown/zapping is not a failure", () => {
@@ -188,7 +193,7 @@ describe("useHls — <video> error listener (PB-4)", () => {
       video.dispatchEvent(new Event("error"));
     });
 
-    expect(hook.result.current.error).toMatch(/decoded/i);
+    expect(hook.result.current.error).toMatch(/decodificar|decoded/i);
   });
 
   it("while hls.js drives playback the raw <video> error is left to hls.js", () => {
@@ -225,8 +230,86 @@ describe("useHls — hls.js fatal error recovery (contrato existente)", () => {
       });
     });
 
-    expect(hook.result.current.error).toMatch(/recover/i);
+    expect(hook.result.current.error).toMatch(/reintentando|retrying/i);
     expect(hls.startLoadCalls).toHaveLength(1);
+  });
+
+  it("PB-16: el cuarto network error consecutivo es terminal — destroy y sin más retries", () => {
+    const { hook } = mount({
+      playbackMethod: "transcode",
+      masterPlaylistUrl: "/api/v1/items/1/stream/hls/master.m3u8",
+    });
+    const hls = FakeHls.instances[0];
+
+    for (let i = 0; i < 4; i++) {
+      act(() => {
+        hls.emit(FakeHls.Events.ERROR, {
+          fatal: true,
+          type: FakeHls.ErrorTypes.NETWORK_ERROR,
+          details: "fragLoadError",
+        });
+      });
+    }
+
+    // 3 recoveries permitidos; el 4º no reintenta y mata la instancia.
+    expect(hls.startLoadCalls).toHaveLength(3);
+    expect(hls.destroyed).toBe(true);
+    expect(hook.result.current.error).toMatch(/no se pudo recuperar|could not reconnect/i);
+  });
+
+  it("PB-16: un FRAG_LOADED sano resetea el presupuesto de recovery", () => {
+    const { hook } = mount({
+      playbackMethod: "transcode",
+      masterPlaylistUrl: "/api/v1/items/1/stream/hls/master.m3u8",
+    });
+    const hls = FakeHls.instances[0];
+    const netError = () =>
+      act(() => {
+        hls.emit(FakeHls.Events.ERROR, {
+          fatal: true,
+          type: FakeHls.ErrorTypes.NETWORK_ERROR,
+          details: "fragLoadError",
+        });
+      });
+
+    netError();
+    netError();
+    netError(); // 3 — presupuesto agotado
+    act(() => {
+      hls.emit(FakeHls.Events.FRAG_LOADED, {});
+    });
+    expect(hook.result.current.error).toBeNull();
+
+    netError(); // tras el reset vuelve a reintentar, no es terminal
+    expect(hls.destroyed).toBe(false);
+    expect(hls.startLoadCalls).toHaveLength(4);
+  });
+
+  it("PB-16: el segundo media error en <3s intenta swapAudioCodec (patrón hls.js)", () => {
+    const { hook } = mount({
+      playbackMethod: "transcode",
+      masterPlaylistUrl: "/api/v1/items/1/stream/hls/master.m3u8",
+    });
+    const hls = FakeHls.instances[0];
+    const mediaError = () =>
+      act(() => {
+        hls.emit(FakeHls.Events.ERROR, {
+          fatal: true,
+          type: FakeHls.ErrorTypes.MEDIA_ERROR,
+          details: "bufferAppendError",
+        });
+      });
+
+    mediaError();
+    expect(hls.swapAudioCodecCalls).toBe(0);
+    mediaError(); // inmediato → dentro de la ventana de 3s
+    expect(hls.swapAudioCodecCalls).toBe(1);
+    expect(hls.recoverMediaCalls).toBe(2);
+
+    mediaError(); // 3º — último permitido
+    mediaError(); // 4º — terminal
+    expect(hls.destroyed).toBe(true);
+    expect(hook.result.current.error).toMatch(/no pudo decodificar|could not decode/i);
   });
 
   it("fatal media error calls recoverMediaError", () => {
@@ -244,7 +327,7 @@ describe("useHls — hls.js fatal error recovery (contrato existente)", () => {
       });
     });
 
-    expect(hook.result.current.error).toMatch(/recover/i);
+    expect(hook.result.current.error).toMatch(/recuperando|recovering/i);
     expect(hls.recoverMediaCalls).toBe(1);
   });
 });

@@ -115,6 +115,12 @@ type IPTVTransmuxer interface {
 	// evitando que el reaper de inactividad la mate. Devuelve
 	// iptv.ErrSessionNotFound cuando la sesión ha expirado.
 	Touch(channelID string) (*iptv.TransmuxSession, error)
+	// JoinViewer/LeaveViewer mantienen el refcount de players activos
+	// de la sesión (PB-28): el último Leave libera el slot al instante
+	// en vez de esperar al idle reap — el zapping ya no agota
+	// MaxSessions. Ambos son no-op para ids vacíos o sin sesión viva.
+	JoinViewer(channelID, viewerID string)
+	LeaveViewer(channelID, viewerID string)
 }
 
 // ─── Repository interfaces ──────────────────────────────────────────────────
