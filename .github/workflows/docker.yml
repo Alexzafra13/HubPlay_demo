@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [main]
 
+# Cancela builds obsoletos de la misma ref: si llegan dos merges a main
+# seguidos, el más nuevo gana y el viejo no desperdicia 2 jobs de
+# buildx. Los tags v* tienen ref única — nunca se cancelan entre sí.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}

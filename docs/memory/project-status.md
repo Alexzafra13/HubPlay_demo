@@ -116,6 +116,18 @@ analysis vs Jellyfin/Plex hecho: faltan (producto, roadmap) Chromecast,
 SyncPlay, control remoto de sesiones, ajustes de apariencia/offset de
 subtítulos.
 
+**Imagen Docker + CI (2026-06-10, pregunta del owner):** la imagen
+default ya es ligera (~105MB: alpine + ffmpeg ~65MB + binario 28MB con
+frontend embebido); Grafana/Prometheus NO van dentro — son sidecars
+opt-in de `deploy/observability/` (decisión: se quedan como opcionales,
+pineados por digest). El CI de Docker tardaba ~20min porque el build
+arm64 corría ENTERO bajo QEMU: ahora los stages de build usan
+`--platform=$BUILDPLATFORM` y cross-compilan (`GOOS/GOARCH` de
+TARGETARCH) — solo el `apk add` del runtime se emula. B7 cerrado:
+`push: [main]` + `concurrency` con cancel en ci/docker (release
+serializa sin cancelar). Esperado: docker ~20min → ~6-8min y mitad de
+runs de CI.
+
 **Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases
 3–5). Ninguna bloquea el uso plug-and-play básico.
 

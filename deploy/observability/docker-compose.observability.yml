@@ -10,7 +10,10 @@
 # only when you want to look, and on a different host if you like.
 services:
   prometheus:
-    image: prom/prometheus:latest
+    # Pineada por digest (disciplina supply-chain del repo): `latest`
+    # mutable en un sidecar con acceso al token de /metrics no es
+    # aceptable. Bump manual: resolver el digest nuevo y actualizar.
+    image: prom/prometheus:latest@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
     restart: unless-stopped
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -22,7 +25,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:latest@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
     restart: unless-stopped
     depends_on:
       - prometheus

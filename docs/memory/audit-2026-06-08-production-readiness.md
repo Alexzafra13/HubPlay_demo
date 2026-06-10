@@ -275,7 +275,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
 - **B6 · `/health` filtra el string de error de DB** crudo
   (`system/health.go:73,122`, sin auth): para Postgres podría filtrar
   fragmentos de DSN. **Fix:** status genérico externo, detalle a logs.
-- **B7 · CI corre en cada push de cada rama** (duplica runs con
+- ✅ **B7 · CI corre en cada push de cada rama** (duplica runs con
   `pull_request`). **Fix:** scope a `main` + `concurrency:` para cancelar.
 - **B8 · Bloat de SDKs cloud (AWS/Azure/GCP)** arrastrados por `tus/tusd/v2`
   (indirectos). Hinchan binario/superficie. Bajo, transitivo.

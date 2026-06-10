@@ -2,8 +2,15 @@ name: CI
 
 on:
   push:
-    branches: ["*"]
+    branches: [main]
   pull_request:
+
+# Un solo run vivo por ref: un push nuevo a la misma PR cancela el run
+# anterior (que ya no le importa a nadie). Antes, cada push a cualquier
+# rama corría CI dos veces (push + pull_request) — B7 del audit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # Default least-privilege scope. Each job below inherits this and can
 # escalate explicitly if it ever needs to (e.g. release uploads).
