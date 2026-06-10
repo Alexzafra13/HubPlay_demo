@@ -149,14 +149,14 @@ mapeando `video.error.code` a mensajes específicos.
 
 ### IPTV
 
-- **PB-14 · Fallo de upstream al arrancar → 200 vacío tras ~15s.**
+- ✅ **PB-14 · Fallo de upstream al arrancar → 200 vacío tras ~15s.**
   `iptv_channels.go:250-253` + `proxy.go:314-343`. Si `fetchUpstream`
   falla antes de escribir, el handler solo loguea ("response may already
   be partially written") — pero no se escribió nada → 200 implícito con
   body vacío; hls.js quema sus 6 reintentos contra más 200s. **Fix:**
   wrapper de `w` que registre bytes escritos; sin bytes → 502/503 (el
   patrón ya existe en `ProxyURL`, `proxy.go:746`).
-- **PB-15 · El retry-loop interno rompe la semántica del breaker y reintenta errores permanentes.**
+- ✅ **PB-15 · El retry-loop interno rompe la semántica del breaker y reintenta errores permanentes.**
   `proxy.go:315,547` + `circuit_breaker.go:44`. Cada uno de los 5 intentos
   registra `RecordFailure` → **una sola request fallida abre el breaker
   30s** (umbral nominal: 5). Un blip de 3s = ~45s de canal muerto para
@@ -227,12 +227,12 @@ mapeando `video.error.code` a mensajes específicos.
 - **PB-26 · Duración "N/A" → 0 silencioso** sin fallback a la duración de
   los streams (`probe.go:155-157`). El downstream degrada con gracia
   (manifest legacy sin free-seek) — fix barato: `max(stream.duration)`.
-- **PB-27 · Canales HEVC: `-bsf:v h264_mp4toannexb` incondicional.**
+- ✅ **PB-27 · Canales HEVC: `-bsf:v h264_mp4toannexb` incondicional.**
   `transmux_args.go:135`. Con HEVC ffmpeg muere → el classifier promueve a
   **re-encode permanente** (1h TTL) cuando `-c copy` funcionaría. +5-10s
   de zap y CPU quemada. **Fix:** quitar el bsf (mpegts no lo necesita) o
   por codec.
-- **PB-28 · Zapping >10 canales TS en 30s → TRANSMUX_BUSY sin forma de liberar.**
+- ✅ **PB-28 · Zapping >10 canales TS en 30s → TRANSMUX_BUSY sin forma de liberar.**
   `transmux.go:463-469`; `Stop` (`transmux.go:814`) no se llama desde
   ningún handler. **Fix:** beacon/DELETE al cambiar de canal o viewers
   refcount con reap a 0.
@@ -393,7 +393,7 @@ backend si se confirma que ningún cliente externo los usa.
 | **P0 ✅** | Correctness que rompe playback común | PB-1, PB-2, PB-3, PB-4 + tests que los fijan | hecho (2026-06-10) |
 | **P1a ✅** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | hecho (2026-06-10) |
 | **P1b ✅** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | hecho (2026-06-10) |
-| **P1c** | IPTV | PB-14, PB-15, PB-27, PB-28 | 1 sesión |
+| **P1c ✅** | IPTV | PB-14, PB-15, PB-27, PB-28 | hecho (2026-06-10) |
 | **P1d ✅** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-34, PB-35 + tests useHls | hecho (2026-06-10) |
 | **P2** | VAAPI real + ABR/caps + surround | PB-5, PB-10, PB-22, PB-23 | 1-2 sesiones |
 | **P3** | E2E smoke + resto 🟡/🟢 | gaps de test 1-7, PB-26, PB-29–34, PB-36–39 | 1-2 sesiones |

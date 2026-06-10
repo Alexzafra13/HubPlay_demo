@@ -132,7 +132,11 @@ func buildDirectArgs(upstreamURL, workDir, userAgent string) []string {
 		"-map", "0:v:0",
 		"-map", "0:a:0?",
 		"-c", "copy",
-		"-bsf:v", "h264_mp4toannexb",
+		// Sin `-bsf:v h264_mp4toannexb`: la entrada es mpegts (ya
+		// Annex-B), donde el filtro era un no-op para h264 — pero con
+		// HEVC ffmpeg lo RECHAZA y muere, y el classifier promovía el
+		// canal a re-encode permanente (1h de TTL quemando CPU) cuando
+		// `-c copy` funciona directamente. PB-27 (audit 2026-06-10).
 	)
 	return append(args, hlsOutputArgs(workDir)...)
 }

@@ -81,9 +81,22 @@ el restart frío de ffmpeg superaba el default de 10s), PB-34
 (`backBufferLength: 90` — el default era infinito), PB-35 (todos los
 errores del player vía i18n es/en, claves `player.errors.*`).
 
+**P1c ✅ hecha (2026-06-10):** PB-14 (`countingResponseWriter` → 502
+real si el upstream falló sin escribir nada, antes 200 vacío + ~15-20s
+de reintentos de hls.js), PB-15 (`upstreamStatusError`: los 4xx son
+permanentes — fallan YA sin quemar backoff — y el fallo de salud se
+registra UNA vez por request, no por intento: una request ya no abre
+el breaker ella sola), PB-27 (fuera `-bsf:v h264_mp4toannexb` del
+transmux direct — mataba HEVC y lo promovía a re-encode permanente),
+PB-28 (refcount de viewers en transmux: `?v=` en manifest +
+`DELETE /channels/{id}/hls/viewer`; el último viewer libera el slot al
+instante; el frontend manda la baja al zapear/pagehide con keepalive;
+clientes sin `?v=` conservan el idle reap). + Hotfix CI: GOTOOLCHAIN
+auto en sqlc-verify y checksum de evermeet en modo soft (403 a IPs de
+runners).
+
 | Prioridad | Tema | Items |
 |---|---|---|
-| **Alta** | **Playback P1c — IPTV** | PB-14, 15, 27, 28 |
 | Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
 
 **Quick wins del player ✅ (2026-06-10):** botones ±10s con icono

@@ -1355,6 +1355,21 @@ export class ApiClient {
     return `${this.baseUrl}/stream/${itemId}/subtitles/${trackIndex}`;
   }
 
+  /**
+   * Baja explícita del viewer en la sesión de transmux del canal
+   * (PB-28). El backend libera el slot inmediatamente si era el último
+   * viewer registrado; keepalive para que sobreviva al unload del
+   * zapping/cierre. Best-effort: si se pierde, el idle reap del server
+   * sigue de backstop.
+   */
+  async leaveChannelStream(channelId: string, viewerId: string): Promise<void> {
+    return this.request<void>(
+      "DELETE",
+      `/channels/${channelId}/hls/viewer?v=${encodeURIComponent(viewerId)}`,
+      { keepalive: true },
+    );
+  }
+
   // ─── Federated subtitles (HubPlay peer) ───────────────────────────────
   //
   // When the user is playing a federated item, embedded subtitles live

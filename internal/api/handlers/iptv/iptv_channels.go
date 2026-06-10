@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -243,14 +244,75 @@ func (h *iptvChannelHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// decision out of the proxy code path, which means HLS upstreams
 	// keep their existing zero-buffer behaviour.
 	if h.transmux != nil && !iptv.IsHLSURL(ch.StreamURL) {
-		http.Redirect(w, r, "/api/v1/channels/"+channelID+"/hls/index.m3u8", http.StatusFound)
+		loc := "/api/v1/channels/" + channelID + "/hls/index.m3u8"
+		// Propagar el viewer-id del player: el 302 perdería la query y
+		// el manifest no podría registrar al viewer (PB-28).
+		if v := r.URL.Query().Get("v"); v != "" {
+			loc += "?v=" + url.QueryEscape(v)
+		}
+		http.Redirect(w, r, loc, http.StatusFound)
 		return
 	}
 
-	if err := h.proxy.ProxyStream(r.Context(), w, channelID, ch.StreamURL); err != nil {
+	// PB-14 (audit 2026-06-10): si el upstream falla ANTES de escribir
+	// ningún byte, el "no escribas el error" de abajo dejaba que Go
+	// emitiera un 200 implícito con body vacío — hls.js lo interpreta
+	// como manifest inválido y quema sus reintentos contra más 200s
+	// vacíos (~15-20s de espera para algo que el server supo en 1s).
+	// El wrapper distingue "nada escrito" (→ 502 real) de "stream a
+	// medias" (→ solo loguear, las cabeceras ya volaron).
+	cw := &countingResponseWriter{ResponseWriter: w}
+	if err := h.proxy.ProxyStream(r.Context(), cw, channelID, ch.StreamURL); err != nil {
 		h.logger.Error("stream proxy error", "channel", channelID, "error", err)
-		// Don't write error — response may already be partially written
+		if !cw.wrote {
+			handlers.RespondError(w, r, http.StatusBadGateway, "UPSTREAM_ERROR",
+				"upstream channel unavailable")
+		}
 	}
+}
+
+// countingResponseWriter registra si ya se escribió algo en la
+// respuesta (cabeceras o body). Passthrough de Flush — pipeStream
+// flushea por chunk para streaming real.
+type countingResponseWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (c *countingResponseWriter) WriteHeader(status int) {
+	c.wrote = true
+	c.ResponseWriter.WriteHeader(status)
+}
+
+func (c *countingResponseWriter) Write(b []byte) (int, error) {
+	c.wrote = true
+	return c.ResponseWriter.Write(b)
+}
+
+func (c *countingResponseWriter) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// HLSLeaveViewer da de baja al viewer de la sesión de transmux del
+// canal; si era el último, la sesión se libera inmediatamente en vez
+// de esperar al idle reap — el zapping ya no acumula sesiones hasta
+// TRANSMUX_BUSY (PB-28). Best-effort por diseño: el frontend lo lanza
+// con keepalive al desmontar el player y en pagehide; si se pierde,
+// el idle reap sigue de backstop. El viewer-id es un UUID efímero
+// inadivinable, así que un DELETE ajeno no puede tumbar sesiones.
+func (h *iptvChannelHandler) HLSLeaveViewer(w http.ResponseWriter, r *http.Request) {
+	channelID := handlers.RequireParam(w, r, "channelId")
+	if channelID == "" {
+		return
+	}
+	if h.transmux != nil {
+		if v := r.URL.Query().Get("v"); v != "" {
+			h.transmux.LeaveViewer(channelID, v)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // HLSManifest serves the live HLS playlist produced by the per-channel
@@ -320,6 +382,13 @@ func (h *iptvChannelHandler) HLSManifest(w http.ResponseWriter, r *http.Request)
 				"failed to start transmux session")
 		}
 		return
+	}
+
+	// Registrar al viewer (PB-28): el manifest se re-pide cada ~2s así
+	// que la membresía sobrevive a respawns; sin `?v=` (clientes
+	// legacy) no se registra nada y aplica solo el idle reap.
+	if v := r.URL.Query().Get("v"); v != "" {
+		h.transmux.JoinViewer(channelID, v)
 	}
 
 	body, err := os.ReadFile(sess.ManifestPath())

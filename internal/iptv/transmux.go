@@ -290,6 +290,17 @@ type TransmuxSession struct {
 	// manager and cleanup is in flight. Touch checks it to avoid
 	// resurrecting a terminated session via races.
 	stopped atomic.Bool
+
+	// viewers son los players ACTIVOS registrados (id efímero por
+	// montaje del player, viaja como `?v=` en el manifest). Permite
+	// liberar la sesión inmediatamente cuando el último viewer zapea
+	// a otro canal en vez de esperar al idle reap de 30s — sin esto,
+	// visitar >MaxSessions canales TS en <30s agotaba los slots y el
+	// canal 11 recibía TRANSMUX_BUSY (PB-28, audit 2026-06-10).
+	// Clientes sin `?v=` (terceros) no registran nada y conservan el
+	// comportamiento histórico de solo-idle-reap.
+	viewersMu sync.Mutex
+	viewers   map[string]struct{}
 }
 
 // NewTransmuxManager constructs a manager with defaults filled in for
@@ -822,6 +833,62 @@ func (m *TransmuxManager) Stop(channelID string) {
 		m.terminate(s)
 		m.notifyChange()
 	}
+}
+
+// JoinViewer registra un viewer activo en la sesión del canal. El
+// manifest live se re-pide cada ~2s, así que la membresía se
+// auto-restaura sola tras un respawn de la sesión. No-op si el canal
+// no tiene sesión viva.
+func (m *TransmuxManager) JoinViewer(channelID, viewerID string) {
+	if viewerID == "" {
+		return
+	}
+	m.mu.Lock()
+	s, ok := m.sessions[channelID]
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.viewersMu.Lock()
+	if s.viewers == nil {
+		s.viewers = make(map[string]struct{})
+	}
+	s.viewers[viewerID] = struct{}{}
+	s.viewersMu.Unlock()
+}
+
+// LeaveViewer da de baja al viewer; si era el ÚLTIMO registrado, para
+// la sesión inmediatamente para devolver el slot (PB-28). Solo actúa
+// si el viewer estaba registrado — un DELETE espurio no puede tumbar
+// la sesión de un cliente legacy que nunca se registró.
+func (m *TransmuxManager) LeaveViewer(channelID, viewerID string) {
+	if viewerID == "" {
+		return
+	}
+	m.mu.Lock()
+	s, ok := m.sessions[channelID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	s.viewersMu.Lock()
+	_, wasMember := s.viewers[viewerID]
+	if wasMember {
+		delete(s.viewers, viewerID)
+	}
+	empty := wasMember && len(s.viewers) == 0
+	s.viewersMu.Unlock()
+	if !empty {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.sessions, channelID)
+	m.mu.Unlock()
+	m.logger.Info("last viewer left; releasing transmux session",
+		"channel", channelID,
+	)
+	m.terminate(s)
+	m.notifyChange()
 }
 
 // ActiveSessions reports the current number of live sessions.

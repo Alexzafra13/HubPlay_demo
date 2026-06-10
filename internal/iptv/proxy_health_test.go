@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -149,9 +150,11 @@ func TestStreamOnceWithChannel_ReportsSuccess(t *testing.T) {
 	}
 }
 
-// Upstream DNS failure gets reported as a proxy failure (not a
-// client cancellation).
-func TestStreamOnceWithChannel_ReportsFailure(t *testing.T) {
+// PB-15 (audit 2026-06-10): los FALLOS los reporta el retry-loop UNA
+// vez por request, no streamOnce por intento — con el reporte
+// per-intento, una sola request contra un canal caído sumaba 5 fallos
+// y abría el breaker (umbral 5) ella sola.
+func TestStreamOnce_DoesNotReportFailuresItself(t *testing.T) {
 	rep := &fakeHealthReporter{}
 	p := newTestProxy(rep)
 
@@ -164,8 +167,43 @@ func TestStreamOnceWithChannel_ReportsFailure(t *testing.T) {
 	}
 
 	_, failures := rep.snapshot()
+	if failures != 0 {
+		t.Errorf("streamOnce must not report failures (the loop does, once); got %d", failures)
+	}
+}
+
+// Un 4xx del upstream es permanente: el loop NO reintenta (antes
+// quemaba ~15s de backoff para el mismo resultado) y registra
+// exactamente UN fallo de salud.
+func TestStreamWithReconnect_PermanentStatusFailsFastAndReportsOnce(t *testing.T) {
+	unblockLoopback(t)
+	rep := &fakeHealthReporter{}
+	p := newTestProxy(rep)
+
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusForbidden) // geo-block típico
+	}))
+	defer srv.Close()
+
+	rr := httptest.NewRecorder()
+	start := time.Now()
+	err := p.streamWithReconnect(context.Background(), rr, "c-geo", srv.URL)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected permanent upstream error")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("4xx must not be retried; upstream hit %d times", got)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("permanent error must fail fast, took %v", elapsed)
+	}
+	_, failures := rep.snapshot()
 	if failures != 1 {
-		t.Errorf("expected 1 failure recorded, got %d", failures)
+		t.Errorf("expected exactly 1 failure recorded for the request, got %d", failures)
 	}
 }
 

@@ -310,6 +310,23 @@ func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, ch
 	return p.streamWithReconnect(ctx, w, channelID, streamURL)
 }
 
+// upstreamStatusError tipifica el código HTTP del upstream para que el
+// retry-loop distinga errores permanentes (4xx: geo-block, credenciales
+// caducadas, 404) de los transitorios. Reintentar un 403 cuatro veces
+// solo añadía ~15s de espera inútil antes del mismo resultado. PB-15
+// (audit 2026-06-10).
+type upstreamStatusError struct{ status int }
+
+func (e *upstreamStatusError) Error() string {
+	return fmt.Sprintf("upstream returned %d", e.status)
+}
+
+// permanent reporta si el status no va a cambiar reintentando ya:
+// 4xx salvo 429 (rate-limit, que sí es transitorio).
+func (e *upstreamStatusError) permanent() bool {
+	return e.status >= 400 && e.status < 500 && e.status != http.StatusTooManyRequests
+}
+
 // streamWithReconnect handles upstream connection with exponential backoff reconnection.
 func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
@@ -321,7 +338,22 @@ func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWr
 			return err
 		}
 
+		// 4xx del upstream: reintentar no cambia nada (geo-block,
+		// credenciales caducadas, 404) — fallar YA en vez de quemar
+		// ~15s de backoff, y registrar UN fallo de salud.
+		var statusErr *upstreamStatusError
+		if errors.As(err, &statusErr) && statusErr.permanent() {
+			p.reportOutcome(context.Background(), ctx, channelID, err)
+			return fmt.Errorf("stream %s: permanent upstream error: %w", channelID, err)
+		}
+
 		if attempt >= len(backoffs) {
+			// Un único outcome por REQUEST, no por intento: con el
+			// reporte per-intento, una sola petición contra un canal
+			// caído sumaba 5 fallos y abría el breaker (umbral 5) — un
+			// blip de 3s se convertía en ~45s de canal "muerto" para
+			// todos los viewers. PB-15 (audit 2026-06-10).
+			p.reportOutcome(context.Background(), ctx, channelID, err)
 			return fmt.Errorf("stream %s failed after %d attempts: %w", channelID, attempt+1, err)
 		}
 
@@ -387,7 +419,7 @@ func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*htt
 
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return nil, "", &upstreamStatusError{status: resp.StatusCode}
 	}
 
 	// Get the final URL after redirects (Go's http.Client follows them automatically).
@@ -540,11 +572,15 @@ func rewriteURIAttribute(line string, base *url.URL, makeProxyURL func(string) s
 // streamOnceWithChannel connects to upstream. For HLS content, rewrites the playlist.
 func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	resp, finalURL, err := p.fetchUpstream(ctx, streamURL)
-	// Record the outcome against the channel's health. Only this path
+	// Record SUCCESS against the channel's health. Only this path
 	// reports — ProxyURL (HLS segments) fires dozens of times per minute
 	// and would flood the DB; the master playlist fetch is the one-shot
-	// signal that matters for "is this upstream reachable".
-	p.reportOutcome(context.Background(), ctx, channelID, err)
+	// signal that matters for "is this upstream reachable". Los FALLOS
+	// los reporta streamWithReconnect una sola vez por request (no por
+	// intento del retry-loop) — ver PB-15.
+	if err == nil {
+		p.reportOutcome(context.Background(), ctx, channelID, nil)
+	}
 	if err != nil {
 		return err
 	}
