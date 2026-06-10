@@ -2142,6 +2142,27 @@ paths:
         "404":
           description: Session expired; reload the manifest to resume
 
+  /channels/{channelId}/hls/viewer:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [livetv, stream]
+      summary: Baja explícita del viewer en la sesión de transmux del canal
+      description: |
+        El player registra un id de viewer efímero (query `v` en el
+        manifest); al zapear o cerrar manda esta baja con `keepalive`.
+        Si era el último viewer registrado, la sesión ffmpeg se libera
+        inmediatamente en vez de esperar al idle reap (~30s) — el
+        zapping rápido ya no agota los slots de transmux (PB-28).
+        Best-effort e idempotente: ids no registrados o sin sesión viva
+        son no-op (el idle reap sigue de backstop), así que un DELETE
+        espurio no puede tumbar la sesión de otros viewers.
+      parameters:
+        - { name: v, in: query, required: true, schema: { type: string }, description: "Id efímero del viewer (UUID generado por el player al montar)" }
+      responses:
+        "204":
+          description: Baja procesada (o no-op)
+
   /channels/{channelId}/logo:
     parameters:
       - { name: channelId, in: path, required: true, schema: { type: string } }
