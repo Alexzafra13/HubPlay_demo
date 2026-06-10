@@ -536,6 +536,11 @@ func TestItemHandler_TrickplayManifest_FreshCacheServesImmediately(t *testing.T)
 	env, dir := trickplayEnv(t)
 	itemDir := filepath.Join(dir, "it-1")
 	trickplayWriteCache(t, itemDir, imaging.TrickplayManifestVersion)
+	// El item debe resolverse incluso en el fast-path: el gate ACL de
+	// biblioteca (PB-12) corre ANTES de servir el cache.
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null"}, nil
+	}
 
 	rr := env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.json")
 	if rr.Code != http.StatusOK {

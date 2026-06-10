@@ -344,6 +344,15 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
+	// Fichero borrado/movido tras el último scan (IsAvailable solo se
+	// actualiza al re-escanear): error claro en vez de arrancar un
+	// ffmpeg que muere al instante y dejar al cliente en un bucle de
+	// SEGMENT_NOT_FOUND. PB-25 (audit 2026-06-10).
+	if _, statErr := os.Stat(item.Path); statErr != nil {
+		m.metrics.TranscodeFailed()
+		return nil, domain.NewNotFound("media file")
+	}
+
 	// Índice de audio explícito fuera de rango → 400, no spinner.
 	if err := validateAudioStreamIndex(mediaStreams, audioStreamIndex); err != nil {
 		return nil, err

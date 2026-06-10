@@ -200,3 +200,31 @@ func TestParseOutput_Empty(t *testing.T) {
 		t.Errorf("expected 0 streams, got %d", len(result.Streams))
 	}
 }
+
+// PB-24 (audit 2026-06-10): la carátula embebida llega como "video
+// stream" con disposition attached_pic=1 — debe marcarse para que el
+// scanner no la persista como pista de vídeo real (un MP3 con carátula
+// caía a transcode completo).
+func TestParseOutput_AttachedPic(t *testing.T) {
+	data := []byte(`{
+		"format": {"format_name": "mp3", "duration": "180.5"},
+		"streams": [
+			{"index": 0, "codec_type": "audio", "codec_name": "mp3"},
+			{"index": 1, "codec_type": "video", "codec_name": "mjpeg",
+			 "disposition": {"attached_pic": 1}}
+		]
+	}`)
+	res, err := parseOutput(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Streams) != 2 {
+		t.Fatalf("expected 2 streams, got %d", len(res.Streams))
+	}
+	if res.Streams[0].IsAttachedPic {
+		t.Error("audio stream must not be attached_pic")
+	}
+	if !res.Streams[1].IsAttachedPic {
+		t.Error("mjpeg cover art must be flagged IsAttachedPic")
+	}
+}

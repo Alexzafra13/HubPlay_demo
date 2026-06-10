@@ -540,6 +540,15 @@ func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// IsAvailable solo se refresca al escanear: si el fichero se borró
+	// hace 5 minutos, ServeFile devolvería un 404 text/plain con el
+	// Content-Type de vídeo ya puesto — rompiendo el contrato JSON de
+	// error. Stat explícito primero. PB-25 (audit 2026-06-10).
+	if _, err := os.Stat(item.Path); err != nil {
+		handlers.RespondError(w, r, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
+		return
+	}
+
 	// Detect content type from container
 	contentType := containerToMIME(item.Container)
 	w.Header().Set("Content-Type", contentType)

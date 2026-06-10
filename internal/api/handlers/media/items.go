@@ -85,7 +85,7 @@ type ItemHandlerDeps struct {
 func NewItemHandler(deps ItemHandlerDeps) *ItemHandler {
 	return &ItemHandler{
 		ItemDetailHandler:      newItemDetailHandler(deps.Lib, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.Segments, deps.ExternalIDs, deps.People, deps.Collections, deps.Identifier, deps.Access, deps.Logger),
-		TrickplayHandler:       newTrickplayHandler(deps.Lib, deps.TrickplayDir, deps.Logger),
+		TrickplayHandler:       newTrickplayHandler(deps.Lib, deps.Access, deps.TrickplayDir, deps.Logger),
 		SearchHandler:          newSearchHandler(deps.Lib, deps.Images, deps.UserData, deps.Users, deps.Access, deps.Logger),
 		RecommendationsHandler: newRecommendationsHandler(deps.Lib, deps.ExternalIDs, deps.Providers, deps.Access, deps.Logger),
 		MetadataHandler:        newMetadataHandler(deps.Identifier, deps.Audit, deps.Logger),

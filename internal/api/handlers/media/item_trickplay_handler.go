@@ -30,6 +30,7 @@ type trickplayItemLookup interface {
 
 type TrickplayHandler struct {
 	lib    trickplayItemLookup
+	access LibraryACL
 	logger *slog.Logger
 	// trickplayDir is the root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
@@ -50,14 +51,41 @@ type TrickplayHandler struct {
 	// cancelado dentro de la goroutine acota el trabajo a su propio
 	// deadline.
 	trickplayBG sync.WaitGroup
+	// genSlots limita los ffmpeg de generación CONCURRENTES a nivel
+	// global. El lock per-item solo evita duplicados del mismo item:
+	// sin este semáforo, hoverear una fila de la home lanzaba N ffmpegs
+	// de hasta 180s a la vez y ponía el servidor de rodillas — los
+	// transcodes activos incluidos. PB-12 (audit 2026-06-10).
+	genSlots chan struct{}
 }
 
-func newTrickplayHandler(lib trickplayItemLookup, trickplayDir string, logger *slog.Logger) *TrickplayHandler {
+func newTrickplayHandler(lib trickplayItemLookup, access LibraryACL, trickplayDir string, logger *slog.Logger) *TrickplayHandler {
 	return &TrickplayHandler{
 		lib:          lib,
+		access:       access,
 		logger:       logger,
 		trickplayDir: trickplayDir,
+		genSlots:     make(chan struct{}, 2),
 	}
+}
+
+// authorizeTrickplayItem resuelve el item y aplica el ACL de biblioteca
+// con respuesta 404 anti-enumeración — mismo contrato que
+// StreamHandler.authorizeItem. Antes trickplay era el único surface de
+// playback SIN gate: cualquier usuario autenticado podía ver la
+// timeline visual completa (200 frames de la película) de bibliotecas
+// a las que no tiene acceso. PB-12 (audit 2026-06-10).
+func (h *TrickplayHandler) authorizeTrickplayItem(w http.ResponseWriter, r *http.Request, itemID string) (*librarymodel.Item, bool) {
+	item, err := h.lib.GetItem(r.Context(), itemID)
+	if err != nil {
+		handlers.HandleServiceError(w, r, err)
+		return nil, false
+	}
+	if h.access != nil && !handlers.CanAccessLibrary(r, h.access, h.logger, item.LibraryID) {
+		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
+		return nil, false
+	}
+	return item, true
 }
 
 // TrickplayManifest serves the sprite-sheet manifest for an item. El
@@ -82,20 +110,36 @@ func (h *TrickplayHandler) TrickplayManifest(w http.ResponseWriter, r *http.Requ
 	if id == "" {
 		return
 	}
-	itemDir, err := h.ensureTrickplay(r.Context(), id)
+	item, ok := h.authorizeTrickplayItem(w, r, id)
+	if !ok {
+		return
+	}
+	itemDir, err := h.ensureTrickplay(item)
 	if err != nil {
-		if errors.Is(err, errTrickplayPending) {
-			w.Header().Set("Retry-After", "10")
-			handlers.RespondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_PENDING",
-				"trickplay sprite is being generated; retry shortly")
-			return
-		}
-		handlers.HandleServiceError(w, r, err)
+		h.respondTrickplayError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", handlers.CacheControlImage)
 	http.ServeFile(w, r, filepath.Join(itemDir, "manifest.json"))
+}
+
+// respondTrickplayError mapea los sentinels de ensureTrickplay:
+// pending → 503 + Retry-After (el cliente poolea); failed → 404 SIN
+// Retry-After, para que el frontend deje de poolear y no relance
+// ffmpeg en bucle contra un fichero que no genera (PB-13).
+func (h *TrickplayHandler) respondTrickplayError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, errTrickplayPending):
+		w.Header().Set("Retry-After", "10")
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_PENDING",
+			"trickplay sprite is being generated; retry shortly")
+	case errors.Is(err, errTrickplayFailed):
+		handlers.RespondError(w, r, http.StatusNotFound, "TRICKPLAY_UNAVAILABLE",
+			"trickplay generation failed for this item")
+	default:
+		handlers.HandleServiceError(w, r, err)
+	}
 }
 
 // TrickplaySprite serves the sprite PNG. Mirrors TrickplayManifest's
@@ -114,15 +158,13 @@ func (h *TrickplayHandler) TrickplaySprite(w http.ResponseWriter, r *http.Reques
 	if id == "" {
 		return
 	}
-	itemDir, err := h.ensureTrickplay(r.Context(), id)
+	item, ok := h.authorizeTrickplayItem(w, r, id)
+	if !ok {
+		return
+	}
+	itemDir, err := h.ensureTrickplay(item)
 	if err != nil {
-		if errors.Is(err, errTrickplayPending) {
-			w.Header().Set("Retry-After", "10")
-			handlers.RespondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_PENDING",
-				"trickplay sprite is being generated; retry shortly")
-			return
-		}
-		handlers.HandleServiceError(w, r, err)
+		h.respondTrickplayError(w, r, err)
 		return
 	}
 	w.Header().Set("Cache-Control", handlers.CacheControlImage)
@@ -134,6 +176,31 @@ func (h *TrickplayHandler) TrickplaySprite(w http.ResponseWriter, r *http.Reques
 // Los handlers lo traducen a 503 + Retry-After para que el cliente
 // poolee sin bloquear el HTTP request behind ffmpeg.
 var errTrickplayPending = errors.New("trickplay: generation pending")
+
+// errTrickplayFailed es el sentinel para items con un intento de
+// generación fallido reciente (negative cache). Sin él, cada hover
+// relanzaba OTRO ffmpeg de hasta 180s contra el mismo fichero
+// corrupto, en bucle con el Retry-After del polling del frontend.
+// PB-13 (audit 2026-06-10).
+var errTrickplayFailed = errors.New("trickplay: generation failed recently")
+
+// trickplayFailedTTL es cuánto se respeta el marcador de fallo antes
+// de permitir un reintento (el fichero puede haber sido reemplazado).
+const trickplayFailedTTL = 24 * time.Hour
+
+// trickplayFailedMarker es el nombre del fichero-marcador dentro del
+// dir per-item. Su mtime es el timestamp del fallo.
+const trickplayFailedMarker = "failed.marker"
+
+// trickplayFailedRecently reporta si hay un marcador de fallo dentro
+// del TTL para el dir del item.
+func trickplayFailedRecently(itemDir string) bool {
+	info, err := os.Stat(filepath.Join(itemDir, trickplayFailedMarker))
+	if err != nil {
+		return false
+	}
+	return time.Since(info.ModTime()) < trickplayFailedTTL
+}
 
 // WaitTrickplayInflight bloquea hasta que cada goroutine background de
 // trickplay arrancada vía este handler haya retornado. Pensado para
@@ -167,7 +234,8 @@ func (h *TrickplayHandler) WaitTrickplayInflight() {
 // cuando ffmpeg termina. Concurrent requests durante la generación
 // ven TryLock fail y devuelven pending también — no duplicate
 // ffmpegs, no thundering herd.
-func (h *TrickplayHandler) ensureTrickplay(ctx context.Context, itemID string) (string, error) {
+func (h *TrickplayHandler) ensureTrickplay(item *librarymodel.Item) (string, error) {
+	itemID := item.ID
 	itemDir := filepath.Join(h.trickplayDir, itemID)
 	spritePath := filepath.Join(itemDir, "sprite.png")
 	manifestPath := filepath.Join(itemDir, "manifest.json")
@@ -178,6 +246,13 @@ func (h *TrickplayHandler) ensureTrickplay(ctx context.Context, itemID string) (
 	// regeneración abajo.
 	if trickplayCacheFresh(spritePath, manifestPath) {
 		return itemDir, nil
+	}
+
+	// Negative cache: un intento fallido reciente no se reintenta
+	// hasta pasado el TTL — el cliente recibe 404 (sin Retry-After) y
+	// deja de poolear (PB-13).
+	if trickplayFailedRecently(itemDir) {
+		return "", errTrickplayFailed
 	}
 
 	// Mutex per-item via sync.Map. TryLock means: si otro caller ya
@@ -199,11 +274,6 @@ func (h *TrickplayHandler) ensureTrickplay(ctx context.Context, itemID string) (
 		return itemDir, nil
 	}
 
-	item, err := h.lib.GetItem(ctx, itemID)
-	if err != nil {
-		lock.Unlock()
-		return "", err
-	}
 	if item.Path == "" {
 		lock.Unlock()
 		return "", errors.New("item has no playable file path")
@@ -228,13 +298,28 @@ func (h *TrickplayHandler) ensureTrickplay(ctx context.Context, itemID string) (
 	go func() {
 		defer h.trickplayBG.Done()
 		defer lock.Unlock()
+		// Semáforo global ANTES del deadline: con los slots ocupados
+		// la generación espera su turno en cola (el caller HTTP ya
+		// recibió pending y poolea) en vez de competir por CPU con
+		// otros N ffmpegs y con los transcodes activos (PB-12).
+		h.genSlots <- struct{}{}
+		defer func() { <-h.genSlots }()
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		params := imaging.TrickplayParams{DurationSeconds: durationSec}
 		if _, err := imaging.GenerateTrickplayWithDeadline(bgCtx, itemPath, itemDir, params, 0); err != nil {
 			h.logger.Warn("trickplay generation failed (background)",
 				"item_id", itemID, "error", err)
+			// Marcador de fallo (mtime = timestamp): los próximos
+			// requests reciben errTrickplayFailed hasta el TTL en vez
+			// de relanzar ffmpeg en bucle.
+			if mkErr := os.MkdirAll(itemDir, 0o755); mkErr == nil {
+				_ = os.WriteFile(filepath.Join(itemDir, trickplayFailedMarker), nil, 0o644)
+			}
+			return
 		}
+		// Generación OK: limpiar cualquier marcador de fallo previo.
+		_ = os.Remove(filepath.Join(itemDir, trickplayFailedMarker))
 	}()
 
 	return "", errTrickplayPending

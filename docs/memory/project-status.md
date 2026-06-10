@@ -61,9 +61,18 @@ mata el ffmpeg si la sesión fue retirada durante el restart), PB-20
 que desregistra arranques muertos + stderr tail en el Warn de ffmpeg),
 PB-21 (sin `-tune zerolatency` en VOD). `/info` acepta `?audio=N`.
 
+**P1b ✅ hecha (2026-06-10):** PB-11 (timeout 60s default en `Probe` +
+2min en fpcalc/ffmpeg de fingerprint; `-v error` + stderr en el error),
+PB-12 (trickplay con gate ACL 404 antes incluso del cache + semáforo
+global de 2 generaciones concurrentes), PB-13 (negative-cache
+`failed.marker` con TTL 24h → 404 sin Retry-After), PB-24
+(`attached_pic` marcado en probe y filtrado en el scanner), PB-25
+(`os.Stat` antes de StartSession → 404 `media file` tipado, y antes de
+ServeFile en DirectPlay).
+
 | Prioridad | Tema | Items |
 |---|---|---|
-| **Alta** | **Playback P1 (b-d)** | trickplay+probe (PB-11..13, 24, 25 — PB-12 es ACL faltante), IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
+| **Alta** | **Playback P1 (c-d)** | IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
 | Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
 
 **Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases

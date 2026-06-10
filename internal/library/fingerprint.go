@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Fingerprint extraction via chromaprint's `fpcalc` binary, plus a
@@ -139,7 +140,15 @@ func (f *Fingerprinter) compute(
 // We ignore DURATION (we already know it) and tokenise the comma
 // list into uint32. fpcalc emits hashes as signed int32 — we cast
 // via int64→uint32 to preserve the bit pattern.
+// fingerprintToolTimeout acota cada invocación de fpcalc/ffmpeg del
+// fingerprinting. Sin techo, un fichero sobre un mount colgado dejaba
+// un worker (de 2) bloqueado para siempre con el mutex de librería
+// tomado. PB-11 (audit 2026-06-10).
+const fingerprintToolTimeout = 2 * time.Minute
+
 func runFpcalc(ctx context.Context, fpcalcPath, source string, offsetSec, lengthSec int) ([]uint32, error) {
+	ctx, cancel := context.WithTimeout(ctx, fingerprintToolTimeout)
+	defer cancel()
 	args := []string{"-raw", "-length", strconv.Itoa(lengthSec)}
 	if offsetSec > 0 {
 		args = append(args, "-ts", "0") // suppress timestamps in output
@@ -160,6 +169,8 @@ func runFpcalc(ctx context.Context, fpcalcPath, source string, offsetSec, length
 // it — no version-skew between fpcalc's stdin parser and ffmpeg's
 // muxer.
 func tailFpcalc(ctx context.Context, fpcalcPath, source string, lengthSec int) ([]uint32, error) {
+	ctx, cancel := context.WithTimeout(ctx, fingerprintToolTimeout)
+	defer cancel()
 	tmp, err := os.CreateTemp("", "hubplay-outro-*.wav")
 	if err != nil {
 		return nil, fmt.Errorf("temp wav: %w", err)

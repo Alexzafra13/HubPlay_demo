@@ -125,14 +125,14 @@ mapeando `video.error.code` a mensajes específicos.
 
 ### Backend — probe, trickplay, scan
 
-- **PB-11 · ffprobe/fpcalc/ffmpeg sin timeout por fichero — un fichero malo cuelga el scan entero.**
+- ✅ **PB-11 · ffprobe/fpcalc/ffmpeg sin timeout por fichero — un fichero malo cuelga el scan entero.**
   `probe.go:85-97` + `scan_walk.go:51,162` + `fingerprint.go:148,184`. El
   walk es secuencial: un NFS colgado o un fichero corrupto bloquea la
   biblioteca indefinidamente ("escaneando…" eterno). El mismo `Probe` sin
   timeout se usa en uploads de usuarios (`upload/service.go:366`).
   **Fix:** `context.WithTimeout` (30–60s) por invocación. Bonus: `-v
   error` en vez de `-v quiet` para que `ExitError.Stderr` sea accionable.
-- **PB-12 · Trickplay sin ACL de biblioteca y sin límite global de ffmpegs.**
+- ✅ **PB-12 · Trickplay sin ACL de biblioteca y sin límite global de ffmpegs.**
   `item_trickplay_handler.go:75-130`. Todo el streaming pasa por
   `authorizeItem`, trickplay no: cualquier usuario autenticado ve la
   timeline visual (200 frames de la película) de bibliotecas restringidas
@@ -140,7 +140,7 @@ mapeando `video.error.code` a mensajes específicos.
   hoverear una fila de la home puede lanzar N ffmpegs de 180s. **Fix:**
   pasar `deps.Access` + gate 404 como `stream.go:92-101`; semáforo global
   de 2-3 slots.
-- **PB-13 · Trickplay reintenta para siempre los fallos de generación.**
+- ✅ **PB-13 · Trickplay reintenta para siempre los fallos de generación.**
   `item_trickplay_handler.go:229-238` + `imaging/trickplay.go:247-254`.
   Fallo de ffmpeg (corrupto, o >180s en hardware lento) no deja marcador
   → cada hover relanza otro ffmpeg de 180s, en bucle con el
@@ -215,11 +215,11 @@ mapeando `video.error.code` a mensajes específicos.
   `profile`, pero ffprobe anuncia DV en `side_data_list` (DOVI). DV
   Profile 5 (WEB-DLs) se etiqueta HDR10/SDR → colores verde/morado.
   **Fix:** parsear `side_data_list`; DV sin base compatible → transcode.
-- **PB-24 · Cover art embebido (`attached_pic`) persiste como pista de vídeo real.**
+- ✅ **PB-24 · Cover art embebido (`attached_pic`) persiste como pista de vídeo real.**
   `probe.go:137` (no lee `disposition.attached_pic`) → música con
   carátula = "transcode completo" del MP3; pista fantasma en el UI.
   **Fix:** filtrar/marcar en `probeResultToStreams`.
-- **PB-25 · Fichero borrado entre scan y play → errores crípticos.**
+- ✅ **PB-25 · Fichero borrado entre scan y play → errores crípticos.**
   `stream.go:529-538` (404 text/plain con Content-Type de vídeo) +
   `transcode.go:140` (ffmpeg muere a Debug → bucle de
   SEGMENT_NOT_FOUND). **Fix:** `os.Stat` antes de servir/arrancar →
@@ -343,7 +343,7 @@ the episode's data".
 |---|---|---|---|
 | **P0 ✅** | Correctness que rompe playback común | PB-1, PB-2, PB-3, PB-4 + tests que los fijan | hecho (2026-06-10) |
 | **P1a ✅** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | hecho (2026-06-10) |
-| **P1b** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | 1 sesión |
+| **P1b ✅** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | hecho (2026-06-10) |
 | **P1c** | IPTV | PB-14, PB-15, PB-27, PB-28 | 1 sesión |
 | **P1d** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-35 + tests useHls | 1 sesión |
 | **P2** | VAAPI real + ABR/caps + surround | PB-5, PB-10, PB-22, PB-23 | 1-2 sesiones |
