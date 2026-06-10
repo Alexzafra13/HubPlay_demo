@@ -188,8 +188,33 @@ func TestBuildFFmpegArgs_HLSSettings(t *testing.T) {
 
 	assertContains(t, args, "-hls_time", "6")
 	assertContains(t, args, "-hls_list_size", "0")
-	assertContains(t, args, "-hls_flags", "independent_segments")
+	// `temp_file` es obligatorio: sin él ffmpeg escribe cada .ts
+	// in-place con su nombre final y el handler de segmentos (que
+	// acepta Size()>0) puede servir un TS truncado — glitches y stalls
+	// post-seek. Ver PB-2 (audit 2026-06-10).
+	assertContains(t, args, "-hls_flags", "independent_segments+temp_file")
 	assertContains(t, args, "-start_number", "0")
+}
+
+// TestBuildFFmpegArgs_ForcedKeyframes pinea PB-3 (audit 2026-06-10): el
+// manifest VOD sintético asume "segmento N cubre [6N, 6N+6)" y el muxer
+// HLS solo corta en keyframes, así que el encoder DEBE forzar un
+// keyframe en cada frontera de 6s. La forma prev_forced_t (no
+// `n_forced*6`) importa: con -copyts el PTS conserva el tiempo de la
+// fuente y la forma n_forced degenera en los seek-restarts.
+func TestBuildFFmpegArgs_ForcedKeyframes(t *testing.T) {
+	args := stream.BuildFFmpegArgs(baseRequest(stream.Profiles["720p"]))
+
+	assertContains(t, args, "-force_key_frames",
+		"expr:if(isnan(prev_forced_t),1,gte(t,prev_forced_t+6))")
+}
+
+// En remux (CopyVideo) no se puede forzar keyframes — el flag no debe
+// emitirse o ffmpeg lo rechaza con -c:v copy.
+func TestBuildFFmpegArgs_ForcedKeyframes_AbsentOnCopyVideo(t *testing.T) {
+	args := stream.BuildFFmpegArgs(baseRequest(stream.Profiles["original"]))
+
+	assertNotContains(t, args, "-force_key_frames")
 }
 
 func TestBuildFFmpegArgs_HWAccel_NVENC_PrependsHwaccelAndSwapsEncoder(t *testing.T) {

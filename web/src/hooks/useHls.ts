@@ -338,7 +338,34 @@ export function useHls({
     }
     video.addEventListener("timeupdate", settledListener);
 
+    // Las rutas de src directo (HLS nativo en Safari/iOS y direct_play)
+    // no tenían NINGÚN listener de error: un fallo de decode a mitad de
+    // reproducción o un fichero corrupto dejaban el overlay de carga
+    // girando para siempre, sin mensaje. hls.js gestiona sus propios
+    // errores (con recovery) vía Hls.Events.ERROR, así que mientras
+    // haya instancia viva no interferimos.
+    const onVideoError = () => {
+      if (hlsRef.current) return;
+      // MediaError.code: 1 aborted, 2 network, 3 decode, 4 src no
+      // soportado. El 1 (abort) se ignora — lo dispara el propio
+      // teardown/zapping del usuario, no es un fallo.
+      const code = video.error?.code;
+      if (code === 2) {
+        setError("A network error interrupted playback.");
+      } else if (code === 3) {
+        setError(
+          "The video could not be decoded — the file may be corrupt or use an unsupported codec.",
+        );
+      } else if (code === 4) {
+        setError("This video format is not supported by your browser.");
+      } else if (code !== 1) {
+        setError("Playback failed.");
+      }
+    };
+    video.addEventListener("error", onVideoError);
+
     return () => {
+      video.removeEventListener("error", onVideoError);
       destroyHlsInstance(hlsRef, video);
       video.removeEventListener("timeupdate", settledListener);
     };

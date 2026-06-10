@@ -95,7 +95,7 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 	eff := effectiveCapabilities(caps)
 	videoOK := eff.VideoCodecs[videoStream.Codec]
 	audioOK := audioStream == nil || eff.AudioCodecs[audioStream.Codec]
-	containerOK := containerInSet(item.Container, eff.Containers)
+	containerOK := containerOKForClient(item.Container, eff.Containers, videoStream, audioStream)
 
 	// Gate HDR: fuente con transfer HDR solo puede ir DirectPlay/DirectStream
 	// si el cliente declaró soporte para ese formato exacto. Si no, se
@@ -176,6 +176,38 @@ func containerInSet(container string, set map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// Códecs que la spec de WebM permite. ffprobe etiqueta TODO Matroska
+// como "matroska,webm" (comparten demuxer), así que el alias "webm" del
+// format_name no prueba nada por sí solo: un MKV h264+aac matchearía el
+// "webm" de las caps del cliente y se serviría como DirectPlay —
+// Firefox y Safari no reproducen Matroska (pantalla negra). Solo
+// contamos el alias webm cuando los códecs reales caben en un WebM de
+// verdad. Ver PB-1 en docs/memory/audit-2026-06-10-playback-chain.md.
+var webmVideoCodecs = map[string]bool{"vp8": true, "vp9": true, "av1": true}
+var webmAudioCodecs = map[string]bool{"opus": true, "vorbis": true}
+
+// containerOKForClient es containerInSet con la corrección del alias
+// webm: el match por nombre de container se acepta salvo que el nombre
+// sea "webm" y los códecs desmientan que el fichero sea un WebM real.
+func containerOKForClient(container string, set map[string]bool, video, audio *librarymodel.MediaStream) bool {
+	for _, part := range splitContainer(container) {
+		if part == "webm" && !webmCompatibleCodecs(video, audio) {
+			continue
+		}
+		if set[part] {
+			return true
+		}
+	}
+	return false
+}
+
+func webmCompatibleCodecs(video, audio *librarymodel.MediaStream) bool {
+	if video == nil || !webmVideoCodecs[video.Codec] {
+		return false
+	}
+	return audio == nil || webmAudioCodecs[audio.Codec]
 }
 
 func splitContainer(c string) []string {

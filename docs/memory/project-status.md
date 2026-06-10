@@ -37,10 +37,18 @@ audit focalizado de la cadena de playback (decisión de streaming, FFmpeg,
 probe, IPTV, player hls.js). 39 hallazgos, 4 críticos. **Es el trabajo de
 más valor de usuario pendiente** — todo lo demás son cimientos.
 
+**P0 ✅ hecha (2026-06-10)** en `claude/project-review-8tznz4`: PB-1
+(alias webm corregido con check de códecs WebM-reales en `Decide`), PB-2
+(`-hls_flags +temp_file`), PB-3 (`-force_key_frames` con forma
+`prev_forced_t` — la forma `n_forced*6` degeneraría con `-copyts` en los
+seek-restarts), PB-4 (listener de `error` del `<video>` en las rutas de
+src directo, guardado para no pisar el recovery de hls.js). Tests:
+2 nuevos en `decision_test.go`, 2 en `transcode_test.go`, y
+`useHls.test.ts` nuevo (7 tests — el núcleo VOD estaba sin cubrir).
+
 | Prioridad | Tema | Items |
 |---|---|---|
-| **Alta** | **Playback P0 — rompe reproducción común** | PB-1 (MKV falso DirectPlay por alias webm), PB-2 (segmentos servidos a medio escribir), PB-3 (keyframes sin alinear al grid de 6s del seeking), PB-4 (sin listener de error del `<video>` en VOD) |
-| Alta | **Playback P1 (a-d)** | decisión/transcode (PB-6..9, 20, 21), trickplay+probe (PB-11..13, 24, 25 — PB-12 es ACL faltante), IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
+| **Alta** | **Playback P1 (a-d)** | decisión/transcode (PB-6..9, 20, 21), trickplay+probe (PB-11..13, 24, 25 — PB-12 es ACL faltante), IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
 | Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
 
 **Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases
