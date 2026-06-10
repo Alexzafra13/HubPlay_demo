@@ -16,9 +16,14 @@
 #                    streaming. Cuando FFmpeg-Builds publique arm64
 #                    macOS, este branch lo migrará.
 #
-# El script verifica que los binarios resultantes son ejecutables y
-# que `ffmpeg -version` devuelve 0 — no queremos shippear un archivo
-# truncado por descarga interrumpida.
+# Verificación de integridad: cada descarga se contrasta con el sha256
+# que publica el upstream por un canal separado (BtbN: campo `digest`
+# de la API de releases de GitHub; evermeet: su API de info). Además se
+# comprueba que `ffmpeg -version` devuelve 0 — no queremos shippear un
+# archivo truncado por descarga interrumpida.
+#
+# FFMPEG_SKIP_VERIFY=1 salta la verificación de checksum (uso local sin
+# acceso a las APIs); en CI nunca debe estar activo.
 
 set -euo pipefail
 
@@ -69,6 +74,87 @@ dl() {
 	done
 }
 
+# sha256 portable (ubuntu: sha256sum; macOS: shasum -a 256).
+file_sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	else
+		shasum -a 256 "$1" | awk '{print $1}'
+	fi
+}
+
+# verify <fichero> <sha256-esperado> <etiqueta>
+#
+# Aborta si el esperado está vacío (no pudimos obtenerlo del upstream)
+# o si no coincide. FFMPEG_SKIP_VERIFY=1 degrada el caso "no hay
+# checksum" a warning — para uso local sin red a las APIs; el mismatch
+# real sigue siendo fatal incluso con el skip activo.
+verify() {
+	local file="$1" expected="$2" label="$3"
+	if [[ -z "$expected" ]]; then
+		if [[ "${FFMPEG_SKIP_VERIFY:-0}" == "1" ]]; then
+			echo "⚠ $label: sin checksum upstream (FFMPEG_SKIP_VERIFY=1) — continuando SIN verificar" >&2
+			return 0
+		fi
+		echo "✗ $label: no se pudo obtener el checksum del upstream." >&2
+		echo "  (FFMPEG_SKIP_VERIFY=1 salta esta verificación bajo tu responsabilidad)" >&2
+		return 1
+	fi
+	local actual
+	actual="$(file_sha256 "$file")"
+	if [[ "$actual" != "$expected" ]]; then
+		echo "✗ $label: sha256 NO coincide — descarga corrupta o alterada" >&2
+		echo "  esperado: $expected" >&2
+		echo "  obtenido: $actual" >&2
+		return 1
+	fi
+	echo "✓ $label: sha256 verificado"
+}
+
+# Checksum de un asset de BtbN vía la API de releases de GitHub: el
+# campo `digest` (sha256:...) lo calcula GitHub al subir el asset, así
+# que detecta truncados/sustituciones en el CDN de descargas por una
+# vía TLS independiente. NO protege contra un compromiso de BtbN en
+# origen — eso requeriría buildear FFmpeg nosotros. El tag `latest` es
+# rolling: si BtbN re-publica entre este GET y la descarga, el mismatch
+# aborta y basta relanzar el job. Con GH_TOKEN/GITHUB_TOKEN la request
+# va autenticada (CI); anónima cae al rate-limit de 60/h por IP.
+btbn_digest() {
+	local asset="$1" auth=()
+	local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+	[[ -n "$token" ]] && auth=(-H "Authorization: Bearer $token")
+	# ${auth[@]+...}: expansión segura de array vacío bajo `set -u` en
+	# bash 3.2 (el /bin/bash de macOS).
+	curl -fsSL --retry 3 ${auth[@]+"${auth[@]}"} \
+		"https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest" |
+		python3 -c '
+import json, sys
+name = sys.argv[1]
+try:
+    assets = json.load(sys.stdin).get("assets", [])
+except ValueError:
+    sys.exit(0)  # respuesta no-JSON (rate-limit, red) → digest vacío
+for a in assets:
+    digest = a.get("digest") or ""
+    if a.get("name") == name and digest.startswith("sha256:"):
+        print(digest[len("sha256:"):])
+        break
+' "$asset" || true
+}
+
+# Checksum que publica evermeet.cx en su API de info (campo sha256 del
+# JSON de la release actual de cada herramienta).
+evermeet_sha256() {
+	curl -fsSL --retry 3 "https://evermeet.cx/ffmpeg/info/$1/release" |
+		python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("sha256") or "")
+except ValueError:
+    pass
+' || true
+}
+
 # Releases de BtbN/FFmpeg-Builds. La carpeta `latest` (tag explícito,
 # no alias) tiene los assets con nombres canónicos `ffmpeg-master-latest-*`
 # que el script consume. **No** usar `releases/latest/download/X` —
@@ -83,9 +169,11 @@ BTBN_BASE="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
 
 case "$GOOS-$GOARCH" in
 linux-amd64)
-	url="${BTBN_BASE}/ffmpeg-master-latest-linux64-lgpl.tar.xz"
+	asset="ffmpeg-master-latest-linux64-lgpl.tar.xz"
+	url="${BTBN_BASE}/${asset}"
 	echo "→ downloading $url"
 	dl "$url" "$tmpdir/ff.tar.xz"
+	verify "$tmpdir/ff.tar.xz" "$(btbn_digest "$asset")" "$asset"
 	tar -xJf "$tmpdir/ff.tar.xz" -C "$tmpdir"
 	# Estructura: ffmpeg-N-...-linux64-lgpl/bin/{ffmpeg,ffprobe}
 	dir="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
@@ -94,9 +182,11 @@ linux-amd64)
 	chmod +x "$OUTDIR/ffmpeg" "$OUTDIR/ffprobe"
 	;;
 linux-arm64)
-	url="${BTBN_BASE}/ffmpeg-master-latest-linuxarm64-lgpl.tar.xz"
+	asset="ffmpeg-master-latest-linuxarm64-lgpl.tar.xz"
+	url="${BTBN_BASE}/${asset}"
 	echo "→ downloading $url"
 	dl "$url" "$tmpdir/ff.tar.xz"
+	verify "$tmpdir/ff.tar.xz" "$(btbn_digest "$asset")" "$asset"
 	tar -xJf "$tmpdir/ff.tar.xz" -C "$tmpdir"
 	dir="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
 	cp "$dir/bin/ffmpeg" "$OUTDIR/ffmpeg"
@@ -104,9 +194,11 @@ linux-arm64)
 	chmod +x "$OUTDIR/ffmpeg" "$OUTDIR/ffprobe"
 	;;
 windows-amd64)
-	url="${BTBN_BASE}/ffmpeg-master-latest-win64-lgpl.zip"
+	asset="ffmpeg-master-latest-win64-lgpl.zip"
+	url="${BTBN_BASE}/${asset}"
 	echo "→ downloading $url"
 	dl "$url" "$tmpdir/ff.zip"
+	verify "$tmpdir/ff.zip" "$(btbn_digest "$asset")" "$asset"
 	unzip -q "$tmpdir/ff.zip" -d "$tmpdir"
 	dir="$(find "$tmpdir" -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"
 	cp "$dir/bin/ffmpeg.exe" "$OUTDIR/ffmpeg.exe"
@@ -117,6 +209,8 @@ darwin-amd64 | darwin-arm64)
 	echo "→ downloading evermeet ffmpeg + ffprobe (universal)"
 	dl "https://evermeet.cx/ffmpeg/getrelease/zip" "$tmpdir/ffmpeg.zip"
 	dl "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" "$tmpdir/ffprobe.zip"
+	verify "$tmpdir/ffmpeg.zip" "$(evermeet_sha256 ffmpeg)" "evermeet ffmpeg.zip"
+	verify "$tmpdir/ffprobe.zip" "$(evermeet_sha256 ffprobe)" "evermeet ffprobe.zip"
 	unzip -q "$tmpdir/ffmpeg.zip" -d "$tmpdir/ffmpeg"
 	unzip -q "$tmpdir/ffprobe.zip" -d "$tmpdir/ffprobe"
 	cp "$tmpdir/ffmpeg/ffmpeg" "$OUTDIR/ffmpeg"

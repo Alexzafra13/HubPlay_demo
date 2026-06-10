@@ -42,7 +42,7 @@ jobs:
       commit: ${{ steps.meta.outputs.commit }}
       build_date: ${{ steps.meta.outputs.build_date }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
@@ -76,17 +76,17 @@ jobs:
           - { goos: darwin,  goarch: amd64, runner: macos-latest,   ext: "",     archive: "tar.gz" }
           - { goos: darwin,  goarch: arm64, runner: macos-latest,   ext: "",     archive: "tar.gz" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           package_json_file: web/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -118,6 +118,11 @@ jobs:
             ./cmd/hubplay
 
       - name: Bundle ffmpeg + ffprobe
+        env:
+          # El script verifica el sha256 de cada asset de BtbN contra el
+          # digest que reporta la API de GitHub; con token evita el
+          # rate-limit anónimo del runner (60 req/h por IP compartida).
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./scripts/fetch-ffmpeg.sh \
             "${{ matrix.goos }}" \
@@ -188,7 +193,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.NAME }}
           path: |
@@ -211,7 +216,7 @@ jobs:
     name: Stage Linux installer assets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Copy install assets
         run: |
@@ -223,7 +228,7 @@ jobs:
           sha256sum dist/hubplay.service  > dist/hubplay.service.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hubplay-linux-installer-assets
           path: |
@@ -251,10 +256,10 @@ jobs:
     # Sólo si el build de windows-amd64 tuvo éxito y produjo el zip.
     if: always() && !cancelled()
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Download windows-amd64 archive
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: hubplay-*-windows-amd64
           path: artifacts
@@ -262,6 +267,8 @@ jobs:
 
       - name: Extract zip + fetch NSSM
         shell: bash
+        env:
+          NSSM_EXPECTED_SHA256: ${{ vars.NSSM_EXPECTED_SHA256 }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.meta.outputs.version }}"
@@ -284,16 +291,34 @@ jobs:
               "https://web.archive.org/web/2024/https://nssm.cc/release/nssm-2.24.zip" \
               -o nssm.zip
           fi
-          # Log del sha256 para auditar — si en runs sucesivas el hash
-          # cambia significa que el host (nssm.cc o archive mirror) está
-          # sirviendo algo distinto y el operador debe investigar.
-          sha256sum nssm.zip || shasum -a 256 nssm.zip
+          # Verificación del zip. NSSM 2.24 es de 2014 y no publica
+          # checksums oficiales, así que el pin es opt-in vía repo
+          # variable (mismo patrón que HUBPLAY_SIGNING_ENABLED):
+          #   1. ejecuta una run y copia el sha256 logueado abajo
+          #   2. contrástalo con una fuente independiente (chocolatey,
+          #      winget, tu propia descarga local)
+          #   3. Settings → Variables → NSSM_EXPECTED_SHA256=<hash>
+          # Con la variable definida el step es fail-closed: un hash
+          # distinto (host comprometido o mirror alterado) aborta el
+          # build en vez de embeber un service-manager troyano en el
+          # installer. Sin definir, sólo loguea (fail-open, como antes).
+          ACTUAL=$(sha256sum nssm.zip | awk '{print $1}')
+          echo "nssm-2.24.zip sha256: $ACTUAL"
+          if [[ -n "${NSSM_EXPECTED_SHA256:-}" ]]; then
+            if [[ "$ACTUAL" != "$NSSM_EXPECTED_SHA256" ]]; then
+              echo "✗ NSSM checksum MISMATCH (esperado $NSSM_EXPECTED_SHA256)" >&2
+              exit 1
+            fi
+            echo "✓ NSSM checksum verificado"
+          else
+            echo "::warning::nssm.zip sin verificar — define la repo variable NSSM_EXPECTED_SHA256 (sha256: $ACTUAL)"
+          fi
           unzip -q nssm.zip
           cp nssm-2.24/win64/nssm.exe scripts/vendor/nssm.exe
 
       - name: Compile installer with Inno Setup
         # El .iss lee las vars vía GetEnv (las /D dan problemas de quoting).
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
+        uses: Minionguyjpro/Inno-Setup-Action@202dd0c4950ef315b6ba13359998fe120179b147 # v1.2.8
         env:
           HUBPLAY_APP_VERSION: ${{ needs.meta.outputs.version }}
           HUBPLAY_SOURCE_DIR: ${{ github.workspace }}\stage\source
@@ -321,7 +346,7 @@ jobs:
       - name: Upload unsigned installer for SignPath
         if: vars.HUBPLAY_SIGNING_ENABLED == 'true'
         id: upload-unsigned
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hubplay-installer-unsigned-${{ needs.meta.outputs.version }}
           path: dist/HubPlay-Setup-*.exe
@@ -330,7 +355,7 @@ jobs:
 
       - name: Submit installer to SignPath for signing
         if: vars.HUBPLAY_SIGNING_ENABLED == 'true'
-        uses: signpath/github-action-submit-signing-request@v2
+        uses: signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
@@ -358,7 +383,7 @@ jobs:
             > "HubPlay-Setup-${VERSION}-windows-amd64.exe.sha256"
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hubplay-installer-windows-amd64
           path: |
@@ -372,17 +397,36 @@ jobs:
     needs: [build, windows-installer, linux-installer-assets]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write     # publicar release + subir assets
+      id-token: write     # firma OIDC de la attestation (Sigstore)
+      attestations: write # persistir la attestation en el repo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           merge-multiple: true
 
+      # SLSA provenance firmada (Sigstore) de cada artefacto publicado.
+      # A diferencia del sidecar .sha256 (que viaja junto al binario y
+      # cae con él), la attestation la firma GitHub con OIDC y se
+      # verifica out-of-band:
+      #   gh attestation verify <fichero> --repo <owner>/<repo>
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/install.sh
+            artifacts/hubplay.service
+
       - name: Create stable GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: |
             artifacts/*.tar.gz
@@ -466,14 +510,31 @@ jobs:
     needs: [build, windows-installer, linux-installer-assets]
     runs-on: ubuntu-latest
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    permissions:
+      contents: write     # borrar/recrear el release nightly
+      id-token: write     # firma OIDC de la attestation (Sigstore)
+      attestations: write # persistir la attestation en el repo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           merge-multiple: true
+
+      # Igual que en release-tag: provenance firmada de los binarios
+      # nightly — el install.sh de nightly también corre `curl | sudo
+      # bash` en máquinas de operadores.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/install.sh
+            artifacts/hubplay.service
 
       - name: Delete previous nightly release + tag
         # gh CLI viene preinstalado en runners ubuntu. `|| true` para
@@ -484,7 +545,7 @@ jobs:
           gh release delete nightly --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
 
       - name: Publish nightly pre-release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: nightly
           name: "Nightly (último build de main)"

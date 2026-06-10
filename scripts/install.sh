@@ -15,6 +15,9 @@
 #                     Default: 8096.
 #   HUBPLAY_SKIP_START   si "1", no arranca el servicio al terminar. Útil si
 #                        quieres editar el yaml antes.
+#   HUBPLAY_SKIP_VERIFY  si "1", permite instalar aunque el .sha256 del
+#                        release no se pueda descargar. Por defecto la
+#                        verificación es obligatoria (fail-closed).
 #
 # Idempotente: ejecutarlo dos veces es seguro. Detecta versión instalada y
 # hace upgrade in-place (descarga, para servicio, sustituye binarios, arranca).
@@ -334,9 +337,21 @@ main() {
 		err "Descarga falló — comprueba que la versión $VERSION existe en releases."
 		exit 1
 	}
-	curl -fsSL -o "$tmp/$tarball_name.sha256" "$sha_url" || {
-		warn "No se pudo descargar el .sha256 — saltando verificación."
-	}
+	# El .sha256 ausente es FATAL: este script corre como root vía
+	# `curl | sudo bash`, así que instalar un tarball sin verificar es
+	# exactamente el escenario que un atacante con el CDN/red a su
+	# favor querría. HUBPLAY_SKIP_VERIFY=1 existe como escape explícito
+	# (mirrors propios, releases antiguos sin sidecar) — opt-in y bajo
+	# responsabilidad del operador, nunca el default.
+	if ! curl -fsSL -o "$tmp/$tarball_name.sha256" "$sha_url"; then
+		if [[ "${HUBPLAY_SKIP_VERIFY:-0}" == "1" ]]; then
+			warn "No se pudo descargar el .sha256 — HUBPLAY_SKIP_VERIFY=1, continúo SIN verificar."
+		else
+			err "No se pudo descargar el .sha256 — abortando (no instalo binarios sin verificar)."
+			err "Si sabes lo que haces: HUBPLAY_SKIP_VERIFY=1 salta esta comprobación."
+			exit 1
+		fi
+	fi
 
 	if [[ -f "$tmp/$tarball_name.sha256" ]]; then
 		step "Verificando sha256..."
