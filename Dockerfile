@@ -4,7 +4,12 @@
 # Bases pineadas por digest (tag + @sha256): el tag documenta la
 # intención, el digest hace el build reproducible y a prueba de
 # re-publicaciones del tag. Dependabot (ecosistema docker) los bumpea.
-FROM node:22-alpine@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920 AS frontend
+# --platform=$BUILDPLATFORM: los stages de BUILD corren nativos en la
+# arquitectura del builder y cross-compilan al destino — sin esto, el
+# build arm64 del CI corría ENTERO bajo emulación QEMU (Go + Node
+# emulados ≈ 15-20 min por run). Solo los stages de runtime (apk/apt
+# install, segundos) se ejecutan en la arquitectura destino.
+FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920 AS frontend
 
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
@@ -18,7 +23,7 @@ RUN pnpm run build
 # ═══════════════════════════════════════════
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
-FROM golang:1.25.11-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS backend
+FROM --platform=$BUILDPLATFORM golang:1.25.11-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS backend
 # GOTOOLCHAIN=auto lets Go fetch the exact toolchain go.mod requires
 # if a future bump outpaces this base image. Plug-and-play for prod.
 ENV GOTOOLCHAIN=auto
@@ -66,9 +71,12 @@ COPY migrations.go ./
 # Inject built frontend for go:embed
 COPY --from=frontend /web/dist ./web/dist
 
+# TARGETOS/TARGETARCH los inyecta buildx según --platform del build.
+# CGO_ENABLED=0 hace la cross-compilación trivial (binario estático).
+ARG TARGETOS TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -o /hubplay ./cmd/hubplay
 

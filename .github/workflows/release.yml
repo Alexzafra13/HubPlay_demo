@@ -25,6 +25,13 @@ on:
 permissions:
   contents: write # publicar release + subir assets
 
+# Serializa (sin cancelar): cancelar un release a medias entre el
+# delete del nightly y su re-publicación dejaría la página de releases
+# sin nightly. El run nuevo espera en cola al anterior.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # ─── Metadatos del release ─────────────────────────────────────────
   # Centraliza `git describe` en un único job. Los demás jobs lo
