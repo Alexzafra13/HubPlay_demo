@@ -11,6 +11,12 @@ interface UseExternalSubModeOptions {
    * → no-op (no hay sub externo activo).
    */
   activeKey: string | null | undefined;
+  /**
+   * Prefijo del `label` que identifica el `<track>` a activar.
+   * Default "External:" (OpenSubtitles); el carril de texto local
+   * embebido usa "Local:".
+   */
+  labelPrefix?: string;
 }
 
 /**
@@ -29,13 +35,14 @@ interface UseExternalSubModeOptions {
 export function useExternalSubMode({
   videoRef,
   activeKey,
+  labelPrefix = "External:",
 }: UseExternalSubModeOptions): void {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !activeKey) return;
     const rafID = window.requestAnimationFrame(() => {
       const tracks = Array.from(video.textTracks);
-      const target = tracks.find((t) => t.label.startsWith("External:"));
+      const target = tracks.find((t) => t.label.startsWith(labelPrefix));
       if (target) target.mode = "showing";
       // Suprime cualquier otro track en showing para no
       // doble-renderizar cues de un sub HLS pre-existente.
@@ -46,5 +53,5 @@ export function useExternalSubMode({
       }
     });
     return () => window.cancelAnimationFrame(rafID);
-  }, [videoRef, activeKey]);
+  }, [videoRef, activeKey, labelPrefix]);
 }

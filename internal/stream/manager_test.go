@@ -2,6 +2,8 @@ package stream
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,7 +11,9 @@ import (
 
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
+	"hubplay/internal/domain"
 	"hubplay/internal/event"
+	librarymodel "hubplay/internal/library/model"
 )
 
 func TestSessionKey(t *testing.T) {
@@ -909,5 +913,187 @@ func TestManager_ListAllSessions_Empty(t *testing.T) {
 	}
 	if len(snaps) != 0 {
 		t.Errorf("expected empty slice, got %d entries", len(snaps))
+	}
+}
+
+// ─── PB-9: re-check anti-huérfano del seek-restart ───
+
+// Si StopSession/cleanupIdle retiró la sesión mientras RestartAt
+// spawneaba el ffmpeg nuevo, reattach debe matar ese proceso y devolver
+// false — sin esto quedaba fuera del map hasta el timeout de 4h.
+func TestManager_ReattachRestartedSession_KilledIfSessionGone(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	outDir := t.TempDir()
+	ms := &ManagedSession{
+		Session: &Session{ID: "k", OutputDir: t.TempDir(), done: closedChan()},
+		UserID:  "u",
+	}
+	// La key NO está registrada (StopSession ya pasó por aquí).
+	newSession := &Session{ID: "k", OutputDir: outDir, done: closedChan()}
+
+	if m.reattachRestartedSession("k", ms, newSession, 42) {
+		t.Fatal("expected reattach to fail when key is not registered")
+	}
+	// Stop() del proceso nuevo borra su OutputDir — la señal observable
+	// de que el ffmpeg huérfano fue terminado.
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("expected new session's OutputDir removed (orphan killed), stat err=%v", err)
+	}
+}
+
+// Igual cuando la key existe pero la ocupa OTRA ManagedSession (un
+// StartSession nuevo re-creó la entrada tras el Stop).
+func TestManager_ReattachRestartedSession_KilledIfSessionReplaced(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	other := &ManagedSession{
+		Session: &Session{ID: "k", OutputDir: t.TempDir(), done: closedChan()},
+		UserID:  "u",
+	}
+	SetSessionForTest(m, "k", other)
+
+	stale := &ManagedSession{
+		Session: &Session{ID: "k", OutputDir: t.TempDir(), done: closedChan()},
+		UserID:  "u",
+	}
+	outDir := t.TempDir()
+	newSession := &Session{ID: "k", OutputDir: outDir, done: closedChan()}
+
+	if m.reattachRestartedSession("k", stale, newSession, 7) {
+		t.Fatal("expected reattach to fail when the map entry is a different session")
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Errorf("expected orphan's OutputDir removed, stat err=%v", err)
+	}
+	// La sesión legítima no debe verse afectada.
+	if got, ok := m.GetSession("k"); !ok || got != other {
+		t.Error("the live session must remain registered untouched")
+	}
+}
+
+func TestManager_ReattachRestartedSession_HappyPath(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	ms := &ManagedSession{
+		Session: &Session{ID: "k", OutputDir: t.TempDir(), done: closedChan()},
+		UserID:  "u",
+	}
+	SetSessionForTest(m, "k", ms)
+	newSession := &Session{ID: "k", OutputDir: ms.OutputDir, done: closedChan()}
+
+	if !m.reattachRestartedSession("k", ms, newSession, 99) {
+		t.Fatal("expected reattach to succeed")
+	}
+	if ms.Session != newSession {
+		t.Error("expected ms.Session swapped to the new session")
+	}
+	if ms.LastRestartSegment != 99 {
+		t.Errorf("expected LastRestartSegment=99, got %d", ms.LastRestartSegment)
+	}
+}
+
+// ─── PB-20: reap de sesiones cuyo ffmpeg murió al arrancar ───
+
+// ffmpeg muerto sin producir ningún segmento → la sesión se desregistra
+// (antes quedaba zombie y el cliente veía un spinner de 404s).
+func TestManager_ReapDeadStart_RemovesSessionWithoutOutput(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+	sink := &fakeSink{}
+	m.SetMetrics(sink)
+
+	s := &Session{ID: "k", OutputDir: t.TempDir(), done: closedChan()}
+	ms := &ManagedSession{Session: s, UserID: "u"}
+	SetSessionForTest(m, "k", ms)
+
+	m.reapDeadStart("k", ms, s)
+
+	if _, ok := m.GetSession("k"); ok {
+		t.Error("expected dead-start session deregistered")
+	}
+	if sink.failed == 0 {
+		t.Error("expected TranscodeFailed metric incremented")
+	}
+}
+
+// Con al menos un segmento producido es un EOF legítimo (contenido
+// corto) — la sesión debe permanecer servible.
+func TestManager_ReapDeadStart_KeepsSessionWithSegments(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, "segment00000.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &Session{ID: "k", OutputDir: outDir, done: closedChan()}
+	ms := &ManagedSession{Session: s, UserID: "u"}
+	SetSessionForTest(m, "k", ms)
+
+	m.reapDeadStart("k", ms, s)
+
+	if _, ok := m.GetSession("k"); !ok {
+		t.Error("session with produced segments must NOT be reaped")
+	}
+}
+
+// Un seek-restart reemplaza ms.Session y cierra el done del proceso
+// viejo — el watcher del proceso viejo no debe tumbar la sesión nueva.
+func TestManager_ReapDeadStart_IgnoresReplacedSession(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	oldS := &Session{ID: "k", OutputDir: t.TempDir(), done: closedChan()}
+	newS := &Session{ID: "k", OutputDir: oldS.OutputDir, done: closedChan()}
+	ms := &ManagedSession{Session: newS, UserID: "u"} // ya restartada
+	SetSessionForTest(m, "k", ms)
+
+	m.reapDeadStart("k", ms, oldS)
+
+	if _, ok := m.GetSession("k"); !ok {
+		t.Error("watcher of the replaced (old) process must not reap the restarted session")
+	}
+}
+
+// ─── PB-20: validación del índice de audio explícito ───
+
+func TestValidateAudioStreamIndex(t *testing.T) {
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264"},
+		{StreamType: "audio", Codec: "aac"},
+		{StreamType: "audio", Codec: "dts"},
+		{StreamType: "subtitle", Codec: "subrip"},
+	}
+	cases := []struct {
+		name    string
+		idx     int
+		wantErr bool
+	}{
+		{"negativo es default y pasa", -1, false},
+		{"primera pista", 0, false},
+		{"última pista", 1, false},
+		{"fuera de rango", 2, true},
+		{"muy fuera de rango", 7, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateAudioStreamIndex(streams, tc.idx)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantErr {
+				var appErr *domain.AppError
+				if !errors.As(err, &appErr) {
+					t.Errorf("expected *domain.AppError, got %T", err)
+				}
+			}
+		})
 	}
 }

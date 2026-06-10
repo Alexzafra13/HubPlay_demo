@@ -63,8 +63,14 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
   if (!open) return null;
 
   return (
+    // `fixed` (no `absolute`): el sheet se monta dentro del wrapper
+    // `relative` del botón que lo abre, así que un `absolute inset-0`
+    // se anclaba al rectángulo del BOTÓN (~40px) y el menú salía como
+    // una tira vertical rota en móvil. `fixed` lo ancla al viewport
+    // (== overlay fullscreen del player; ningún ancestro lleva
+    // transform). Reporte de usuario 2026-06-10 (PB-42).
     <div
-      className="absolute inset-0 z-50 flex items-end justify-center"
+      className="fixed inset-0 z-50 flex items-end justify-center"
       role="dialog"
       aria-modal="true"
       aria-label={title}

@@ -219,6 +219,14 @@ func probeResultToChapters(pr *probe.Result) []librarymodel.Chapter {
 func probeResultToStreams(itemID string, pr *probe.Result) []*librarymodel.MediaStream {
 	var streams []*librarymodel.MediaStream
 	for _, s := range pr.Streams {
+		// Carátula embebida (cover art mjpeg/png con disposition
+		// attached_pic): no es una pista de vídeo reproducible. Si se
+		// persiste, la decisión de playback la toma por "el vídeo" del
+		// fichero → un MP3 con carátula caía a transcode completo, y el
+		// UI listaba una pista de vídeo fantasma. PB-24 (audit 2026-06-10).
+		if s.CodecType == "video" && s.IsAttachedPic {
+			continue
+		}
 		streams = append(streams, &librarymodel.MediaStream{
 			ItemID:            itemID,
 			StreamIndex:       s.Index,

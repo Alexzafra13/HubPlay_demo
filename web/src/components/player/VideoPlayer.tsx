@@ -225,6 +225,25 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     setActiveFederatedSubIndex,
   } = useFederatedSubs({ videoRef, peerId, peerStreamSessionId });
 
+  // Sub de texto local activo (SRT/mov_text embebido), por índice
+  // ABSOLUTO del stream — monta el `<track>` WebVTT de abajo, servido
+  // por el endpoint de extracción del backend. El estado lleva el
+  // itemId con el que se eligió: al encadenar episodio (auto-advance)
+  // la derivación devuelve null sola, sin efecto de reset (las pistas
+  // del episodio siguiente son otras).
+  const [localSubPick, setLocalSubPick] = useState<{
+    itemId: string;
+    index: number;
+  } | null>(null);
+  const activeLocalSubIndex =
+    localSubPick && localSubPick.itemId === itemId ? localSubPick.index : null;
+  const setActiveLocalSubIndex = useCallback(
+    (idx: number | null) => {
+      setLocalSubPick(idx === null ? null : { itemId, index: idx });
+    },
+    [itemId],
+  );
+
   // ─── Hooks ─────────────────────────────────────────────────────────────────
 
   const {
@@ -381,14 +400,24 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       pickExternalSub(pick);
       setSubtitleTrack(-1);
       setActiveFederatedSubIndex(null);
+      setActiveLocalSubIndex(null);
     },
-    [pickExternalSub, setSubtitleTrack, setActiveFederatedSubIndex],
+    [pickExternalSub, setSubtitleTrack, setActiveFederatedSubIndex, setActiveLocalSubIndex],
   );
 
   // Tras montar el <track> externo, fuerza su mode a "showing" en
   // el siguiente rAF (el DOM aún no tiene el elemento en el
   // microtask inmediato) y suprime cualquier otro track en showing
   // para no doble-renderizar cues de un HLS sub pre-existente.
+  // Mismo forzado de `mode = "showing"` para el <track> de texto
+  // local recién montado (prefijo "Local:" en el label).
+  useExternalSubMode({
+    videoRef,
+    activeKey:
+      activeLocalSubIndex !== null ? `local:${activeLocalSubIndex}` : null,
+    labelPrefix: "Local:",
+  });
+
   useExternalSubMode({
     videoRef,
     activeKey: activeExternalSub
@@ -413,6 +442,8 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     subtitleStreams,
     burnSubtitleIndex,
     onBurnSubtitleSelected,
+    activeLocalSubIndex,
+    setActiveLocalSubIndex,
     clearActiveExternalSub: clearExternalSub,
   });
 
@@ -498,6 +529,18 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
               label={`Federated:${federatedSubs[activeFederatedSubIndex].language || activeFederatedSubIndex}`}
               src={api.federatedSubtitleURL(peerId, peerStreamSessionId, federatedSubs[activeFederatedSubIndex].index)}
             />
+        )}
+        {activeLocalSubIndex !== null && (
+          <track
+            key={`local:${activeLocalSubIndex}`}
+            kind="subtitles"
+            srcLang={
+              subtitleStreams?.find((s) => s.index === activeLocalSubIndex)
+                ?.language ?? ""
+            }
+            label={`Local:${activeLocalSubIndex}`}
+            src={api.subtitleTrackURL(itemId, activeLocalSubIndex)}
+          />
         )}
       </video>
 

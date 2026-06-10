@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -52,6 +53,12 @@ type Stream struct {
 	IsDefault         bool
 	IsForced          bool
 	IsHearingImpaired bool
+	// IsAttachedPic marca los "video streams" que en realidad son la
+	// carátula embebida (cover art de MP3/FLAC/M4A, mjpeg/png). No son
+	// reproducibles: tratarlos como pista de vídeo real hacía que un
+	// fichero de música cayera a "transcode completo" y contaminaba el
+	// listado de pistas del UI. PB-24 (audit 2026-06-10).
+	IsAttachedPic bool
 }
 
 // DurationTicks: 10 000 ticks = 1 ms, 10 M ticks = 1 s.
@@ -76,14 +83,29 @@ func New() *FFprobe {
 	return &FFprobe{BinPath: "ffprobe"}
 }
 
+// probeTimeout acota cada invocación de ffprobe cuando el caller no
+// trae deadline propio. Un ffprobe sano tarda <1s; el techo cubre NFS
+// lentos sin permitir que un fichero colgado (FIFO disfrazado, mount
+// muerto, contenedor corrupto) bloquee el scan secuencial de la
+// biblioteca para siempre. PB-11 (audit 2026-06-10).
+const probeTimeout = 60 * time.Second
+
 func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
 	bin := f.BinPath
 	if bin == "" {
 		bin = "ffprobe"
 	}
 
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, probeTimeout)
+		defer cancel()
+	}
+
+	// `-v error` (no `quiet`): con quiet, ExitError.Stderr llega vacío
+	// y todo fallo se loguea como un "exit status 1" inservible.
 	cmd := exec.CommandContext(ctx, bin,
-		"-v", "quiet",
+		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
@@ -93,6 +115,14 @@ func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
 
 	out, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			detail := strings.TrimSpace(string(exitErr.Stderr))
+			if len(detail) > 512 {
+				detail = detail[len(detail)-512:]
+			}
+			return nil, fmt.Errorf("ffprobe %q: %w: %s", path, err, detail)
+		}
 		return nil, fmt.Errorf("ffprobe %q: %w", path, err)
 	}
 
@@ -186,6 +216,7 @@ func parseOutput(data []byte) (*Result, error) {
 			stream.IsDefault = s.Disposition["default"] == 1
 			stream.IsForced = s.Disposition["forced"] == 1
 			stream.IsHearingImpaired = s.Disposition["hearing_impaired"] == 1
+			stream.IsAttachedPic = s.Disposition["attached_pic"] == 1
 		}
 
 		result.Streams = append(result.Streams, stream)

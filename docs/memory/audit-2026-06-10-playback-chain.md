@@ -85,27 +85,27 @@ mapeando `video.error.code` a mensajes específicos.
   (`autotune.go:28`). NVENC sí funciona. **Fix:** path VAAPI dedicado
   (init_hw_device + hwupload, tonemap software antes del upload) y
   visibilizar el fallback en el panel admin.
-- **PB-6 · La decisión ignora la pista de audio seleccionada.**
+- ✅ **PB-6 · La decisión ignora la pista de audio seleccionada.**
   `decision.go:84-97` + `manager.go:428-446`. `Decide` evalúa `audioOK`
   solo contra la pista default; `AudioStreamIndex` no le llega. MKV con
   default AAC + pista DTS: el usuario cambia a DTS → DirectStream con
   `CopyAudio` → DTS dentro del TS → **vídeo mudo**. Inverso: re-encode
   innecesario. **Fix:** pasar `AudioStreamIndex` a `Decide` y evaluar
   contra la pista efectiva.
-- **PB-7 · `mp4`/`mov` no están en `remuxableContainers`.**
+- ✅ **PB-7 · `mp4`/`mov` no están en `remuxableContainers`.**
   `decision.go:36-41,127`. MP4 h264+AC3 (rip típico): falla `audioOK`, y
   el gate de DirectStream exige container remuxeable → **re-encode
   completo del vídeo** (CPU + pérdida de calidad + 720p) cuando bastaba
   `-c:v copy` + transcode de audio. **Fix:** añadir mp4/mov/m4a al set +
   test `TestDecide_DirectStream_MP4_H264_AC3`.
-- **PB-8 · Perfil del códec ignorado: Hi10P/HEVC Main10 → DirectPlay imposible.**
+- ✅ **PB-8 · Perfil del códec ignorado: Hi10P/HEVC Main10 → DirectPlay imposible.**
   `decision.go:96` (el probe captura `Profile` en `probe.go:127` y se
   persiste — simplemente no se consulta). h264 High 10 (omnipresente en
   anime) no lo decodifica ningún navegador → pantalla rota. **Fix:** gate
   "profile contiene '10' → transcode salvo cap explícita". Capturar
   `pix_fmt`/`bits_per_raw_sample` daría señal más fiable. *(Encontrado
   por 2 sweeps.)*
-- **PB-9 · ffmpeg huérfano por race StopSession/cleanupIdle ↔ RestartSessionAt.**
+- ✅ **PB-9 · ffmpeg huérfano por race StopSession/cleanupIdle ↔ RestartSessionAt.**
   `manager.go:547-628` vs `:660-682,812-836`. El restart solo sostiene
   `restartMu`; un Stop concurrente (usuario cierra el player durante un
   seek, o tick de idle-reap) borra la key y mata el ffmpeg viejo, y el
@@ -125,14 +125,14 @@ mapeando `video.error.code` a mensajes específicos.
 
 ### Backend — probe, trickplay, scan
 
-- **PB-11 · ffprobe/fpcalc/ffmpeg sin timeout por fichero — un fichero malo cuelga el scan entero.**
+- ✅ **PB-11 · ffprobe/fpcalc/ffmpeg sin timeout por fichero — un fichero malo cuelga el scan entero.**
   `probe.go:85-97` + `scan_walk.go:51,162` + `fingerprint.go:148,184`. El
   walk es secuencial: un NFS colgado o un fichero corrupto bloquea la
   biblioteca indefinidamente ("escaneando…" eterno). El mismo `Probe` sin
   timeout se usa en uploads de usuarios (`upload/service.go:366`).
   **Fix:** `context.WithTimeout` (30–60s) por invocación. Bonus: `-v
   error` en vez de `-v quiet` para que `ExitError.Stderr` sea accionable.
-- **PB-12 · Trickplay sin ACL de biblioteca y sin límite global de ffmpegs.**
+- ✅ **PB-12 · Trickplay sin ACL de biblioteca y sin límite global de ffmpegs.**
   `item_trickplay_handler.go:75-130`. Todo el streaming pasa por
   `authorizeItem`, trickplay no: cualquier usuario autenticado ve la
   timeline visual (200 frames de la película) de bibliotecas restringidas
@@ -140,7 +140,7 @@ mapeando `video.error.code` a mensajes específicos.
   hoverear una fila de la home puede lanzar N ffmpegs de 180s. **Fix:**
   pasar `deps.Access` + gate 404 como `stream.go:92-101`; semáforo global
   de 2-3 slots.
-- **PB-13 · Trickplay reintenta para siempre los fallos de generación.**
+- ✅ **PB-13 · Trickplay reintenta para siempre los fallos de generación.**
   `item_trickplay_handler.go:229-238` + `imaging/trickplay.go:247-254`.
   Fallo de ffmpeg (corrupto, o >180s en hardware lento) no deja marcador
   → cada hover relanza otro ffmpeg de 180s, en bucle con el
@@ -200,12 +200,12 @@ mapeando `video.error.code` a mensajes específicos.
   handler espera 2s y **reinicia ffmpeg** perdiendo el progreso; a 20
   restarts/min entra el rate-limit → 429 → stall. **Fix:** mirar el
   último segmento en disco; si lo pedido está ≤3-4 por delante, esperar.
-- **PB-20 · Sesión zombie con ffmpeg muerto = spinner sin error; `?audio=N` fuera de rango lo provoca.**
+- ✅ **PB-20 · Sesión zombie con ffmpeg muerto = spinner sin error; `?audio=N` fuera de rango lo provoca.**
   `manager.go:486-523` + `transcode.go:402-407` (`-map 0:a:N` sin sufijo
   `?`) + `stream.go:264-269` (índice sin validar). **Fix:** validar
   índices contra `mediaStreams` (400) + observar `session.done` y
   desregistrar con error tipado.
-- **PB-21 · `-tune zerolatency` en VOD** degrada calidad por bit sin
+- ✅ **PB-21 · `-tune zerolatency` en VOD** degrada calidad por bit sin
   ganar latencia (`transcode.go:441-446`). Quitarlo del path VOD.
 - **PB-22 · Downmix forzado `-ac 2`** en todo transcode de audio
   (`transcode.go:495-499`): las fuentes 5.1/7.1 pierden surround aunque el
@@ -215,11 +215,11 @@ mapeando `video.error.code` a mensajes específicos.
   `profile`, pero ffprobe anuncia DV en `side_data_list` (DOVI). DV
   Profile 5 (WEB-DLs) se etiqueta HDR10/SDR → colores verde/morado.
   **Fix:** parsear `side_data_list`; DV sin base compatible → transcode.
-- **PB-24 · Cover art embebido (`attached_pic`) persiste como pista de vídeo real.**
+- ✅ **PB-24 · Cover art embebido (`attached_pic`) persiste como pista de vídeo real.**
   `probe.go:137` (no lee `disposition.attached_pic`) → música con
   carátula = "transcode completo" del MP3; pista fantasma en el UI.
   **Fix:** filtrar/marcar en `probeResultToStreams`.
-- **PB-25 · Fichero borrado entre scan y play → errores crípticos.**
+- ✅ **PB-25 · Fichero borrado entre scan y play → errores crípticos.**
   `stream.go:529-538` (404 text/plain con Content-Type de vídeo) +
   `transcode.go:140` (ffmpeg muere a Debug → bucle de
   SEGMENT_NOT_FOUND). **Fix:** `os.Stat` antes de servir/arrancar →
@@ -275,6 +275,29 @@ sembrada en `handlePlay`), deriva los hermanos de su `parent_id`, y
 expone `playingItem`; `ItemDetail` alimenta el player desde él. Test de
 regresión: "playing an episode from the season page feeds the player
 the episode's data".
+
+### ✅ PB-41 · Los subtítulos de TEXTO embebidos (SRT) no aparecían en el picker (reporte de usuario, 2026-06-10)
+`useSubtitleSelection.ts`. El picker fusionaba 3 orígenes: hls.js
+(que en el master sintético nunca trae renditions de subtítulos),
+federados y burn-in (solo PGS/DVDSUB/ASS). El comentario asumía que
+"SRT/WebVTT son HLS tracks normales" — falso en nuestro HLS. Resultado:
+un MKV con 3 pistas SUBRIP (que Jellyfin lista) mostraba solo
+"Ninguno + Buscar online". El backend YA tenía el extractor
+(`/stream/{id}/subtitles/{absIndex}` → WebVTT, índice absoluto).
+**Fix aplicado:** 4º carril "texto local" (ID base 30000, codecs
+subrip/srt/webvtt/vtt/mov_text/text) → `<track>` nativo con label
+`Local:` + `useExternalSubMode` generalizado por prefijo; exclusión
+mutua con hls/federado/externo/burn-in; estado keyed por itemId (se
+auto-invalida en auto-advance). Tests: `useSubtitleSelection.test.ts`
+(6 casos, el hook no tenía ninguno).
+
+### ✅ PB-42 · El menú del player salía como una tira vertical rota en móvil (reporte de usuario, 2026-06-10)
+`BottomSheet.tsx`. La sheet usaba `absolute inset-0`, pero se monta
+dentro del wrapper `relative` del BOTÓN que la abre — `inset-0` se
+anclaba al rectángulo del botón (~40px) y el menú de ajustes/pistas
+salía como una columna estrecha inutilizable. **Fix aplicado:**
+`fixed inset-0` (ancla al viewport; el overlay del player es
+fullscreen y ningún ancestro lleva transform).
 
 ## 🟢 Bajos
 
@@ -342,8 +365,8 @@ the episode's data".
 | Fase | Tema | Items | Coste |
 |---|---|---|---|
 | **P0 ✅** | Correctness que rompe playback común | PB-1, PB-2, PB-3, PB-4 + tests que los fijan | hecho (2026-06-10) |
-| **P1a** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | 1 sesión |
-| **P1b** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | 1 sesión |
+| **P1a ✅** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | hecho (2026-06-10) |
+| **P1b ✅** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | hecho (2026-06-10) |
 | **P1c** | IPTV | PB-14, PB-15, PB-27, PB-28 | 1 sesión |
 | **P1d** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-35 + tests useHls | 1 sesión |
 | **P2** | VAAPI real + ABR/caps + surround | PB-5, PB-10, PB-22, PB-23 | 1-2 sesiones |
