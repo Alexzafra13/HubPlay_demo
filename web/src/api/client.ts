@@ -1331,6 +1331,15 @@ export class ApiClient {
     return `${this.baseUrl}/stream/${itemId}/subtitles/external/${encodeURIComponent(fileID)}?source=${encodeURIComponent(source)}`;
   }
 
+  /**
+   * URL del extractor WebVTT de una pista de subtitulos EMBEBIDA en el
+   * fichero (SRT/mov_text). trackIndex es el indice ABSOLUTO del
+   * stream (ffmpeg `0:N`), no el per-tipo — es lo que el backend mapea.
+   */
+  subtitleTrackURL(itemId: string, trackIndex: number): string {
+    return `${this.baseUrl}/stream/${itemId}/subtitles/${trackIndex}`;
+  }
+
   // ─── Federated subtitles (HubPlay peer) ───────────────────────────────
   //
   // When the user is playing a federated item, embedded subtitles live
