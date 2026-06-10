@@ -6,17 +6,18 @@
 
 ---
 
-## 🔭 Estado actual (2026-06-09)
+## 🔭 Estado actual (2026-06-10)
 
 **Salud:** MVP funcional, cerca de early-production. Todo el trabajo
-reciente está **mergeado en `main`**.
+hasta el 2026-06-09 está **mergeado en `main`**; la Fase 2 (supply-chain)
+está en la rama `claude/project-review-8tznz4`.
 
 | Área | Estado |
 |---|---|
 | Tests backend | `go test ./...` verde (con `-race` en los paquetes tocados) |
 | Tests frontend | **718/718** vitest verdes; `tsc` y `eslint` (0 errores) limpios |
 | PRs abiertas | ninguna nuestra (#489 dependabot pendiente de revisar) |
-| Audit prod 2026-06-08 | Fases 0/1 + Bloques 1/2 ✅ shipped. **Fases 2–5 abiertas** |
+| Audit prod 2026-06-08 | Fases 0/1/2 + Bloques 1/2 ✅. **Fases 3–5 abiertas** |
 | Audits arquitectónicos previos | 2026-05-14 ✅ y 2026-05-27 (macro + per-package) ✅ — cerrados, archivados |
 
 **Endurecido de cara a internet** (2026-06-08, en `main`): token solo por
@@ -31,12 +32,46 @@ virtualizado. Detalle: `archive/2026-05-27-to-06-08.md`.
 
 ## 📋 Trabajo abierto
 
-**Roadmap principal:** `audit-2026-06-08-production-readiness.md` (Fases
-2–5). Ninguna bloquea el uso plug-and-play básico.
+**Roadmap principal (nuevo):** `audit-2026-06-10-playback-chain.md` —
+audit focalizado de la cadena de playback (decisión de streaming, FFmpeg,
+probe, IPTV, player hls.js). 39 hallazgos, 4 críticos. **Es el trabajo de
+más valor de usuario pendiente** — todo lo demás son cimientos.
+
+**PB-40 ✅ (reporte de usuario, 2026-06-10):** el player se alimentaba
+del item de la página, no del que suena — reproducir desde la
+temporada/serie no mostraba selector de pistas ni "siguiente episodio",
+y el auto-advance dejaba datos stale. `usePlayback` ahora deriva todo
+del item en reproducción. Detalle: PB-40 en el audit de playback.
+
+**P0 ✅ hecha (2026-06-10)** en `claude/project-review-8tznz4`: PB-1
+(alias webm corregido con check de códecs WebM-reales en `Decide`), PB-2
+(`-hls_flags +temp_file`), PB-3 (`-force_key_frames` con forma
+`prev_forced_t` — la forma `n_forced*6` degeneraría con `-copyts` en los
+seek-restarts), PB-4 (listener de `error` del `<video>` en las rutas de
+src directo, guardado para no pisar el recovery de hls.js). Tests:
+2 nuevos en `decision_test.go`, 2 en `transcode_test.go`, y
+`useHls.test.ts` nuevo (7 tests — el núcleo VOD estaba sin cubrir).
 
 | Prioridad | Tema | Items |
 |---|---|---|
-| Media-alta | **Fase 2 — supply-chain / release** | A9 (SHA-pin de GitHub Actions), A10 (provenance/firma de binarios + checksum FFmpeg + install.sh), M12–M17 (Trivy/govulncheck bloqueantes, SBOM, `pnpm build` y sqlc-verify en CI) |
+| **Alta** | **Playback P1 (a-d)** | decisión/transcode (PB-6..9, 20, 21), trickplay+probe (PB-11..13, 24, 25 — PB-12 es ACL faltante), IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
+| Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
+
+**Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases
+3–5). Ninguna bloquea el uso plug-and-play básico.
+
+**Fase 2 — supply-chain / release: ✅ hecha (2026-06-10)** en
+`claude/project-review-8tznz4`: actions SHA-pineadas, SLSA provenance
+(attest-build-provenance) en releases + nightly, SBOM/provenance OCI en
+la imagen Docker, verificación sha256 de FFmpeg (API digest) y NSSM
+(opt-in por repo var), `.sha256` fatal en install.sh, Trivy bloqueante
+en tags, govulncheck pineado, jobs `sqlc-verify` + `pnpm build` en CI,
+dependabot docker + bases por digest. Detalle y acciones de operador
+pendientes (NSSM_EXPECTED_SHA256, SignPath): §"Fase 2 — implementación"
+del audit.
+
+| Prioridad | Tema | Items |
+|---|---|---|
 | Media | **Fase 3 — observabilidad / config** | M18–M21, M23, M24 (IP de cliente en logs, panics en métricas, validación de config, completar `example.yaml`). M22 ya descartado (no-issue). |
 | Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes). A11/A12 ya hechos. |
 | Baja | **Fase 5 — gobernanza** | README de despliegue, `SECURITY.md`, `CODEOWNERS` |
@@ -62,7 +97,9 @@ virtualizado. Detalle: `archive/2026-05-27-to-06-08.md`.
   keystore, preflight, sqlc adapter, ADR-026 logs).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,
   comentarios en español, regeneración sqlc.
-- `audit-2026-06-08-production-readiness.md` — roadmap activo (Fases 2–5).
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo principal**
+  (cadena de playback: 39 hallazgos, plan P0–P3).
+- `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 3–5).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend.
 - `web/verify/` — arnés de verificación en navegador del grid virtualizado.
 

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import { queryKeys, useUserPreference } from "@/api/hooks";
-import type { MediaItem, PlaybackMethod } from "@/api/types";
+import { queryKeys, useItem, useItemChildren, useUserPreference } from "@/api/hooks";
+import type { ItemDetail, MediaItem, PlaybackMethod } from "@/api/types";
 import {
   PREFERRED_AUDIO_LANG_PREF_KEY,
   pickAudioStreamIndex,
@@ -113,14 +113,6 @@ interface UsePlaybackArgs {
    *  default playback target when handlePlay is called without an
    *  explicit override. */
   pageItemId: string | undefined;
-  /** Sibling episodes for the auto-advance pipeline. Empty for
-   *  movies and orphan episodes. */
-  siblingEpisodes: MediaItem[];
-  /** Optional duration of the item in seconds (parent passes the
-   *  primary item's duration_ticks → seconds conversion). The hook
-   *  doesn't need it for state, only memoises chapter markers off
-   *  the parent's chapters list — so the conversion stays at the
-   *  call site, the hook accepts the seconds-shape directly. */
 }
 
 interface PlayerOverlayState {
@@ -168,6 +160,14 @@ export interface UsePlaybackResult extends PlayerOverlayState {
   /** Up-next promo card data for the player overlay. undefined when
    *  there's no next sibling. */
   nextUpInfo: NextUpInfo | undefined;
+  /** Detalle del item EN REPRODUCCIÓN (≠ item de la página cuando se
+   *  reproduce un episodio desde la temporada/serie o tras un
+   *  auto-advance). Los props per-item del player (pistas, capítulos,
+   *  segments, duración, título) deben salir de aquí — del item de la
+   *  página salían vacíos en esos flujos (una temporada no tiene
+   *  media_streams) y stale tras el auto-advance. undefined mientras
+   *  carga o cuando no hay nada sonando. */
+  playingItem: ItemDetail | undefined;
 }
 
 /**
@@ -193,7 +193,6 @@ export interface UsePlaybackResult extends PlayerOverlayState {
  */
 export function usePlayback({
   pageItemId,
-  siblingEpisodes,
 }: UsePlaybackArgs): UsePlaybackResult {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -208,6 +207,32 @@ export function usePlayback({
   const [playError, setPlayError] = useState<string | null>(null);
   const [playingItemId, setPlayingItemId] = useState<string | null>(null);
   const isPlayingRef = useRef(false);
+
+  // Detalle del item en reproducción. Antes los datos per-item del
+  // player venían del item de la PÁGINA, que solo coincide con el que
+  // suena cuando se reproduce desde la página del propio episodio.
+  // Reproducir desde la fila de episodios de la temporada, desde el
+  // "Seguir viendo" de la serie, o encadenar con auto-advance dejaba
+  // el player sin selector de audio/subtítulos, sin skip-intro y sin
+  // "siguiente episodio". Cache-hit gratis: handlePlay siembra esta
+  // query y el prefetch del siguiente episodio la calienta de antemano.
+  const { data: playingItem } = useItem(playingItemId ?? "");
+
+  // Episodios hermanos para next-up/auto-advance: hijos de la
+  // temporada del episodio EN REPRODUCCIÓN. Para películas (o nada
+  // sonando) el parent queda null y la query ni se dispara — el
+  // pipeline de next-up se apaga solo.
+  const siblingParentId =
+    playingItem?.type === "episode" ? playingItem.parent_id : null;
+  const { data: siblings } = useItemChildren(siblingParentId ?? "", {
+    enabled: !!siblingParentId,
+  });
+  const siblingEpisodes = useMemo<MediaItem[]>(() => {
+    if (!siblings || siblings.length === 0) return [];
+    return siblings
+      .filter((s) => s.type === "episode")
+      .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
+  }, [siblings]);
 
   const cleanup = useCallback(async (itemId: string) => {
     await cleanupSession(itemId);
@@ -238,7 +263,15 @@ export function usePlayback({
         // just start at zero.
         let startPosition: number | undefined;
         try {
-          const it = await api.getItem(playId);
+          // fetchQuery (no api.getItem directo) para sembrar la cache
+          // que useItem(playingItemId) lee arriba: el player monta con
+          // las pistas/capítulos/segments del item ya disponibles en
+          // vez de un primer render con pickers vacíos.
+          const it = await queryClient.fetchQuery({
+            queryKey: queryKeys.item(playId),
+            queryFn: () => api.getItem(playId),
+            staleTime: 5 * 60 * 1000,
+          });
           const ticks = it.user_data?.progress?.position_ticks ?? 0;
           if (ticks > 0 && !it.user_data?.played) {
             startPosition = ticks / 10_000_000;
@@ -255,7 +288,7 @@ export function usePlayback({
         setPlayError(t("itemDetail.playbackError"));
       }
     },
-    [pageItemId, playingItemId, cleanup, preferredAudio, t],
+    [pageItemId, playingItemId, cleanup, preferredAudio, queryClient, t],
   );
 
   // Next-episode lookup. Used both to prefetch its item data when
@@ -391,6 +424,7 @@ export function usePlayback({
     playingItemId,
     playError,
     nextUpInfo,
+    playingItem,
     handlePlay,
     handlePlayerEnded,
     handleClosePlayer,

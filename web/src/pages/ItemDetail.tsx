@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useItem, useItemChildren, useToggleFavorite } from "@/api/hooks";
-import type { MediaItem } from "@/api/types";
+import { useItem, useToggleFavorite } from "@/api/hooks";
 import { Spinner, EmptyState } from "@/components/common";
 import {
   HeroSection,
@@ -60,36 +59,33 @@ export default function ItemDetail() {
   const [metadataEditorOpen, setMetadataEditorOpen] = useState(false);
   const setMetadataLock = useSetItemMetadataLock(id ?? "");
 
-  // Sibling episodes for auto-advance + the resume rail. Pure
-  // derivation (filter + sort) — useMemo-able. Episodes-only;
-  // movies and series get an empty list and the playback hook
-  // treats it as "no auto-advance available".
-  const parentId = item?.parent_id;
-  const { data: siblings } = useItemChildren(parentId ?? "", {
-    enabled: !!parentId && item?.type === "episode",
-  });
-  const siblingEpisodes = useMemo<MediaItem[]>(() => {
-    if (!siblings || siblings.length === 0) return [];
-    return siblings
-      .filter((s) => s.type === "episode")
-      .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
-  }, [siblings]);
-
   // Playback machinery (overlay state + handlers + auto-advance +
   // session cleanup) lives in usePlayback; this page just wires the
-  // returned handlers to the hero buttons and the VideoPlayer.
+  // returned handlers to the hero buttons and the VideoPlayer. Los
+  // episodios hermanos para el auto-advance los deriva el propio hook
+  // a partir del item EN REPRODUCCIÓN — derivarlos aquí desde el item
+  // de la página rompía next-up al reproducir desde la temporada/serie.
   const {
     showPlayer,
     playerInfo,
     playingItemId,
     playError,
     nextUpInfo,
+    playingItem,
     handlePlay,
     handlePlayerEnded,
     handleClosePlayer,
     switchAudioStream,
     switchBurnSubtitle,
-  } = usePlayback({ pageItemId: id, siblingEpisodes });
+  } = usePlayback({ pageItemId: id });
+
+  // Fuente de los props per-item del player. El item en reproducción
+  // puede no ser el de la página (fila de episodio en la temporada,
+  // "Seguir viendo" de la serie, auto-advance): pistas, capítulos,
+  // segments y duración deben salir de ÉL. Fallback al item de la
+  // página solo mientras la query del playing item carga (cache-hit
+  // casi siempre — handlePlay la siembra).
+  const playerItem = playingItem ?? item;
 
   // ─── Auto-play deep-link (?play=1) ──────────────────────────────────────
   // Lets surfaces like the home hero and Continue Watching launch the
@@ -187,7 +183,7 @@ export default function ItemDetail() {
   // Pulled to a local so the React Compiler agrees with the dep
   // list — `item?.chapters` in the array vs `item.chapters` in
   // the body confused its inference and skipped memoization.
-  const chapters = item?.chapters;
+  const chapters = playerItem?.chapters;
   const chapterMarkers = useMemo(() => {
     if (!chapters || chapters.length === 0) return undefined;
     return chapters.map((c) => ({
@@ -293,6 +289,14 @@ export default function ItemDetail() {
     ? { ...detailStyle, ...auroraBackground }
     : detailStyle;
 
+  // Versión non-null de playerItem para los props del player: tras los
+  // guards de arriba `item` ya no puede ser null, así que el fallback
+  // siempre resuelve (TS no propaga el narrowing al playerItem
+  // calculado antes de los guards).
+  const surfaceItem = playerItem ?? item;
+  const surfaceIsSubItem =
+    surfaceItem.type === "season" || surfaceItem.type === "episode";
+
   return (
     // -mx-4 md:-mx-6 cancels the AppLayout <main> px gutter so the
     // page-tint background reaches the very edges of the viewport
@@ -317,31 +321,36 @@ export default function ItemDetail() {
           masterPlaylistUrl={playerInfo.masterPlaylistUrl}
           directUrl={playerInfo.directUrl}
           playbackMethod={playerInfo.playbackMethod}
-          title={item.title}
-          logoUrl={item.logo_url ?? undefined}
+          // Todos los props per-item salen de surfaceItem (el item EN
+          // REPRODUCCIÓN, con fallback al de la página mientras carga):
+          // con `item` a secas, reproducir desde la temporada/serie o
+          // encadenar episodios montaba el player sin pistas de
+          // audio/subs, sin segments y con la duración equivocada.
+          title={surfaceItem.title}
+          logoUrl={surfaceItem.logo_url ?? item.logo_url ?? undefined}
           // Player's loading overlay falls back to series-level
           // backdrop for episodes (the per-episode still is too
           // small / often missing). When neither is available the
           // overlay degrades to a flat black surface with the
           // title/logo — still better than the bare-black <video>.
           backdropUrl={
-            item.backdrop_url ??
-            (isSubItem ? item.series_backdrop_url : undefined) ??
+            surfaceItem.backdrop_url ??
+            (surfaceIsSubItem ? surfaceItem.series_backdrop_url : undefined) ??
             undefined
           }
           knownDuration={
-            item.duration_ticks
-              ? item.duration_ticks / 10_000_000
+            surfaceItem.duration_ticks
+              ? surfaceItem.duration_ticks / 10_000_000
               : undefined
           }
           nextUp={nextUpInfo}
           chapters={chapterMarkers}
-          segments={item.segments}
-          audioStreams={item.media_streams?.filter((s) => s.type === "audio")}
+          segments={surfaceItem.segments}
+          audioStreams={surfaceItem.media_streams?.filter((s) => s.type === "audio")}
           audioStreamIndex={playerInfo.audioStreamIndex}
           startPosition={playerInfo.startPosition}
           onAudioStreamSelected={switchAudioStream}
-          subtitleStreams={item.media_streams?.filter((s) => s.type === "subtitle")}
+          subtitleStreams={surfaceItem.media_streams?.filter((s) => s.type === "subtitle")}
           burnSubtitleIndex={playerInfo.burnSubtitleIndex}
           onBurnSubtitleSelected={switchBurnSubtitle}
           onClose={async () => {

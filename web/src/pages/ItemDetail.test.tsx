@@ -22,9 +22,23 @@ vi.mock("@/components/player", async () => {
   );
   return {
     ...actual,
-    VideoPlayer: ({ title, onClose, onEnded }: { title?: string; onClose: () => void; onEnded?: () => void }) => (
+    VideoPlayer: ({
+      title,
+      nextUp,
+      audioStreams,
+      onClose,
+      onEnded,
+    }: {
+      title?: string;
+      nextUp?: { title: string };
+      audioStreams?: unknown[];
+      onClose: () => void;
+      onEnded?: () => void;
+    }) => (
       <div data-testid="video-player">
         <span>{title}</span>
+        <span data-testid="player-next-up">{nextUp?.title ?? "none"}</span>
+        <span data-testid="player-audio-count">{audioStreams?.length ?? 0}</span>
         <button onClick={onClose}>close-player</button>
         <button onClick={() => onEnded?.()}>fire-ended</button>
       </div>
@@ -240,5 +254,72 @@ describe("ItemDetail", () => {
     const kebab = await screen.findByLabelText(/more options|mas opciones/i);
     fireEvent.click(kebab);
     expect(screen.getByText(/refresh metadata|actualizar metadatos/i)).toBeInTheDocument();
+  });
+
+  // Regresión: los props per-item del player (pistas de audio, next-up,
+  // título) deben derivar del item EN REPRODUCCIÓN, no del de la
+  // página. Reproducir un episodio desde la fila de la temporada
+  // montaba el player con los datos de la temporada (sin
+  // media_streams) → sin selector de audio y sin "siguiente episodio".
+  it("playing an episode from the season page feeds the player the episode's data", async () => {
+    const audioStream = (index: number, lang: string) => ({
+      index,
+      type: "audio" as const,
+      codec: "aac",
+      language: lang,
+      title: null,
+      channels: 2,
+      width: null,
+      height: null,
+      bitrate: null,
+      is_default: index === 1,
+      is_forced: false,
+      hdr_type: null,
+    });
+    const season = makeItemDetail({
+      id: "season-1",
+      type: "season",
+      title: "Season 1",
+      parent_id: "series-1",
+      season_number: 1,
+      episode_number: null,
+      media_streams: [],
+    });
+    const ep1Detail = makeItemDetail({
+      id: "ep-1",
+      title: "Episode 1",
+      media_streams: [audioStream(1, "spa"), audioStream(2, "eng")],
+    });
+    const epRow = (id: string, n: number, title: string) =>
+      makeMediaItem({ id, title, episode_number: n });
+
+    apiMock.getItem.mockImplementation(async (id: string) => {
+      if (id === "season-1") return season;
+      if (id === "ep-1") return ep1Detail;
+      throw new Error(`unexpected getItem(${id})`);
+    });
+    apiMock.getItemChildren.mockImplementation(async (id: string) =>
+      id === "season-1"
+        ? [epRow("ep-1", 1, "Episode 1"), epRow("ep-2", 2, "Episode 2")]
+        : [],
+    );
+    apiMock.getStreamInfo.mockResolvedValue({ method: "Transcode" });
+
+    renderItemDetail("season-1");
+
+    // La fila del episodio dispara reproducción inline (sin navegar).
+    const row = await screen.findByText(/Episode 1/);
+    fireEvent.click(row);
+
+    const player = await screen.findByTestId("video-player");
+    // Pistas del EPISODIO (la temporada no tiene media_streams).
+    await waitFor(() =>
+      expect(screen.getByTestId("player-audio-count")).toHaveTextContent("2"),
+    );
+    // Next-up apunta al hermano siguiente del episodio en reproducción.
+    await waitFor(() =>
+      expect(screen.getByTestId("player-next-up")).toHaveTextContent("Episode 2"),
+    );
+    expect(player).toHaveTextContent("Episode 1");
   });
 });

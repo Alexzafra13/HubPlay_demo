@@ -96,7 +96,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
   interrumpirse. **Fix:** `stop_grace_period: 40s` en los 3 compose.
 
 ### Supply-chain / Release
-- **A9 · GitHub Actions pineadas a tags flotantes, no a SHA.** Casi todas
+- ✅ **A9 · GitHub Actions pineadas a tags flotantes, no a SHA.** Casi todas
   (`checkout@v4`, `setup-go@v6`, `action-gh-release@v3`, `build-push-action@v6`,
   `golangci-lint-action@v9`, `signpath/...@v2`, `Inno-Setup-Action@v1.2.8`,
   y `millionco/react-doctor@main` ← rama móvil). Compromiso upstream =
@@ -104,7 +104,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
   La disciplina ya existe (trivy-action SHA-pineada, docker.yml:124) pero
   no se aplicó al resto. **Fix:** pinear a SHA completo con comentario
   `# vX.Y.Z`; Dependabot (ya configurado para actions) los bumpea.
-- **A10 · Releases sin provenance/firma + FFmpeg sin verificar + bypass en `install.sh`.**
+- ✅ **A10 · Releases sin provenance/firma + FFmpeg sin verificar + bypass en `install.sh`.**
   Cluster supply-chain:
   - `release.yml:384-396,486-499` publica solo con sidecars `.sha256` (no
     prueban nada: quien altera el binario altera el checksum). Sin cosign,
@@ -202,21 +202,21 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
   (guards via PRAGMA), nota de recuperación en docs.
 
 ### CI/CD
-- **M12 · govulncheck instalado con `@latest` en un job gating.** `ci.yml:225`.
+- ✅ **M12 · govulncheck instalado con `@latest` en un job gating.** `ci.yml:225`.
   Indeterminismo en un gate de seguridad. **Fix:** pinear `@v1.x.y`.
-- **M13 · Sin SBOM en ningún sitio.** Ni syft ni `buildx --sbom`. **Fix:**
+- ✅ **M13 · Sin SBOM en ningún sitio.** Ni syft ni `buildx --sbom`. **Fix:**
   CycloneDX/SPDX del binario + imagen; `build-push-action` soporta
   `sbom:true` + `provenance:mode=max`.
-- **M14 · `make sqlc-verify` existe pero NO corre en CI.** El drift guard
+- ✅ **M14 · `make sqlc-verify` existe pero NO corre en CI.** El drift guard
   solo protege si el dev lo recuerda. **Fix:** job de CI con `make sqlc-verify`.
-- **M15 · `pnpm build` no corre en CI.** Solo en release.yml. Un cambio que
+- ✅ **M15 · `pnpm build` no corre en CI.** Solo en release.yml. Un cambio que
   rompa el build de producción de Vite/Rollup no se detecta hasta release.
   **Fix:** añadir `pnpm build` al job frontend. (+ coverage sin gate;
   opcional añadir floor en auth/stream.)
-- **M16 · Trivy es report-only (`exit-code:0`), nunca bloquea.** `docker.yml:131`.
+- ✅ **M16 · Trivy es report-only (`exit-code:0`), nunca bloquea.** `docker.yml:131`.
   CVEs HIGH/CRITICAL en `:latest` se publican igual. **Fix:** `exit-code:1`
   en CRITICAL para builds de tag/release.
-- **M17 · Dependabot sin ecosistema `docker` + bases sin pinear.**
+- ✅ **M17 · Dependabot sin ecosistema `docker` + bases sin pinear.**
   `dependabot.yml` cubre gomod/npm/actions pero no docker; `Dockerfile`
   usa `node:22-alpine`, `golang:1.25.11-alpine`, `ubuntu:24.04`,
   `alpine:3.21` sin digest. **Fix:** añadir `docker` a dependabot + pinear
@@ -307,7 +307,7 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
 |---|---|---|---|
 | **0 ✅** | **Bloqueantes de exposición** | C1, C2, A1, A2, A3, A4, A5 | hecho |
 | **1 ✅** | **Robustez de despliegue** | A6, A7, A8, M9, M10, M11, A5-perímetro | hecho (M5/M7 diferidos, ver nota) |
-| **2** | **Supply-chain / release** | A9, A10, M12, M13, M14, M15, M16, M17 | 1 sesión |
+| **2 ✅** | **Supply-chain / release** | A9, A10, M12, M13, M14, M15, M16, M17 | hecho (2026-06-10; SignPath y pin de NSSM quedan como acciones de operador) |
 | **3** | **Observabilidad & config** | M18, M19, M20, M21, M22, M23, M24, B6 | 1 sesión |
 | **4** | **Frontend hardening** | A11, A12, M2(ui), B10-B14 | 1 sesión |
 | **5** | **Gobernanza & docs** | A13, M3, M8, B-varios | 0.5 sesión |
@@ -379,3 +379,38 @@ datos, sin pasos manuales. 3 commits, con tests; build/vet/`-race` verdes.
 (SHA-pin actions, provenance/firma, checksum FFmpeg), observabilidad
 (client IP en logs, panics en métricas), frontend (error boundaries,
 virtualización), gobernanza (README/SECURITY/CODEOWNERS).
+
+---
+
+## Fase 2 — implementación (2026-06-10)
+
+Rama `claude/project-review-8tznz4`. Solo CI/scripts — 0 cambios de
+código de la app. Validado con actionlint, `bash -n`, parse YAML y
+`make sqlc-verify` en local.
+
+| Item | Qué se hizo |
+|---|---|
+| **A9** | Las 18 actions de `ci.yml`/`docker.yml`/`release.yml` pineadas a SHA completo con comentario `# vX.Y.Z` (incl. `react-doctor@main` → SHA del día). Dependabot bumpea SHA+comentario juntos |
+| **A10** | (1) `actions/attest-build-provenance` en `release-tag` y `release-nightly` → SLSA provenance firmada (Sigstore/OIDC) de todos los assets; verificable con `gh attestation verify`. (2) `fetch-ffmpeg.sh` verifica sha256 de cada asset BtbN contra el campo `digest` de la API de releases de GitHub (canal TLS independiente; GA desde jun-2025) y los zips de evermeet contra su API de info; `FFMPEG_SKIP_VERIFY=1` como escape local, mismatch siempre fatal. (3) `install.sh`: `.sha256` ausente ahora es **fatal** (`HUBPLAY_SKIP_VERIFY=1` opt-out explícito). (4) NSSM: verificación fail-closed opt-in vía repo var `NSSM_EXPECTED_SHA256` (patrón SignPath) |
+| **M12** | govulncheck `@latest` → `@v1.3.0` (la DB de vulns sigue siendo online; solo se congela el tool) |
+| **M13** | `build-push-action`: `sbom:true` + `provenance:mode=max` (attestations OCI en GHCR; off en PRs porque `load` no las soporta) |
+| **M14** | Job `sqlc-verify` en ci.yml (`make sqlc-verify`; sqlc v1.31.1 auto-instala toolchain go1.26 vía GOTOOLCHAIN=auto — verificado en local) |
+| **M15** | Step `pnpm build` en el job test-frontend |
+| **M16** | Trivy gate bloqueante (`exit-code:1`, severity CRITICAL, ignore-unfixed) **solo en builds de tag**; main sigue report-only via SARIF |
+| **M17** | Ecosistema `docker` en dependabot + 4 bases del Dockerfile pineadas `tag@sha256:digest` |
+
+**Limitaciones documentadas (aceptadas):**
+- La verificación de FFmpeg autentica el **canal de descarga** (CDN), no
+  el origen BtbN/evermeet — protegerse de un upstream comprometido
+  requeriría buildear FFmpeg propio. El tag `latest` de BtbN sigue siendo
+  rolling: pinearlo a un autobuild concreto no es viable porque BtbN
+  borra los autobuilds antiguos (rompería releases futuros).
+- Sin cosign manual de archivos: la attestation de GitHub cubre el mismo
+  caso (firma + provenance) con menos llaves que gestionar.
+
+**Acciones de operador pendientes (no de código):**
+1. `NSSM_EXPECTED_SHA256`: correr una release, copiar el sha256 logueado,
+   contrastarlo con una fuente independiente y fijar la repo variable.
+2. SignPath (ya wireado): aplicar en signpath.org y activar
+   `HUBPLAY_SIGNING_ENABLED` (guía en
+   `docs/architecture/windows-installer-signing.md`).

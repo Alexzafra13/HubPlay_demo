@@ -36,17 +36,17 @@ jobs:
             platforms: linux/amd64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -54,7 +54,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
@@ -76,7 +76,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           target: ${{ matrix.target || '' }}
@@ -89,6 +89,12 @@ jobs:
           # only when push:true.
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' && matrix.target == 'hwaccel' }}
+          # SBOM (SPDX) + SLSA provenance adjuntos a la imagen como
+          # attestations OCI — consultables con `docker buildx imagetools
+          # inspect`. Sólo cuando se pushea: `load` al daemon local (PRs)
+          # no soporta attestations y el build fallaría.
+          sbom: ${{ github.event_name != 'pull_request' }}
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -139,7 +145,24 @@ jobs:
       # Bumped to v4 — v3 is scheduled for deprecation in Dec 2026.
       - name: Upload Trivy results
         if: always() && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ matrix.target || 'default' }}
+
+      # Gate bloqueante SOLO en builds de tag (release estable): un
+      # CRITICAL con fix disponible no debe publicarse bajo una versión
+      # estable. Los pushes a main siguen siendo report-only (el scan
+      # de arriba) para no bloquear el desarrollo con CVEs del día en
+      # la imagen base. Nota: la imagen ya está pusheada al registry en
+      # este punto — el gate rojo evita que el workflow quede verde y
+      # avisa antes de promocionar/anunciar el release.
+      - name: Trivy gate (CRITICAL blocks tagged releases)
+        if: success() && startsWith(github.ref, 'refs/tags/v')
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.tags && fromJSON(steps.meta.outputs.json).tags[0] || format('hubplay:scan-{0}', github.sha) }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

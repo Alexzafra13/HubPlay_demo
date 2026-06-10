@@ -1,9 +1,11 @@
 # Dependabot — weekly dependency updates.
 #
-# Three ecosystems live in this repo:
+# Four ecosystems live in this repo:
 #   - go.mod / go.sum at the root (Go backend).
 #   - web/package.json (pnpm-managed React frontend).
-#   - .github/workflows/ (action versions).
+#   - .github/workflows/ (action versions — pineadas a SHA; dependabot
+#     bumpea SHA + comentario `# vX.Y.Z` juntos).
+#   - Dockerfile (imágenes base pineadas por digest @sha256).
 #
 # Each ecosystem has its own update cadence and PR limits so a quiet
 # week doesn't get drowned out by an avalanche of patch bumps and a
@@ -62,3 +64,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2

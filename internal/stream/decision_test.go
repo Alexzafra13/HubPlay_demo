@@ -122,6 +122,49 @@ func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
 	}
 }
 
+// PB-1 (audit 2026-06-10): ffprobe etiqueta TODO Matroska como
+// "matroska,webm" (comparten demuxer). Un MKV h264+aac — el fichero más
+// común del mundo real — matcheaba el "webm" de las caps del cliente y
+// se servía como DirectPlay con Content-Type matroska: Chrome suele
+// tragarlo, Firefox y Safari dan pantalla negra. El path correcto es
+// DirectStream (remux). El alias webm solo cuenta si los códecs caben
+// en un WebM real (vp8/vp9/av1 + opus/vorbis).
+func TestDecide_MKV_WebmAlias_H264_AAC_MustNotDirectPlay(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska,webm"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "")
+	if d.Method != MethodDirectStream {
+		t.Fatalf("h264 + AAC in 'matroska,webm' must DirectStream (remux), got %s", d.Method)
+	}
+	if !d.CopyVideo {
+		t.Error("expected CopyVideo=true (h264 is client-compatible)")
+	}
+	if !d.CopyAudio {
+		t.Error("expected CopyAudio=true (aac is client-compatible)")
+	}
+}
+
+// Un WebM de verdad también llega como "matroska,webm" desde ffprobe —
+// con códecs WebM-legales el alias sí cuenta y DirectPlay se mantiene.
+func TestDecide_DirectPlay_WebmAlias_VP9_Opus(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska,webm"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "vp9", IsDefault: true},
+		{StreamType: "audio", Codec: "opus", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "")
+	if d.Method != MethodDirectPlay {
+		t.Errorf("real webm (vp9+opus) reported as 'matroska,webm' must DirectPlay, got %s", d.Method)
+	}
+}
+
 func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
 	t.Parallel()
 	item := &librarymodel.Item{Container: "webm"}

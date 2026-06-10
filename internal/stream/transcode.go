@@ -444,6 +444,23 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 				"-tune", "zerolatency",
 			)
 		}
+		// Keyframe forzado en cada frontera de 6s. El manifest VOD
+		// sintético y el seek-restart asumen "segmento N cubre
+		// [6N, 6N+6)", pero el muxer HLS solo puede cortar en keyframes:
+		// sin esto, el keyint por defecto del encoder (~10s en libx264)
+		// produce segmentos de 6-10s y el grid del manifest miente —
+		// seeks que aterrizan mal y huecos de buffer. La forma
+		// prev_forced_t (y no `gte(t,n_forced*6)`) es deliberada:
+		// con -copyts los PTS conservan el tiempo de la fuente, así que
+		// en un seek-restart `t` arranca en startSegment*6 y la forma
+		// n_forced degeneraría forzando keyframe en cada frame hasta
+		// alcanzar el offset. Los restarts siempre empiezan en múltiplo
+		// de 6 (manager.startSegment), así que anclar al primer frame
+		// forzado mantiene la malla alineada en ambos tipos de run.
+		// Funciona igual para libx264 y los encoders HW.
+		args = append(args,
+			"-force_key_frames", "expr:if(isnan(prev_forced_t),1,gte(t,prev_forced_t+6))",
+		)
 		args = append(args,
 			"-b:v", req.Profile.VideoBitrate,
 			"-maxrate", req.Profile.VideoBitrate,
@@ -502,12 +519,18 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 	// HLS output. `-start_number` is parameterised so seek-restart
 	// runs produce segments that line up with the indices the
 	// synthesized VOD manifest already advertised to the client.
+	// `temp_file`: ffmpeg escribe cada segmento como `*.tmp` y renombra
+	// al completarlo. Sin él, los .ts crecen in-place con su nombre
+	// final y el handler de segmentos (waitForFile acepta Size()>0)
+	// puede servir un TS truncado con Content-Length parcial — glitches
+	// y stalls de hls.js, sobre todo en la ventana post-seek. El
+	// transmux de IPTV ya usa este flag por la misma razón.
 	args = append(args,
 		"-f", "hls",
 		"-hls_time", "6",
 		"-hls_list_size", "0",
 		"-hls_segment_filename", segmentPattern,
-		"-hls_flags", "independent_segments",
+		"-hls_flags", "independent_segments+temp_file",
 		"-start_number", strconv.Itoa(req.StartSegmentNumber),
 		manifestPath,
 	)

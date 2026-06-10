@@ -1,7 +1,10 @@
 # ═══════════════════════════════════════════
 # Stage 1: Build frontend
 # ═══════════════════════════════════════════
-FROM node:22-alpine AS frontend
+# Bases pineadas por digest (tag + @sha256): el tag documenta la
+# intención, el digest hace el build reproducible y a prueba de
+# re-publicaciones del tag. Dependabot (ecosistema docker) los bumpea.
+FROM node:22-alpine@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920 AS frontend
 
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
@@ -15,7 +18,7 @@ RUN pnpm run build
 # ═══════════════════════════════════════════
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
-FROM golang:1.25.11-alpine AS backend
+FROM golang:1.25.11-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS backend
 # GOTOOLCHAIN=auto lets Go fetch the exact toolchain go.mod requires
 # if a future bump outpaces this base image. Plug-and-play for prod.
 ENV GOTOOLCHAIN=auto
@@ -77,7 +80,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Runtime:
 #   docker run --device /dev/dri:/dev/dri hubplay:hwaccel
 # ═══════════════════════════════════════════
-FROM ubuntu:24.04 AS hwaccel
+FROM ubuntu:24.04@sha256:786a8b558f7be160c6c8c4a54f9a57274f3b4fb1491cf65146521ae77ff1dc54 AS hwaccel
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
@@ -125,7 +128,7 @@ CMD ["--config", "/config/hubplay.yaml"]
 #
 #   docker build -t hubplay .
 # ═══════════════════════════════════════════
-FROM alpine:3.21
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 RUN apk add --no-cache \
     ffmpeg \
