@@ -276,6 +276,29 @@ expone `playingItem`; `ItemDetail` alimenta el player desde él. Test de
 regresión: "playing an episode from the season page feeds the player
 the episode's data".
 
+### ✅ PB-41 · Los subtítulos de TEXTO embebidos (SRT) no aparecían en el picker (reporte de usuario, 2026-06-10)
+`useSubtitleSelection.ts`. El picker fusionaba 3 orígenes: hls.js
+(que en el master sintético nunca trae renditions de subtítulos),
+federados y burn-in (solo PGS/DVDSUB/ASS). El comentario asumía que
+"SRT/WebVTT son HLS tracks normales" — falso en nuestro HLS. Resultado:
+un MKV con 3 pistas SUBRIP (que Jellyfin lista) mostraba solo
+"Ninguno + Buscar online". El backend YA tenía el extractor
+(`/stream/{id}/subtitles/{absIndex}` → WebVTT, índice absoluto).
+**Fix aplicado:** 4º carril "texto local" (ID base 30000, codecs
+subrip/srt/webvtt/vtt/mov_text/text) → `<track>` nativo con label
+`Local:` + `useExternalSubMode` generalizado por prefijo; exclusión
+mutua con hls/federado/externo/burn-in; estado keyed por itemId (se
+auto-invalida en auto-advance). Tests: `useSubtitleSelection.test.ts`
+(6 casos, el hook no tenía ninguno).
+
+### ✅ PB-42 · El menú del player salía como una tira vertical rota en móvil (reporte de usuario, 2026-06-10)
+`BottomSheet.tsx`. La sheet usaba `absolute inset-0`, pero se monta
+dentro del wrapper `relative` del BOTÓN que la abre — `inset-0` se
+anclaba al rectángulo del botón (~40px) y el menú de ajustes/pistas
+salía como una columna estrecha inutilizable. **Fix aplicado:**
+`fixed inset-0` (ancla al viewport; el overlay del player es
+fullscreen y ningún ancestro lleva transform).
+
 ## 🟢 Bajos
 
 - **PB-36** · Profile `"original"` fuerza `CopyAudio` pisando la decisión
