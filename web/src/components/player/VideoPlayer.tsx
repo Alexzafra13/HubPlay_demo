@@ -295,6 +295,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   } = useVideoPlaybackEvents({
     videoRef,
     itemId,
+    peerId,
     knownDuration,
     onProgress: updateTime,
     onEnded: handleVideoEnded,
@@ -373,7 +374,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onClose,
   });
 
-  useStreamSessionCleanup(itemId);
+  useStreamSessionCleanup(itemId, peerId);
 
   // ─── Saltos ±10s + marea visual (sello HubPlay) ──────────────────────────
   // El total ACUMULA mientras la marea siga viva (pulsos < 900ms):

@@ -1,7 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import Hls from "hls.js";
 import { destroyHlsInstance } from "./hlsLifecycle";
+
+// PB-16: techo de recuperaciones por origen de error. Sin límite, un
+// servidor caído dejaba a hls.js reintentando para siempre con el
+// overlay de "recovering…" parpadeando — el usuario solo tenía el
+// botón de cerrar. Los contadores se resetean en cada FRAG_LOADED
+// sano (la sesión volvió a la vida) y en cada cambio de source.
+const MAX_NETWORK_RECOVERIES = 3;
+const MAX_MEDIA_RECOVERIES = 3;
+// Ventana del patrón documentado de hls.js: si el segundo MEDIA_ERROR
+// llega a menos de 3s del anterior, recoverMediaError() solo no basta
+// — hay que intentar swapAudioCodec() antes del retry.
+const MEDIA_SWAP_WINDOW_MS = 3000;
 
 interface AudioTrack {
   id: number;
@@ -54,6 +67,22 @@ export function useHls({
   startPosition,
 }: UseHlsOptions): UseHlsReturn {
   const hlsRef = useRef<Hls | null>(null);
+  const { t } = useTranslation();
+  // Latest-ref para que un cambio de idioma no re-monte el player.
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
+  // Estado de recovery (PB-16). En ref — los handlers de hls.js viven
+  // fuera del ciclo de render. `recovering` distingue el toast
+  // transitorio del error terminal al limpiar en FRAG_LOADED.
+  const recoveryRef = useRef({
+    net: 0,
+    media: 0,
+    lastMediaErrorAt: 0,
+    recovering: false,
+  });
 
   const [error, setError] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
@@ -114,7 +143,6 @@ export function useHls({
     setCurrentQuality(id);
   }, []);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -136,6 +164,7 @@ export function useHls({
     setCurrentSubtitleTrack(-1);
     setCurrentQuality(-1);
     lastGoodTimeRef.current = 0;
+    recoveryRef.current = { net: 0, media: 0, lastMediaErrorAt: 0, recovering: false };
 
     // Tear down anything left from a prior attach. The cleanup
     // returned below runs first when deps change, but defending here
@@ -159,6 +188,29 @@ export function useHls({
           enableWorker: true,
           lowLatencyMode: false,
           startPosition: startPositionRef.current ?? -1,
+          // PB-34: el default de hls.js es back-buffer infinito — en
+          // una película de 2h a bitrate alto la memoria crece sin
+          // límite (móviles/TV boxes). 90s cubre cualquier seek-atrás
+          // razonable sin re-fetch.
+          backBufferLength: 90,
+          // PB-32: en transcode, un seek a zona no codificada obliga
+          // al servidor a reiniciar ffmpeg en frío — el primer byte
+          // del segmento puede tardar >10s en hardware modesto, y el
+          // TTFB default (10s) lo convertía en error fatal + ciclo de
+          // recovery para una situación normal. Solo se relaja el
+          // primer byte; el techo total de descarga queda igual.
+          ...(playbackMethod === "transcode"
+            ? {
+                fragLoadPolicy: {
+                  default: {
+                    maxTimeToFirstByteMs: 30000,
+                    maxLoadTimeMs: 120000,
+                    timeoutRetry: { maxNumRetry: 4, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+                    errorRetry: { maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+                  },
+                },
+              }
+            : {}),
           // Opt-in verbose logging. Set `window.__hp_debug_hls = true`
           // in DevTools BEFORE opening the player to dump every
           // hls.js decision (level switch, fragment load, error,
@@ -252,6 +304,7 @@ export function useHls({
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data.fatal) return;
+          const rec = recoveryRef.current;
           // Capture the best-known position BEFORE recovery so the
           // restart starts in the right place even if the recovery
           // path detaches the media element.
@@ -259,35 +312,65 @@ export function useHls({
             video.currentTime > 0.5 ? video.currentTime : lastGoodTimeRef.current;
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              setError("A network error occurred. Attempting to recover...");
+              // PB-16: acotado. Con el server caído, el retry infinito
+              // solo parpadeaba el overlay para siempre.
+              if (++rec.net > MAX_NETWORK_RECOVERIES) {
+                rec.recovering = false;
+                setError(tRef.current("player.errors.networkFatal"));
+                hls.destroy();
+                return;
+              }
+              rec.recovering = true;
+              setError(tRef.current("player.errors.networkRecovering"));
               // hls.startLoad(timeSec) tells the loader where to
               // resume; without it the loader picks the live edge
               // (irrelevant for VOD) or replays from the start.
               hls.startLoad(resumeFrom > 0 ? resumeFrom : -1);
               break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              setError("A media error occurred. Attempting to recover...");
+            case Hls.ErrorTypes.MEDIA_ERROR: {
+              if (++rec.media > MAX_MEDIA_RECOVERIES) {
+                rec.recovering = false;
+                setError(tRef.current("player.errors.mediaFatal"));
+                hls.destroy();
+                return;
+              }
+              // Patrón documentado de hls.js: un segundo MEDIA_ERROR a
+              // <3s del anterior significa que recoverMediaError() no
+              // bastó — swapAudioCodec() antes del siguiente intento.
+              const now = performance.now();
+              if (rec.media > 1 && now - rec.lastMediaErrorAt < MEDIA_SWAP_WINDOW_MS) {
+                hls.swapAudioCodec();
+              }
+              rec.lastMediaErrorAt = now;
+              rec.recovering = true;
+              setError(tRef.current("player.errors.mediaRecovering"));
               hls.recoverMediaError();
               // recoverMediaError preserves <video>.currentTime, but
-              // a follow-on detach (e.g. swapAudioCodec on the second
-              // pass) can zero it. The MEDIA_ATTACHED handler above
-              // will restore from lastGoodTimeRef once the new media
-              // source is wired up.
+              // a follow-on detach (swapAudioCodec arriba) can zero
+              // it. The MEDIA_ATTACHED handler above will restore
+              // from lastGoodTimeRef once the new media source is
+              // wired up.
               break;
+            }
             default:
-              setError(`Playback failed: ${data.details}`);
+              rec.recovering = false;
+              setError(tRef.current("player.errors.fatal", { details: data.details }));
               hls.destroy();
               break;
           }
         });
 
-        // Recovery worked — the next fragment loaded clean. Clear
-        // the "Attempting to recover…" toast so the player chrome
-        // doesn't keep nagging the user.
+        // Recovery worked — the next fragment loaded clean. Clear the
+        // transient toast and reset the budgets: a session that came
+        // back to life earns a fresh allowance for the NEXT incident.
         hls.on(Hls.Events.FRAG_LOADED, () => {
-          setError((prev) =>
-            prev && prev.includes("Attempting to recover") ? null : prev,
-          );
+          const rec = recoveryRef.current;
+          if (rec.recovering) {
+            rec.recovering = false;
+            rec.net = 0;
+            rec.media = 0;
+            setError(null);
+          }
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         // Native HLS path (Safari/iOS). Mutar `video.src` es la API
@@ -305,7 +388,7 @@ export function useHls({
           { once: true },
         );
       } else {
-        setError("HLS playback is not supported in this browser.");
+        setError(tRef.current("player.errors.hlsUnsupported"));
       }
     } else if (playbackMethod === "direct_play" && directUrl) {
       // Auth is handled via HTTP-only cookies for same-origin requests.
@@ -318,7 +401,7 @@ export function useHls({
         { once: true },
       );
     } else {
-      setError("No playback source available.");
+      setError(tRef.current("player.errors.noSource"));
     }
 
     // Capture the listener-removal handle in scope: the `onSettledTime`
@@ -351,15 +434,13 @@ export function useHls({
       // teardown/zapping del usuario, no es un fallo.
       const code = video.error?.code;
       if (code === 2) {
-        setError("A network error interrupted playback.");
+        setError(tRef.current("player.errors.videoNetwork"));
       } else if (code === 3) {
-        setError(
-          "The video could not be decoded — the file may be corrupt or use an unsupported codec.",
-        );
+        setError(tRef.current("player.errors.videoDecode"));
       } else if (code === 4) {
-        setError("This video format is not supported by your browser.");
+        setError(tRef.current("player.errors.videoFormat"));
       } else if (code !== 1) {
-        setError("Playback failed.");
+        setError(tRef.current("player.errors.videoUnknown"));
       }
     };
     video.addEventListener("error", onVideoError);
@@ -370,7 +451,6 @@ export function useHls({
       video.removeEventListener("timeupdate", settledListener);
     };
   }, [videoRef, masterPlaylistUrl, directUrl, playbackMethod, sessionToken]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   return {
     error,

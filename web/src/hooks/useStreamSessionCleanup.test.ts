@@ -71,4 +71,15 @@ describe("useStreamSessionCleanup", () => {
     expect(api.stopStreamSession).toHaveBeenCalledWith("item-new");
     expect(api.stopStreamSession).not.toHaveBeenCalledWith("item-old");
   });
+
+  // PB-17: en reproducción federada itemId es el id REMOTO — el DELETE
+  // local 404eaba. Sin endpoint de stop remoto, el reaper del peer es
+  // el mecanismo correcto: aquí no se dispara nada.
+  it("no llama a la API para items federados (peerId presente)", () => {
+    renderHook(() => useStreamSessionCleanup("remote-item", "peer-1"));
+
+    firePageHide();
+
+    expect(api.stopStreamSession).not.toHaveBeenCalled();
+  });
 });

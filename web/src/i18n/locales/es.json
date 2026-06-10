@@ -1664,7 +1664,20 @@
     },
     "skipIntro": "Saltar intro",
     "skipCredits": "Saltar créditos",
-    "skipRecap": "Saltar resumen"
+    "skipRecap": "Saltar resumen",
+    "errors": {
+      "networkRecovering": "Problema de conexión — reintentando…",
+      "networkFatal": "No se pudo recuperar la conexión con el servidor.",
+      "mediaRecovering": "Error de reproducción — recuperando…",
+      "mediaFatal": "Tu navegador no pudo decodificar este vídeo.",
+      "fatal": "La reproducción falló ({{details}}).",
+      "hlsUnsupported": "Este navegador no soporta reproducción HLS.",
+      "noSource": "No hay ninguna fuente de reproducción disponible.",
+      "videoNetwork": "Un error de red interrumpió la reproducción.",
+      "videoDecode": "No se pudo decodificar el vídeo — el fichero puede estar dañado o usar un códec no soportado.",
+      "videoFormat": "Este formato de vídeo no está soportado por tu navegador.",
+      "videoUnknown": "La reproducción falló."
+    }
   },
   "livetv": {
     "customize": {

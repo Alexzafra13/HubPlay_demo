@@ -79,6 +79,11 @@ function playbackReducer(
 interface UseVideoPlaybackEventsOptions {
   videoRef: RefObject<HTMLVideoElement | null>;
   itemId: string;
+  /** Set en reproducción federada: itemId es el id REMOTO en ese peer.
+   *  El marcado de "visto" debe ir a la tabla federation_progress
+   *  local — `markPlayed(remoteId)` contra el server local era un 404
+   *  silencioso y el item nunca quedaba visto (PB-17). */
+  peerId?: string;
   knownDuration?: number;
   /** Notificación a cada timeupdate (incluido durante seek). */
   onProgress?: (
@@ -117,6 +122,7 @@ interface UseVideoPlaybackEventsOptions {
 export function useVideoPlaybackEvents({
   videoRef,
   itemId,
+  peerId,
   knownDuration,
   onProgress,
   onEnded,
@@ -207,7 +213,23 @@ export function useVideoPlaybackEvents({
     const onEndedHandler = () => {
       dispatch({ type: "ended" });
       onSettledRef.current();
-      api.markPlayed(itemId).catch(() => {});
+      if (peerId) {
+        // Federado: completed=true en el progreso local del peer (el
+        // server remoto nunca sabe quién mira, solo que se streameó).
+        const durationTicks =
+          Number.isFinite(video.duration) && video.duration > 0
+            ? Math.floor(video.duration * 10_000_000)
+            : 0;
+        api
+          .updatePeerItemProgress(peerId, itemId, {
+            position_ticks: durationTicks,
+            duration_ticks: durationTicks,
+            completed: true,
+          })
+          .catch(() => {});
+      } else {
+        api.markPlayed(itemId).catch(() => {});
+      }
       onEndedRef.current?.();
     };
 
@@ -226,7 +248,7 @@ export function useVideoPlaybackEvents({
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("ended", onEndedHandler);
     };
-  }, [videoRef, itemId]);
+  }, [videoRef, itemId, peerId]);
 
   return state;
 }

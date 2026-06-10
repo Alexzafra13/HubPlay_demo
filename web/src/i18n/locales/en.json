@@ -1664,7 +1664,20 @@
     },
     "skipIntro": "Saltar intro",
     "skipCredits": "Saltar créditos",
-    "skipRecap": "Saltar resumen"
+    "skipRecap": "Saltar resumen",
+    "errors": {
+      "networkRecovering": "Connection problem — retrying…",
+      "networkFatal": "Could not reconnect to the server.",
+      "mediaRecovering": "Playback error — recovering…",
+      "mediaFatal": "Your browser could not decode this video.",
+      "fatal": "Playback failed ({{details}}).",
+      "hlsUnsupported": "This browser does not support HLS playback.",
+      "noSource": "No playback source available.",
+      "videoNetwork": "A network error interrupted playback.",
+      "videoDecode": "The video could not be decoded — the file may be corrupt or use an unsupported codec.",
+      "videoFormat": "This video format is not supported by your browser.",
+      "videoUnknown": "Playback failed."
+    }
   },
   "livetv": {
     "customize": {

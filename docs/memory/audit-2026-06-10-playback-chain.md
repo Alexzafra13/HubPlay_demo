@@ -166,7 +166,7 @@ mapeando `video.error.code` a mensajes específicos.
 
 ### Frontend player
 
-- **PB-16 · Recovery de hls.js sin contador ni backoff → bucle infinito.**
+- ✅ **PB-16 · Recovery de hls.js sin contador ni backoff → bucle infinito.**
   `useHls.ts:253-282`. `NETWORK_ERROR` fatal → `startLoad()` siempre, sin
   límite; `MEDIA_ERROR` → `recoverMediaError()` ilimitado y el
   `swapAudioCodec` del "segundo pase" que menciona el comentario **no
@@ -175,7 +175,7 @@ mapeando `video.error.code` a mensajes específicos.
   `useLiveHls.ts:227-230` — network sí está acotado a 3.) **Fix:**
   contadores con ventana + backoff, `swapAudioCodec` en el 2º media
   error, tras N intentos `destroy()` + error terminal traducido.
-- **PB-17 · Federación: `markPlayed` y cleanup de sesión apuntan al server local con id remoto.**
+- ✅ **PB-17 · Federación: `markPlayed` y cleanup de sesión apuntan al server local con id remoto.**
   `useVideoPlaybackEvents.ts:210` + `VideoPlayer.tsx:349`. Con `peerId`,
   `ended` hace `api.markPlayed(remoteId)` local → 404 tragado; y como
   `useProgressReporter` nunca envía `completed:true`, **un item federado
@@ -183,7 +183,7 @@ mapeando `video.error.code` a mensajes específicos.
   también va al server equivocado → la sesión de transcode del peer se
   filtra hasta el reaper. **Fix:** branch por `peerId` (ya existe
   `updatePeerItemProgress` con campo `completed`, `client.ts:2086-2095`).
-- **PB-18 · El progreso no se persiste al cerrar la pestaña.**
+- ✅ **PB-18 · El progreso no se persiste al cerrar la pestaña.**
   `useProgressReporter.ts`: guarda cada 10s (saltando paused/seeking) y en
   el cleanup de unmount de React — que no corre al cerrar pestaña. Se
   pierden hasta 10s siempre; "pauso → seekeo → cierro" pierde el seek
@@ -243,18 +243,18 @@ mapeando `video.error.code` a mensajes específicos.
 - **PB-31 · Stall de body sin watchdog** en raw-TS passthrough con
   transmux off (`proxy.go:632-653`); mitigado por hls.js/`-rw_timeout` en
   los paths default. Corregir el comentario engañoso de `proxy.go:85-95`.
-- **PB-32 · Timeouts default de hls.js en seek a zona no transcodificada**
+- ✅ **PB-32 · Timeouts default de hls.js en seek a zona no transcodificada**
   (`useHls.ts:158-177`): un restart en frío con HW lento supera
   `fragLoadingTimeOut` → cae en el bucle PB-16 para algo normal. **Fix:**
   subir timeouts cuando `playbackMethod === "transcode"`.
 - **PB-33 · Atajos de teclado a nivel window activos con modales abiertos**
   (`usePlayerKeyboard.ts:34-41`). **Fix:** prop `enabled` o check de
   `[role="dialog"]`.
-- **PB-34 · VOD sin tuning de buffers** (`useHls.ts:158-177`):
+- ✅ **PB-34 · VOD sin tuning de buffers** (`useHls.ts:158-177`):
   `backBufferLength` default = Infinity → memoria sin límite en sesiones
   largas (móviles/TV boxes). La config live está exquisita; la VOD no se
   revisó. **Fix:** `backBufferLength: 30-90`.
-- **PB-35 · Mensajes de error del player hardcodeados en inglés/técnicos**
+- ✅ **PB-35 · Mensajes de error del player hardcodeados en inglés/técnicos**
   ("Playback failed: bufferStallError") en una app i18n es/en
   (`useHls.ts:262-321`). **Fix:** claves i18n + tabla detalle→humano.
 
@@ -394,6 +394,6 @@ backend si se confirma que ningún cliente externo los usa.
 | **P1a ✅** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | hecho (2026-06-10) |
 | **P1b ✅** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | hecho (2026-06-10) |
 | **P1c** | IPTV | PB-14, PB-15, PB-27, PB-28 | 1 sesión |
-| **P1d** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-35 + tests useHls | 1 sesión |
+| **P1d ✅** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-34, PB-35 + tests useHls | hecho (2026-06-10) |
 | **P2** | VAAPI real + ABR/caps + surround | PB-5, PB-10, PB-22, PB-23 | 1-2 sesiones |
 | **P3** | E2E smoke + resto 🟡/🟢 | gaps de test 1-7, PB-26, PB-29–34, PB-36–39 | 1-2 sesiones |

@@ -13,6 +13,7 @@ vi.mock("@/api/client", () => ({
 describe("useProgressReporter", () => {
   let mockVideo: Partial<HTMLVideoElement>;
   let videoRef: RefObject<HTMLVideoElement | null>;
+  let videoListeners: Record<string, EventListener[]>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -30,6 +31,13 @@ describe("useProgressReporter", () => {
       writable: true,
       configurable: true,
     });
+    // PB-18: el hook engancha 'pause' al <video>; el mock registra los
+    // listeners para que los tests puedan dispararlos.
+    videoListeners = {};
+    mockVideo.addEventListener = vi.fn((ev: string, fn: EventListenerOrEventListenerObject) => {
+      (videoListeners[ev] ??= []).push(fn as EventListener);
+    }) as HTMLVideoElement["addEventListener"];
+    mockVideo.removeEventListener = vi.fn() as HTMLVideoElement["removeEventListener"];
     videoRef = { current: mockVideo as HTMLVideoElement };
   });
 
@@ -150,6 +158,40 @@ describe("useProgressReporter", () => {
 
     vi.clearAllMocks();
     unmount();
+
+    expect(api.updateProgress).not.toHaveBeenCalled();
+  });
+
+  // ─── PB-18: persistencia en pause y pagehide ───
+
+  it("guarda la posición al pausar (el interval salta las muestras en pausa)", () => {
+    renderHook(() => useProgressReporter(videoRef, "item-1"));
+
+    for (const fn of videoListeners["pause"] ?? []) fn(new Event("pause"));
+
+    expect(api.updateProgress).toHaveBeenCalledWith("item-1", {
+      position_ticks: Math.floor(42.5 * 10_000_000),
+    }, undefined);
+  });
+
+  it("guarda con keepalive en pagehide (cerrar pestaña no desmonta React)", () => {
+    renderHook(() => useProgressReporter(videoRef, "item-1"));
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(api.updateProgress).toHaveBeenCalledWith(
+      "item-1",
+      { position_ticks: Math.floor(42.5 * 10_000_000) },
+      { keepalive: true },
+    );
+  });
+
+  it("pause/pagehide tampoco persisten posiciones mid-seek", () => {
+    Object.defineProperty(mockVideo, "seeking", { value: true, configurable: true });
+    renderHook(() => useProgressReporter(videoRef, "item-1"));
+
+    for (const fn of videoListeners["pause"] ?? []) fn(new Event("pause"));
+    window.dispatchEvent(new Event("pagehide"));
 
     expect(api.updateProgress).not.toHaveBeenCalled();
   });

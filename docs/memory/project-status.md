@@ -70,9 +70,20 @@ global de 2 generaciones concurrentes), PB-13 (negative-cache
 (`os.Stat` antes de StartSession → 404 `media file` tipado, y antes de
 ServeFile en DirectPlay).
 
+**P1d ✅ hecha (2026-06-10):** PB-16 (recovery de hls.js acotado: 3
+reintentos por origen con reset en FRAG_LOADED sano, `swapAudioCodec`
+en el 2º media-error <3s — patrón hls.js — y error terminal con
+destroy), PB-17 (`ended` federado → `updatePeerItemProgress` con
+`completed:true`; el cleanup de sesión se salta en peers — el DELETE
+local 404eaba), PB-18 (progreso guardado en `pagehide` con keepalive y
+en `pause`), PB-32 (`fragLoadPolicy` con TTFB 30s solo en transcode —
+el restart frío de ffmpeg superaba el default de 10s), PB-34
+(`backBufferLength: 90` — el default era infinito), PB-35 (todos los
+errores del player vía i18n es/en, claves `player.errors.*`).
+
 | Prioridad | Tema | Items |
 |---|---|---|
-| **Alta** | **Playback P1 (c-d)** | IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
+| **Alta** | **Playback P1c — IPTV** | PB-14, 15, 27, 28 |
 | Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
 
 **Quick wins del player ✅ (2026-06-10):** botones ±10s con icono
