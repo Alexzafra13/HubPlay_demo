@@ -118,3 +118,102 @@ export function SettingsIcon() {
     </svg>
   );
 }
+
+// Salto ±10s — diseño propio: arco abierto con punta de flecha
+// integrada en el extremo y el "10" en numerales tabulares dentro,
+// en vez de la flecha circular cerrada de YouTube/Jellyfin. El arco
+// gira al pulsar (hp-skip-nudge-* en globals.css), aplicado por el
+// wrapper en PlayerControls.
+export function SkipBackIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7.75 4.64 A8.5 8.5 0 1 0 16.25 4.64"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <path
+        d="M7.75 4.64 l3.3 -0.85 M7.75 4.64 l0.85 3.3"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <text
+        x="12"
+        y="15"
+        textAnchor="middle"
+        fontSize="7.5"
+        fontWeight="700"
+        fill="currentColor"
+        style={{ fontVariantNumeric: "tabular-nums" }}
+      >
+        10
+      </text>
+    </svg>
+  );
+}
+
+export function SkipForwardIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M16.25 4.64 A8.5 8.5 0 1 1 7.75 4.64"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <path
+        d="M16.25 4.64 l-3.3 -0.85 M16.25 4.64 l-0.85 3.3"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <text
+        x="12"
+        y="15"
+        textAnchor="middle"
+        fontSize="7.5"
+        fontWeight="700"
+        fill="currentColor"
+        style={{ fontVariantNumeric: "tabular-nums" }}
+      >
+        10
+      </text>
+    </svg>
+  );
+}
+
+// Picture-in-Picture: marco con la mini-ventana ya "asentada" y
+// rellena — comunica el estado destino, no la acción abstracta.
+export function PiPIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M21 9V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <rect x="12" y="12" width="9" height="7" rx="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function HeartIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      className="size-5"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      aria-hidden="true"
+    >
+      <path
+        d="M12 20.3 4.9 13.2a4.9 4.9 0 0 1 0-6.9 4.87 4.87 0 0 1 6.9 0l.2.2.2-.2a4.87 4.87 0 0 1 6.9 0 4.9 4.9 0 0 1 0 6.9Z"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

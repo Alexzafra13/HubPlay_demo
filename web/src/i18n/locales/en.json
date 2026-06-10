@@ -376,7 +376,13 @@
       "directStream": "Direct stream",
       "transcode": "Transcoding",
       "transcodeWithProfile": "Transcoding · {{profile}}"
-    }
+    },
+    "skipBack": "Back 10 seconds",
+    "skipForward": "Forward 10 seconds",
+    "pip": "Picture in picture",
+    "favoriteAdd": "Add to favorites",
+    "favoriteRemove": "Remove from favorites",
+    "timeModeToggle": "Toggle total duration / remaining time"
   },
   "externalSubs": {
     "title": "Online subtitles",

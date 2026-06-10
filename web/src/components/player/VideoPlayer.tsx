@@ -17,8 +17,10 @@ import { usePlayerActions } from "@/hooks/usePlayerActions";
 import { useFullscreenSync } from "@/hooks/useFullscreenSync";
 import { useStartPositionSeek } from "@/hooks/useStartPositionSeek";
 import { useStreamSessionCleanup } from "@/hooks/useStreamSessionCleanup";
+import { useTapSeekGestures } from "@/hooks/useTapSeekGestures";
 import { useVideoElementSync } from "@/hooks/useVideoElementSync";
 import { PlayerControls } from "./PlayerControls";
+import { SeekTide } from "./SeekTide";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
 import { KeyboardHelpOverlay } from "./KeyboardHelpOverlay";
@@ -28,6 +30,14 @@ import { ErrorOverlay } from "./ErrorOverlay";
 import { useSubtitleSelection } from "@/hooks/useSubtitleSelection";
 import { useAudioSelection } from "@/hooks/useAudioSelection";
 import type { ExternalSubtitleResult } from "@/api/types";
+
+// Soporte PiP del navegador, evaluado una vez. Firefox estable y los
+// WebKit sin la API no lo exponen — sin soporte, el botón ni se monta
+// (en iOS el PiP de vídeo va por la UI nativa del sistema).
+const pipSupported =
+  typeof document !== "undefined" &&
+  "pictureInPictureEnabled" in document &&
+  document.pictureInPictureEnabled;
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -82,6 +92,10 @@ interface VideoPlayerProps {
    * (Plex/Netflix behaviour).
    */
   nextUp?: UpNextInfo;
+  /** Favorito del item en reproducción (corazón de la barra). Ausente
+   *  onToggleFavorite = superficie sin user-data (peer) → oculto. */
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
   /**
    * Chapter markers to render as ticks on the seek bar. Each entry's
    * `startSeconds` is the chapter start in seconds (the parent does
@@ -173,6 +187,8 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   logoUrl,
   backdropUrl,
   nextUp,
+  isFavorite,
+  onToggleFavorite,
   chapters,
   segments,
   audioStreams,
@@ -367,6 +383,58 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 
   useStreamSessionCleanup(itemId);
 
+  // ─── Saltos ±10s + marea visual (sello HubPlay) ──────────────────────────
+  // El total ACUMULA mientras la marea siga viva (pulsos < 900ms):
+  // tres toques rápidos leen "−30 s", no tres animaciones sueltas.
+  const [tide, setTide] = useState<{
+    dir: "back" | "fwd";
+    total: number;
+    seq: number;
+  } | null>(null);
+  const tideTimerRef = useRef<number | null>(null);
+
+  const skipBy = useCallback(
+    (delta: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const max = Number.isFinite(video.duration)
+        ? video.duration
+        : Number.POSITIVE_INFINITY;
+      handleSeek(Math.min(Math.max(0, video.currentTime + delta), max));
+      const dir: "back" | "fwd" = delta < 0 ? "back" : "fwd";
+      setTide((prev) =>
+        prev && prev.dir === dir
+          ? { dir, total: prev.total + Math.abs(delta), seq: prev.seq + 1 }
+          : { dir, total: Math.abs(delta), seq: (prev?.seq ?? 0) + 1 },
+      );
+      if (tideTimerRef.current !== null) {
+        window.clearTimeout(tideTimerRef.current);
+      }
+      tideTimerRef.current = window.setTimeout(() => {
+        tideTimerRef.current = null;
+        setTide(null);
+      }, 900);
+    },
+    [videoRef, handleSeek],
+  );
+
+  useEffect(
+    () => () => {
+      if (tideTimerRef.current !== null) {
+        window.clearTimeout(tideTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  // Doble-tap en los tercios laterales (móvil) → saltar. El tap simple
+  // conserva el toggle de controles; en desktop el click no cambia.
+  const { handleSurfaceClick } = useTapSeekGestures({
+    isMobile,
+    onSingleTap: handleSurfaceTap,
+    onZoneSkip: (dir) => skipBy(dir === "back" ? -10 : 10),
+  });
+
   // ─── Keyboard shortcuts ──────────────────────────────────────────────────
 
   usePlayerKeyboard({
@@ -479,7 +547,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       className="fixed inset-0 z-50 bg-black select-none"
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      onClick={handleSurfaceTap}
+      onClick={handleSurfaceClick}
       onKeyDown={(e) => {
         // Tap/Space sobre la superficie despierta los controles
         // (espejo del onClick). El resto de atajos los maneja
@@ -559,6 +627,11 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         />
       )}
 
+      {/* Marea de salto: feedback de los ±10s (botones y doble-tap). */}
+      {tide && (
+        <SeekTide dir={tide.dir} totalSeconds={tide.total} seq={tide.seq} />
+      )}
+
       {/* Capa de controles. Sólo intercepta clicks/teclas para que no
           burbujeen al video (que dispararía play/pause). role="toolbar"
           comunica que contiene controles agrupados al lector de pantalla. */}
@@ -608,6 +681,12 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
             else showControls();
           }}
           onSearchExternalSubs={openExternalSubsModal}
+          onSkip={skipBy}
+          onTogglePiP={
+            pipSupported ? () => void handleTogglePiP() : undefined
+          }
+          isFavorite={isFavorite}
+          onToggleFavorite={onToggleFavorite}
           trickplay={trickplay.available && trickplay.manifest ? {
             manifest: trickplay.manifest,
             spriteURL: trickplay.spriteURL,

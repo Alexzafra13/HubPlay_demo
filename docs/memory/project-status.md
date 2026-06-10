@@ -75,6 +75,16 @@ ServeFile en DirectPlay).
 | **Alta** | **Playback P1 (c-d)** | IPTV (PB-14, 15, 27, 28), player (PB-16..18, 32, 35) |
 | Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
 
+**Quick wins del player ✅ (2026-06-10):** botones ±10s con icono
+propio (arco que gira al pulsar), doble-tap por zonas en móvil
+(encadenable), feedback "SeekTide" de marca (marea teal + chevrons en
+cascada + total acumulado — componente `SeekTide.tsx`), botón PiP
+(gated por soporte del navegador), toggle total↔restante persistido en
+el contador, y corazón de favorito con latido + anillo de glow. Gap
+analysis vs Jellyfin/Plex hecho: faltan (producto, roadmap) Chromecast,
+SyncPlay, control remoto de sesiones, ajustes de apariencia/offset de
+subtítulos.
+
 **Roadmap secundario:** `audit-2026-06-08-production-readiness.md` (Fases
 3–5). Ninguna bloquea el uso plug-and-play básico.
 

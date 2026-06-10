@@ -376,7 +376,13 @@
       "directStream": "Stream directo",
       "transcode": "Transcodificando",
       "transcodeWithProfile": "Transcodificando · {{profile}}"
-    }
+    },
+    "skipBack": "Retroceder 10 segundos",
+    "skipForward": "Avanzar 10 segundos",
+    "pip": "Ventana flotante",
+    "favoriteAdd": "Añadir a favoritos",
+    "favoriteRemove": "Quitar de favoritos",
+    "timeModeToggle": "Alternar duración total / tiempo restante"
   },
   "externalSubs": {
     "title": "Subtítulos online",
