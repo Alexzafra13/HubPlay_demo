@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"hubplay/internal/procutil"
@@ -26,6 +27,37 @@ type Session struct {
 	cmd       *exec.Cmd
 	cancel    context.CancelFunc
 	done      chan struct{}
+	stderr    *stderrTail
+}
+
+// stderrTail conserva los últimos bytes del stderr de ffmpeg para que
+// una muerte inesperada del proceso sea diagnosticable en logs (el
+// "exit status 1" pelado no dice nada). Capado para que un transcode
+// de horas no acumule memoria.
+type stderrTail struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+const stderrTailCap = 4096
+
+func (t *stderrTail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > stderrTailCap {
+		t.buf = t.buf[len(t.buf)-stderrTailCap:]
+	}
+	return len(p), nil
+}
+
+func (t *stderrTail) String() string {
+	if t == nil {
+		return ""
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return string(t.buf)
 }
 
 // Transcoder spawnea procesos ffmpeg. Stateless: ni map ni mutex — cada
@@ -117,6 +149,9 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 	cmd.Cancel = func() error { return procutil.KillProcessGroup(cmd) }
 	cmd.WaitDelay = 10 * time.Second
 
+	tail := &stderrTail{}
+	cmd.Stderr = tail
+
 	session := &Session{
 		ID:        sessionID,
 		ItemID:    itemID,
@@ -126,6 +161,7 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 		cmd:       cmd,
 		cancel:    cancel,
 		done:      make(chan struct{}),
+		stderr:    tail,
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -136,8 +172,20 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 
 	go func() {
 		defer close(session.done)
-		if err := cmd.Wait(); err != nil {
+		err := cmd.Wait()
+		switch {
+		case err == nil:
+		case ctx.Err() != nil:
+			// Cancelación nuestra (Stop / timeout) — esperada.
 			t.logger.Debug("ffmpeg process ended", "session", sessionID, "error", err)
+		default:
+			// Muerte no pedida: el tail de stderr es lo único que
+			// distingue "fichero corrupto" de "encoder mal configurado".
+			t.logger.Warn("ffmpeg exited unexpectedly",
+				"session", sessionID,
+				"error", err,
+				"stderr_tail", tail.String(),
+			)
 		}
 	}()
 
@@ -179,6 +227,9 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 	cmd.Cancel = func() error { return procutil.KillProcessGroup(cmd) }
 	cmd.WaitDelay = 10 * time.Second
 
+	tail := &stderrTail{}
+	cmd.Stderr = tail
+
 	session := &Session{
 		ID:        sessionID,
 		ItemID:    itemID,
@@ -188,6 +239,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 		cmd:       cmd,
 		cancel:    cancel,
 		done:      make(chan struct{}),
+		stderr:    tail,
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -197,8 +249,17 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 
 	go func() {
 		defer close(session.done)
-		if err := cmd.Wait(); err != nil {
+		err := cmd.Wait()
+		switch {
+		case err == nil:
+		case ctx.Err() != nil:
 			t.logger.Debug("ffmpeg restart process ended", "session", sessionID, "error", err)
+		default:
+			t.logger.Warn("ffmpeg restart exited unexpectedly",
+				"session", sessionID,
+				"error", err,
+				"stderr_tail", tail.String(),
+			)
 		}
 	}()
 
@@ -439,10 +500,11 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 		// we keep this clean by gating per encoder).
 		args = append(args, "-c:v", encoder)
 		if encoder == "libx264" {
-			args = append(args,
-				"-preset", libx264Preset,
-				"-tune", "zerolatency",
-			)
+			// Sin `-tune zerolatency`: desactiva B-frames y lookahead,
+			// un knob de live streaming que aquí solo degradaba calidad
+			// por bit — en HLS VOD la latencia la dominan hls_time y el
+			// arranque de sesión, no el encoder. PB-21 (audit 2026-06-10).
+			args = append(args, "-preset", libx264Preset)
 		}
 		// Keyframe forzado en cada frontera de 6s. El manifest VOD
 		// sintético y el seek-restart asumen "segmento N cubre

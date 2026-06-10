@@ -123,7 +123,7 @@ func TestDecide_NilCaps_LegacyWebDefaults(t *testing.T) {
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectPlay {
 		t.Errorf("h264+aac+mp4 should DirectPlay under defaults: got %s", d.Method)
 	}
@@ -135,7 +135,7 @@ func TestDecide_NilCaps_LegacyWebDefaults(t *testing.T) {
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "eac3", IsDefault: true},
 	}
-	d2 := Decide(item2, streams2, nil, "")
+	d2 := Decide(item2, streams2, nil, "", -1)
 	if d2.Method != MethodTranscode {
 		t.Errorf("hevc+eac3+mkv should Transcode under defaults: got %s", d2.Method)
 	}
@@ -155,7 +155,7 @@ func TestDecide_DeclaredCaps_UnlockDirectPlay(t *testing.T) {
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "eac3", IsDefault: true},
 	}
-	d := Decide(item, streams, caps, "")
+	d := Decide(item, streams, caps, "", -1)
 	if d.Method != MethodDirectPlay {
 		t.Fatalf("declared HEVC+EAC3+MKV should DirectPlay: got %s container=%s", d.Method, d.Container)
 	}
@@ -179,7 +179,7 @@ func TestDecide_DeclaredCaps_RemuxToCompatibleContainer(t *testing.T) {
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
-	d := Decide(item, streams, caps, "")
+	d := Decide(item, streams, caps, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Fatalf("h264+aac+mkv with mp4-only client should DirectStream: got %s", d.Method)
 	}
@@ -258,7 +258,7 @@ func TestDecide_DeclaredCaps_TranscodeOnUnsupportedCodec(t *testing.T) {
 		{StreamType: "video", Codec: "av1", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
-	d := Decide(item, streams, caps, "")
+	d := Decide(item, streams, caps, "", -1)
 	if d.Method != MethodTranscode {
 		t.Errorf("undeclared av1 should Transcode: got %s", d.Method)
 	}

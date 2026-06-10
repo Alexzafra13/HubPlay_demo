@@ -1,6 +1,10 @@
 package stream
 
-import librarymodel "hubplay/internal/library/model"
+import (
+	"strings"
+
+	librarymodel "hubplay/internal/library/model"
+)
 
 // PlaybackMethod describe cómo el servidor entrega un media item.
 type PlaybackMethod string
@@ -32,31 +36,25 @@ type PlaybackDecision struct {
 }
 
 // remuxableContainers lista containers fuente que ffmpeg puede
-// reempaquetar en mp4 sin re-encode.
+// reempaquetar en mpegts sin re-encode. mp4/mov van incluidos: un MP4
+// h264+AC3 (rip típico) solo necesita remux + transcode de audio — sin
+// ellos en este set caía a re-encode completo del vídeo (CPU + pérdida
+// de calidad) sin necesidad. PB-7 (audit 2026-06-10).
 var remuxableContainers = map[string]bool{
 	"matroska": true,
 	"mkv":      true,
 	"avi":      true,
 	"mpegts":   true,
+	"mp4":      true,
+	"mov":      true,
+	"m4a":      true,
 }
 
 // DecideForceDirectPlay cortocircuita el waterfall y devuelve DirectPlay
 // sin importar las capabilities del cliente. Hook de política para el
 // flag admin `playback.force_direct_play`.
 func DecideForceDirectPlay(item *librarymodel.Item, streams []*librarymodel.MediaStream) PlaybackDecision {
-	var videoStream, audioStream *librarymodel.MediaStream
-	for _, s := range streams {
-		switch s.StreamType {
-		case "video":
-			if videoStream == nil || s.IsDefault {
-				videoStream = s
-			}
-		case "audio":
-			if audioStream == nil || s.IsDefault {
-				audioStream = s
-			}
-		}
-	}
+	videoStream, audioStream := pickStreams(streams, -1)
 	videoCodec := ""
 	if videoStream != nil {
 		videoCodec = videoStream.Codec
@@ -72,20 +70,15 @@ func DecideForceDirectPlay(item *librarymodel.Item, streams []*librarymodel.Medi
 // Decide analiza los media streams del item y devuelve una decisión de
 // playback. Waterfall: DirectPlay → DirectStream → Transcode.
 // `caps` nil = "cliente desconocido" → fallback a DefaultWebCapabilities.
-func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *Capabilities, requestedProfile string) PlaybackDecision {
-	var videoStream, audioStream *librarymodel.MediaStream
-	for _, s := range streams {
-		switch s.StreamType {
-		case "video":
-			if videoStream == nil || s.IsDefault {
-				videoStream = s
-			}
-		case "audio":
-			if audioStream == nil || s.IsDefault {
-				audioStream = s
-			}
-		}
-	}
+//
+// audioStreamIndex es la pista de audio seleccionada (0-based,
+// per-type); -1 = default del fichero. La decisión DEBE evaluarse
+// contra la pista que va a sonar: con un MKV de default AAC + pista
+// DTS, el usuario que cambiaba a DTS recibía DirectStream con
+// CopyAudio=true → DTS copiado al TS → vídeo mudo en el navegador.
+// PB-6 (audit 2026-06-10).
+func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *Capabilities, requestedProfile string, audioStreamIndex int) PlaybackDecision {
+	videoStream, audioStream := pickStreams(streams, audioStreamIndex)
 
 	// Sin video stream — no se puede reproducir
 	if videoStream == nil {
@@ -93,7 +86,7 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 	}
 
 	eff := effectiveCapabilities(caps)
-	videoOK := eff.VideoCodecs[videoStream.Codec]
+	videoOK := eff.VideoCodecs[videoStream.Codec] && videoProfileCompatible(videoStream)
 	audioOK := audioStream == nil || eff.AudioCodecs[audioStream.Codec]
 	containerOK := containerOKForClient(item.Container, eff.Containers, videoStream, audioStream)
 
@@ -148,6 +141,55 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 		CopyAudio:  false,
 		ToneMap:    !hdrOK,
 	}
+}
+
+// pickStreams selecciona el video stream (default o primero) y la pista
+// de audio efectiva: la del índice pedido (0-based, contando solo
+// audio) o, con índice negativo / fuera de rango, la default del
+// fichero — fuera de rango cae al default por robustez; la validación
+// dura contra el índice vive en el Manager antes de llegar aquí.
+func pickStreams(streams []*librarymodel.MediaStream, audioStreamIndex int) (video, audio *librarymodel.MediaStream) {
+	var defaultAudio *librarymodel.MediaStream
+	audioOrd := 0
+	for _, s := range streams {
+		switch s.StreamType {
+		case "video":
+			if video == nil || s.IsDefault {
+				video = s
+			}
+		case "audio":
+			if defaultAudio == nil || s.IsDefault {
+				defaultAudio = s
+			}
+			if audioOrd == audioStreamIndex {
+				audio = s
+			}
+			audioOrd++
+		}
+	}
+	if audio == nil {
+		audio = defaultAudio
+	}
+	return video, audio
+}
+
+// videoProfileCompatible gatea los perfiles h264 que ningún navegador
+// decodifica: High 10 ("Hi10P", omnipresente en anime), High 4:2:2 y
+// High 4:4:4 Predictive. Sin este gate, "h264" matcheaba las caps del
+// cliente por nombre y el fichero salía DirectPlay → pantalla
+// rota/verde garantizada. HEVC Main 10 NO se gatea a propósito: todo
+// decoder hardware de HEVC soporta Main 10 (es el perfil dominante) y
+// forzar transcode aquí quemaría CPU en los 4K que hoy reproducen bien.
+// Perfil vacío (probe antiguo, pre-captura) = asumir compatible.
+// PB-8 (audit 2026-06-10).
+func videoProfileCompatible(s *librarymodel.MediaStream) bool {
+	if s.Codec != "h264" || s.Profile == "" {
+		return true
+	}
+	p := strings.ToLower(s.Profile)
+	return !strings.Contains(p, "10") &&
+		!strings.Contains(p, "4:2:2") &&
+		!strings.Contains(p, "4:4:4")
 }
 
 // hdrFormatInSet compara el label HDR de la fuente (HDR10/HLG/DolbyVision)

@@ -14,7 +14,7 @@ func TestDecide_DirectPlay_MP4_H264_AAC(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectPlay {
 		t.Errorf("expected DirectPlay, got %s", d.Method)
 	}
@@ -28,7 +28,7 @@ func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Errorf("expected DirectStream, got %s", d.Method)
 	}
@@ -51,7 +51,7 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_AC3(t *testing.T) {
 		{StreamType: "audio", Codec: "ac3", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Errorf("expected DirectStream (video copy + audio reencode), got %s", d.Method)
 	}
@@ -71,7 +71,7 @@ func TestDecide_Transcode_HEVC(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode, got %s", d.Method)
 	}
@@ -87,7 +87,7 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Errorf("expected DirectStream (video copy + audio reencode), got %s", d.Method)
 	}
@@ -113,7 +113,7 @@ func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
 		{StreamType: "audio", Codec: "ac3", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Fatalf("h264 + AC3 in 'matroska,webm' must DirectStream (video copy), got %s", d.Method)
 	}
@@ -137,7 +137,7 @@ func TestDecide_MKV_WebmAlias_H264_AAC_MustNotDirectPlay(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Fatalf("h264 + AAC in 'matroska,webm' must DirectStream (remux), got %s", d.Method)
 	}
@@ -159,7 +159,7 @@ func TestDecide_DirectPlay_WebmAlias_VP9_Opus(t *testing.T) {
 		{StreamType: "audio", Codec: "opus", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectPlay {
 		t.Errorf("real webm (vp9+opus) reported as 'matroska,webm' must DirectPlay, got %s", d.Method)
 	}
@@ -173,7 +173,7 @@ func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
 		{StreamType: "audio", Codec: "opus", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodDirectPlay {
 		t.Errorf("expected DirectPlay, got %s", d.Method)
 	}
@@ -187,7 +187,7 @@ func TestDecide_RequestedProfile(t *testing.T) {
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
 
-	d := Decide(item, streams, nil, "480p")
+	d := Decide(item, streams, nil, "480p", -1)
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode, got %s", d.Method)
 	}
@@ -199,7 +199,7 @@ func TestDecide_RequestedProfile(t *testing.T) {
 func TestDecide_NoStreams(t *testing.T) {
 	t.Parallel()
 	item := &librarymodel.Item{Container: "mp4"}
-	d := Decide(item, nil, nil, "")
+	d := Decide(item, nil, nil, "", -1)
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode for no streams, got %s", d.Method)
 	}
@@ -213,7 +213,7 @@ func TestDecide_AudioOnly(t *testing.T) {
 	}
 
 	// No video stream → falls back to transcode
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode for audio-only, got %s", d.Method)
 	}
@@ -294,7 +294,7 @@ func TestDecide_HDR_TonemapsForDefaultWebClient(t *testing.T) {
 				{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: tc.hdrType},
 				{StreamType: "audio", Codec: "aac", IsDefault: true},
 			}
-			d := Decide(item, streams, nil, "")
+			d := Decide(item, streams, nil, "", -1)
 			if d.Method != MethodTranscode {
 				t.Fatalf("Method = %s, want Transcode (HDR source + SDR client)", d.Method)
 			}
@@ -322,7 +322,7 @@ func TestDecide_HDR_DirectStreamsWhenClientDeclaresHDR(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 	caps := &Capabilities{HDRFormats: map[string]bool{"hdr10": true}}
-	d := Decide(item, streams, caps, "")
+	d := Decide(item, streams, caps, "", -1)
 	if d.Method != MethodDirectStream {
 		t.Fatalf("Method = %s, want DirectStream (HDR client matches HDR source)", d.Method)
 	}
@@ -346,7 +346,7 @@ func TestDecide_HDR_DolbyVisionLongAlias(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 	caps := &Capabilities{HDRFormats: map[string]bool{"dolbyvision": true}}
-	d := Decide(item, streams, caps, "")
+	d := Decide(item, streams, caps, "", -1)
 	if d.Method == MethodTranscode || d.ToneMap {
 		t.Errorf("DolbyVision client (long alias) should not tonemap; got Method=%s ToneMap=%v", d.Method, d.ToneMap)
 	}
@@ -363,7 +363,7 @@ func TestDecide_HDR_HEVCAlsoTonemaps(t *testing.T) {
 		{StreamType: "video", Codec: "hevc", IsDefault: true, HDRType: "HDR10"},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.Method != MethodTranscode {
 		t.Fatalf("Method = %s, want Transcode", d.Method)
 	}
@@ -383,7 +383,7 @@ func TestDecide_SDR_NeverTonemaps(t *testing.T) {
 		{StreamType: "video", Codec: "hevc", IsDefault: true}, // HDRType deliberately empty
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
-	d := Decide(item, streams, nil, "")
+	d := Decide(item, streams, nil, "", -1)
 	if d.ToneMap {
 		t.Error("ToneMap = true on SDR source, want false")
 	}
@@ -408,5 +408,135 @@ func TestDecideForceDirectPlay_AudioOnlyItemEmptyVideoCodec(t *testing.T) {
 	}
 	if d.AudioCodec != "aac" {
 		t.Errorf("AudioCodec = %q, want aac", d.AudioCodec)
+	}
+}
+
+// ─── PB-6: la decisión debe evaluar la pista de audio SELECCIONADA ───
+
+// MKV con default AAC + pista DTS: al seleccionar la DTS (índice 1) la
+// decisión debe re-encodear el audio. Antes evaluaba solo la default →
+// DirectStream con CopyAudio=true → DTS copiado al TS → vídeo mudo.
+func TestDecide_SelectedAudioTrack_DTS_ForcesAudioReencode(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+		{StreamType: "audio", Codec: "dts"},
+	}
+
+	d := Decide(item, streams, nil, "", 1)
+	if d.Method != MethodDirectStream {
+		t.Fatalf("expected DirectStream, got %s", d.Method)
+	}
+	if d.CopyAudio {
+		t.Error("expected CopyAudio=false: la pista seleccionada es DTS, no la default AAC")
+	}
+	if d.AudioCodec != "dts" {
+		t.Errorf("expected AudioCodec=dts (la pista seleccionada), got %q", d.AudioCodec)
+	}
+}
+
+// Caso inverso: default DTS + selección de la pista AAC → el audio se
+// puede copiar (antes re-encodeaba sin necesidad).
+func TestDecide_SelectedAudioTrack_AAC_AllowsAudioCopy(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "dts", IsDefault: true},
+		{StreamType: "audio", Codec: "aac"},
+	}
+
+	d := Decide(item, streams, nil, "", 1)
+	if d.Method != MethodDirectStream {
+		t.Fatalf("expected DirectStream, got %s", d.Method)
+	}
+	if !d.CopyAudio {
+		t.Error("expected CopyAudio=true: la pista seleccionada es AAC compatible")
+	}
+}
+
+// Índice fuera de rango → fallback a la default (la validación dura
+// vive en el Manager; Decide es robusto por sí mismo).
+func TestDecide_AudioIndexOutOfRange_FallsBackToDefault(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "", 7)
+	if d.AudioCodec != "aac" {
+		t.Errorf("expected fallback to default aac, got %q", d.AudioCodec)
+	}
+}
+
+// ─── PB-7: mp4/mov son remuxeables ───
+
+// MP4 h264+AC3 (rip típico): solo el audio es incompatible. Antes caía
+// a re-encode completo del vídeo porque mp4 no estaba en
+// remuxableContainers; basta DirectStream con -c:v copy.
+func TestDecide_DirectStream_MP4_H264_AC3(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "mov,mp4,m4a,3gp,3g2,mj2"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "ac3", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "", -1)
+	if d.Method != MethodDirectStream {
+		t.Fatalf("mp4 h264+ac3 must DirectStream (remux + audio reencode), got %s", d.Method)
+	}
+	if !d.CopyVideo {
+		t.Error("expected CopyVideo=true")
+	}
+	if d.CopyAudio {
+		t.Error("expected CopyAudio=false (ac3)")
+	}
+}
+
+// ─── PB-8: perfiles h264 que ningún navegador decodifica ───
+
+// h264 High 10 (Hi10P, anime): el nombre del codec matchea las caps
+// pero NINGÚN navegador lo decodifica. Debe forzar Transcode, nunca
+// DirectPlay/DirectStream (copiar Hi10P al TS tampoco ayuda).
+func TestDecide_H264High10_ForcesTranscode(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", Profile: "High 10", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "", -1)
+	if d.Method != MethodTranscode {
+		t.Fatalf("h264 High 10 must Transcode, got %s", d.Method)
+	}
+	if d.CopyVideo {
+		t.Error("expected CopyVideo=false (Hi10P necesita re-encode)")
+	}
+}
+
+// HEVC Main 10 NO se gatea: todo decoder HW de HEVC soporta Main 10 —
+// un cliente que declara hevc debe seguir haciendo direct play.
+func TestDecide_HEVCMain10_NotGatedWhenCapsDeclareHEVC(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "mp4"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "hevc", Profile: "Main 10", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+	caps := &Capabilities{
+		VideoCodecs: map[string]bool{"hevc": true, "h264": true},
+		AudioCodecs: map[string]bool{"aac": true},
+		Containers:  map[string]bool{"mp4": true},
+	}
+
+	d := Decide(item, streams, caps, "", -1)
+	if d.Method != MethodDirectPlay {
+		t.Errorf("hevc Main 10 with hevc-capable client must DirectPlay, got %s", d.Method)
 	}
 }

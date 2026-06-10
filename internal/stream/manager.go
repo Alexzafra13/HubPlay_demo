@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -343,11 +344,16 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
+	// Índice de audio explícito fuera de rango → 400, no spinner.
+	if err := validateAudioStreamIndex(mediaStreams, audioStreamIndex); err != nil {
+		return nil, err
+	}
+
 	// Resolver burn-in spec desde el índice pedido.
 	burnSub := m.resolveBurnSubtitle(mediaStreams, burnSubIndex, item.Path)
 
 	// Decidir método de playback.
-	decision := m.decidePlayback(ctx, item, mediaStreams, caps, profileName, burnSub)
+	decision := m.decidePlayback(ctx, item, mediaStreams, caps, profileName, audioStreamIndex, burnSub)
 
 	// DirectPlay no necesita sesión de transcode.
 	if decision.Method == MethodDirectPlay {
@@ -425,24 +431,49 @@ func (m *Manager) resolveBurnSubtitle(mediaStreams []*librarymodel.MediaStream, 
 
 // decidePlayback ejecuta el waterfall DirectPlay → DirectStream → Transcode
 // y aplica el override force_direct_play y el upgrade por burn-in.
-func (m *Manager) decidePlayback(ctx context.Context, item *librarymodel.Item, mediaStreams []*librarymodel.MediaStream, caps *Capabilities, profileName string, burnSub *BurnSubtitleSpec) PlaybackDecision {
+// audioStreamIndex viaja hasta Decide para que la compatibilidad de
+// audio se evalúe contra la pista que va a sonar, no la default (PB-6).
+func (m *Manager) decidePlayback(ctx context.Context, item *librarymodel.Item, mediaStreams []*librarymodel.MediaStream, caps *Capabilities, profileName string, audioStreamIndex int, burnSub *BurnSubtitleSpec) PlaybackDecision {
 	var decision PlaybackDecision
 	if m.shouldForceDirectPlay(ctx) {
 		decision = DecideForceDirectPlay(item, mediaStreams)
 	} else {
-		decision = Decide(item, mediaStreams, caps, profileName)
+		decision = Decide(item, mediaStreams, caps, profileName, audioStreamIndex)
 	}
 
 	// Burn-in necesita decoded frames. Si el waterfall eligió
 	// DirectPlay/DirectStream, upgrade a Transcode completo.
 	if burnSub != nil {
 		if decision.Method == MethodDirectPlay {
-			decision = Decide(item, mediaStreams, caps, profileName)
+			decision = Decide(item, mediaStreams, caps, profileName, audioStreamIndex)
 		}
 		decision.Method = MethodTranscode
 		decision.CopyVideo = false
 	}
 	return decision
+}
+
+// validateAudioStreamIndex rechaza índices de audio fuera de rango
+// ANTES de llegar a ffmpeg. `-map 0:a:N` con N inexistente (sin sufijo
+// `?` — la selección explícita debe ser fatal, no silenciosa) mata
+// ffmpeg nada más arrancar y el cliente solo vería un spinner eterno
+// de 404s. Mejor un 400 con mensaje. PB-20 (audit 2026-06-10).
+func validateAudioStreamIndex(streams []*librarymodel.MediaStream, idx int) error {
+	if idx < 0 {
+		return nil
+	}
+	var n int
+	for _, s := range streams {
+		if s.StreamType == "audio" {
+			n++
+		}
+	}
+	if idx >= n {
+		return domain.NewValidation(map[string]string{
+			"audio": fmt.Sprintf("audio stream index %d out of range (item has %d audio streams)", idx, n),
+		})
+	}
+	return nil
 }
 
 // buildDirectPlaySession construye una ManagedSession sin sesión de
@@ -520,7 +551,64 @@ func (m *Manager) spawnTranscodeSession(key, userID, itemID, inputPath string, a
 		"profile", decision.Profile.Name,
 	)
 
+	// Watchdog de arranque muerto: si ffmpeg sale en los primeros
+	// segundos sin producir nada (fichero corrupto, encoder roto), la
+	// sesión quedaba registrada como zombie y el cliente solo veía un
+	// spinner de 404s + restarts inútiles hasta el idle-reap.
+	go m.watchEarlyExit(key, ms, session)
+
 	return ms, nil
+}
+
+// earlyExitWindow acota cuánto observa watchEarlyExit el proceso recién
+// arrancado. Un arranque sano produce su primer segmento en mucho menos.
+const earlyExitWindow = 15 * time.Second
+
+// watchEarlyExit espera la muerte temprana del ffmpeg recién spawneado
+// y desregistra la sesión si murió sin producir salida. Pasada la
+// ventana (o en shutdown) se retira — las muertes tardías las cubren
+// el seek-restart del handler y el idle-reap.
+func (m *Manager) watchEarlyExit(key string, ms *ManagedSession, s *Session) {
+	select {
+	case <-s.done:
+	case <-time.After(earlyExitWindow):
+		return
+	case <-m.stopClean:
+		return
+	}
+	m.reapDeadStart(key, ms, s)
+}
+
+// reapDeadStart desregistra una sesión cuyo ffmpeg murió al arrancar
+// sin producir ningún segmento. PB-20 (audit 2026-06-10). Separado de
+// watchEarlyExit para poder testearlo de forma determinista.
+func (m *Manager) reapDeadStart(key string, ms *ManagedSession, s *Session) {
+	// Un seek-restart reemplaza ms.Session y cancela el proceso viejo
+	// (su done se cierra) — eso no es una muerte. Igual si StopSession
+	// ya retiró la entrada o la key la ocupa otra sesión nueva.
+	m.mu.Lock()
+	cur, ok := m.sessions[key]
+	same := ok && cur == ms && ms.Session == s
+	m.mu.Unlock()
+	if !same {
+		return
+	}
+	// Si produjo al menos un segmento fue contenido corto legítimo
+	// (EOF natural): el manifest sintético sigue siendo servible.
+	// Los parciales `.ts.tmp` de temp_file no cuentan — a propósito.
+	if entries, err := os.ReadDir(s.OutputDir); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".ts") {
+				return
+			}
+		}
+	}
+	m.logger.Warn("ffmpeg died at startup without producing output; deregistering session",
+		"key", key,
+		"item", ms.ItemID,
+	)
+	m.metrics.TranscodeFailed()
+	m.StopSession(key)
 }
 
 // Constantes de coalesce para RestartSessionAt. 2 segmentos Y 300ms
@@ -613,12 +701,9 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		return fmt.Errorf("restart transcode at segment %d: %w", segmentIndex, err)
 	}
 
-	m.mu.Lock()
-	ms.Session = newSession
-	ms.LastAccessed = m.now()
-	ms.LastRestartSegment = segmentIndex
-	ms.LastRestartTime = m.now()
-	m.mu.Unlock()
+	if !m.reattachRestartedSession(key, ms, newSession, segmentIndex) {
+		return ErrSessionNotFound
+	}
 
 	m.logger.Info("session restarted at segment",
 		"key", key,
@@ -626,6 +711,35 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		"start_time", startTime,
 	)
 	return nil
+}
+
+// reattachRestartedSession publica la sesión recién spawneada por un
+// seek-restart bajo m.mu, verificando que la entrada del map siga
+// siendo la misma: StopSession / cleanupIdle / Shutdown no adquieren
+// restartMu, así que pueden retirar (o reemplazar) la sesión mientras
+// RestartAt spawneaba el ffmpeg nuevo. Sin este re-check, ese proceso
+// quedaba fuera del map y nadie lo paraba hasta el timeout de 4h —
+// un transcode huérfano comiéndose la CPU. Devuelve false (y mata el
+// proceso nuevo) si la sesión ya no está registrada. PB-9
+// (audit 2026-06-10).
+func (m *Manager) reattachRestartedSession(key string, ms *ManagedSession, newSession *Session, segmentIndex int) bool {
+	m.mu.Lock()
+	cur, ok := m.sessions[key]
+	if !ok || cur != ms {
+		m.mu.Unlock()
+		newSession.Stop()
+		m.logger.Warn("session stopped during seek-restart; killed orphaned ffmpeg",
+			"key", key,
+			"segment", segmentIndex,
+		)
+		return false
+	}
+	ms.Session = newSession
+	ms.LastAccessed = m.now()
+	ms.LastRestartSegment = segmentIndex
+	ms.LastRestartTime = m.now()
+	m.mu.Unlock()
+	return true
 }
 
 // TouchSession actualiza el tiempo de último acceso de una sesión.

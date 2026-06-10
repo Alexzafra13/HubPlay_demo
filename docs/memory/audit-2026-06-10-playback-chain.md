@@ -85,27 +85,27 @@ mapeando `video.error.code` a mensajes específicos.
   (`autotune.go:28`). NVENC sí funciona. **Fix:** path VAAPI dedicado
   (init_hw_device + hwupload, tonemap software antes del upload) y
   visibilizar el fallback en el panel admin.
-- **PB-6 · La decisión ignora la pista de audio seleccionada.**
+- ✅ **PB-6 · La decisión ignora la pista de audio seleccionada.**
   `decision.go:84-97` + `manager.go:428-446`. `Decide` evalúa `audioOK`
   solo contra la pista default; `AudioStreamIndex` no le llega. MKV con
   default AAC + pista DTS: el usuario cambia a DTS → DirectStream con
   `CopyAudio` → DTS dentro del TS → **vídeo mudo**. Inverso: re-encode
   innecesario. **Fix:** pasar `AudioStreamIndex` a `Decide` y evaluar
   contra la pista efectiva.
-- **PB-7 · `mp4`/`mov` no están en `remuxableContainers`.**
+- ✅ **PB-7 · `mp4`/`mov` no están en `remuxableContainers`.**
   `decision.go:36-41,127`. MP4 h264+AC3 (rip típico): falla `audioOK`, y
   el gate de DirectStream exige container remuxeable → **re-encode
   completo del vídeo** (CPU + pérdida de calidad + 720p) cuando bastaba
   `-c:v copy` + transcode de audio. **Fix:** añadir mp4/mov/m4a al set +
   test `TestDecide_DirectStream_MP4_H264_AC3`.
-- **PB-8 · Perfil del códec ignorado: Hi10P/HEVC Main10 → DirectPlay imposible.**
+- ✅ **PB-8 · Perfil del códec ignorado: Hi10P/HEVC Main10 → DirectPlay imposible.**
   `decision.go:96` (el probe captura `Profile` en `probe.go:127` y se
   persiste — simplemente no se consulta). h264 High 10 (omnipresente en
   anime) no lo decodifica ningún navegador → pantalla rota. **Fix:** gate
   "profile contiene '10' → transcode salvo cap explícita". Capturar
   `pix_fmt`/`bits_per_raw_sample` daría señal más fiable. *(Encontrado
   por 2 sweeps.)*
-- **PB-9 · ffmpeg huérfano por race StopSession/cleanupIdle ↔ RestartSessionAt.**
+- ✅ **PB-9 · ffmpeg huérfano por race StopSession/cleanupIdle ↔ RestartSessionAt.**
   `manager.go:547-628` vs `:660-682,812-836`. El restart solo sostiene
   `restartMu`; un Stop concurrente (usuario cierra el player durante un
   seek, o tick de idle-reap) borra la key y mata el ffmpeg viejo, y el
@@ -200,12 +200,12 @@ mapeando `video.error.code` a mensajes específicos.
   handler espera 2s y **reinicia ffmpeg** perdiendo el progreso; a 20
   restarts/min entra el rate-limit → 429 → stall. **Fix:** mirar el
   último segmento en disco; si lo pedido está ≤3-4 por delante, esperar.
-- **PB-20 · Sesión zombie con ffmpeg muerto = spinner sin error; `?audio=N` fuera de rango lo provoca.**
+- ✅ **PB-20 · Sesión zombie con ffmpeg muerto = spinner sin error; `?audio=N` fuera de rango lo provoca.**
   `manager.go:486-523` + `transcode.go:402-407` (`-map 0:a:N` sin sufijo
   `?`) + `stream.go:264-269` (índice sin validar). **Fix:** validar
   índices contra `mediaStreams` (400) + observar `session.done` y
   desregistrar con error tipado.
-- **PB-21 · `-tune zerolatency` en VOD** degrada calidad por bit sin
+- ✅ **PB-21 · `-tune zerolatency` en VOD** degrada calidad por bit sin
   ganar latencia (`transcode.go:441-446`). Quitarlo del path VOD.
 - **PB-22 · Downmix forzado `-ac 2`** en todo transcode de audio
   (`transcode.go:495-499`): las fuentes 5.1/7.1 pierden surround aunque el
@@ -342,7 +342,7 @@ the episode's data".
 | Fase | Tema | Items | Coste |
 |---|---|---|---|
 | **P0 ✅** | Correctness que rompe playback común | PB-1, PB-2, PB-3, PB-4 + tests que los fijan | hecho (2026-06-10) |
-| **P1a** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | 1 sesión |
+| **P1a ✅** | Decisión/transcode | PB-6, PB-7, PB-8, PB-9, PB-20, PB-21 | hecho (2026-06-10) |
 | **P1b** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | 1 sesión |
 | **P1c** | IPTV | PB-14, PB-15, PB-27, PB-28 | 1 sesión |
 | **P1d** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-35 + tests useHls | 1 sesión |

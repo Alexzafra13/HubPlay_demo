@@ -139,6 +139,15 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	}
 
 	caps := stream.CapabilitiesFromRequest(r)
+	// ?audio=N: la decisión depende de la pista que va a sonar (una
+	// pista DTS no-default fuerza transcode de audio aunque la default
+	// sea AAC). Mismo parseo que MasterPlaylist; ausente → -1 (default).
+	audioStreamIndex := -1
+	if a := r.URL.Query().Get("audio"); a != "" {
+		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+			audioStreamIndex = v
+		}
+	}
 	// Honour the runtime `playback.force_direct_play` admin toggle —
 	// the /info response is what drives the player's pill, so the
 	// method shown to the user must match what StartSession will
@@ -154,7 +163,7 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if decision.Method == "" {
-		decision = stream.Decide(item, mediaStreams, caps, "")
+		decision = stream.Decide(item, mediaStreams, caps, "", audioStreamIndex)
 	}
 	profiles := stream.ProfileNames()
 
