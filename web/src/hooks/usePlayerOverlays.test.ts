@@ -1,15 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { usePlayerOverlays } from "./usePlayerOverlays";
-import type { ExternalSubtitleResult } from "@/api/types";
 
-const sampleSub: ExternalSubtitleResult = {
-  source: "opensubtitles",
-  file_id: "fid-1",
-  language: "es",
-  format: "srt",
-  score: 0.9,
-};
 
 describe("usePlayerOverlays", () => {
   it("starts with all overlays closed", () => {
@@ -18,8 +10,6 @@ describe("usePlayerOverlays", () => {
     );
 
     expect(result.current.upNextActive).toBe(false);
-    expect(result.current.externalSubsModalOpen).toBe(false);
-    expect(result.current.activeExternalSub).toBeNull();
     expect(result.current.showHelp).toBe(false);
   });
 
@@ -88,42 +78,6 @@ describe("usePlayerOverlays", () => {
     expect(onEndedCallback).not.toHaveBeenCalled();
   });
 
-  it("openExternalSubsModal and closeExternalSubsModal toggle the flag", () => {
-    const { result } = renderHook(() =>
-      usePlayerOverlays({ itemId: "i1", hasNextUp: false }),
-    );
-
-    act(() => result.current.openExternalSubsModal());
-    expect(result.current.externalSubsModalOpen).toBe(true);
-
-    act(() => result.current.closeExternalSubsModal());
-    expect(result.current.externalSubsModalOpen).toBe(false);
-  });
-
-  it("pickExternalSub stores the pick and closes the modal in one shot", () => {
-    const { result } = renderHook(() =>
-      usePlayerOverlays({ itemId: "i1", hasNextUp: false }),
-    );
-
-    act(() => result.current.openExternalSubsModal());
-    act(() => result.current.pickExternalSub(sampleSub));
-
-    expect(result.current.activeExternalSub).toEqual(sampleSub);
-    expect(result.current.externalSubsModalOpen).toBe(false);
-  });
-
-  it("clearExternalSub resets the active pick to null", () => {
-    const { result } = renderHook(() =>
-      usePlayerOverlays({ itemId: "i1", hasNextUp: false }),
-    );
-
-    act(() => result.current.pickExternalSub(sampleSub));
-    expect(result.current.activeExternalSub).toEqual(sampleSub);
-
-    act(() => result.current.clearExternalSub());
-    expect(result.current.activeExternalSub).toBeNull();
-  });
-
   it("toggleHelp flips the flag and closeHelp forces it false", () => {
     const { result } = renderHook(() =>
       usePlayerOverlays({ itemId: "i1", hasNextUp: false }),
@@ -157,20 +111,6 @@ describe("usePlayerOverlays", () => {
     expect(result.current.showHelp).toBe(false);
   });
 
-  it("OPEN_EXTERNAL_SUBS dismisses an open help overlay", () => {
-    const { result } = renderHook(() =>
-      usePlayerOverlays({ itemId: "i1", hasNextUp: false }),
-    );
-
-    act(() => result.current.toggleHelp());
-    expect(result.current.showHelp).toBe(true);
-
-    act(() => result.current.openExternalSubsModal());
-
-    expect(result.current.externalSubsModalOpen).toBe(true);
-    expect(result.current.showHelp).toBe(false);
-  });
-
   it("changing itemId resets every overlay back to initial state", () => {
     const { result, rerender } = renderHook(
       ({ itemId }: { itemId: string }) =>
@@ -179,18 +119,14 @@ describe("usePlayerOverlays", () => {
     );
 
     act(() => result.current.handleEnded());
-    act(() => result.current.pickExternalSub(sampleSub));
     act(() => result.current.toggleHelp());
 
     expect(result.current.upNextActive).toBe(true);
-    expect(result.current.activeExternalSub).toEqual(sampleSub);
     expect(result.current.showHelp).toBe(true);
 
     rerender({ itemId: "i2" });
 
     expect(result.current.upNextActive).toBe(false);
-    expect(result.current.externalSubsModalOpen).toBe(false);
-    expect(result.current.activeExternalSub).toBeNull();
     expect(result.current.showHelp).toBe(false);
   });
 });

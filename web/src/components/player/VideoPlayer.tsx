@@ -22,14 +22,12 @@ import { useVideoElementSync } from "@/hooks/useVideoElementSync";
 import { PlayerControls } from "./PlayerControls";
 import { SeekTide } from "./SeekTide";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
-import { ExternalSubsModal } from "./ExternalSubsModal";
 import { KeyboardHelpOverlay } from "./KeyboardHelpOverlay";
 import { SkipSegmentButton } from "./SkipSegmentButton";
 import { BackdropLoadingOverlay } from "./BackdropLoadingOverlay";
 import { ErrorOverlay } from "./ErrorOverlay";
 import { useSubtitleSelection } from "@/hooks/useSubtitleSelection";
 import { useAudioSelection } from "@/hooks/useAudioSelection";
-import type { ExternalSubtitleResult } from "@/api/types";
 
 // Soporte PiP del navegador, evaluado una vez. Firefox estable y los
 // WebKit sin la API no lo exponen — sin soporte, el botón ni se monta
@@ -213,16 +211,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 
   const {
     upNextActive,
-    externalSubsModalOpen,
-    activeExternalSub,
     showHelp,
     handleEnded: handleVideoEnded,
     handleUpNextConfirm,
     handleUpNextCancel,
-    openExternalSubsModal,
-    closeExternalSubsModal,
-    pickExternalSub,
-    clearExternalSub,
     toggleHelp,
     closeHelp,
   } = usePlayerOverlays({
@@ -458,27 +450,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     sourceKey: masterPlaylistUrl ?? directUrl,
   });
 
-  // External subs lifecycle.
-  // - Opening the modal is a single setter; closing too.
-  // - Picking a result: stash it as state so the JSX renders a fresh
-  //   <track>. Suppress any HLS subtitle that might be active so the
-  //   two systems don't race over which cues to show.
-  const handleExternalSubPicked = useCallback(
-    (pick: ExternalSubtitleResult) => {
-      pickExternalSub(pick);
-      setSubtitleTrack(-1);
-      setActiveFederatedSubIndex(null);
-      setActiveLocalSubIndex(null);
-    },
-    [pickExternalSub, setSubtitleTrack, setActiveFederatedSubIndex, setActiveLocalSubIndex],
-  );
-
-  // Tras montar el <track> externo, fuerza su mode a "showing" en
-  // el siguiente rAF (el DOM aún no tiene el elemento en el
+  // Tras montar el <track> de texto local, fuerza su mode a "showing"
+  // en el siguiente rAF (el DOM aún no tiene el elemento en el
   // microtask inmediato) y suprime cualquier otro track en showing
   // para no doble-renderizar cues de un HLS sub pre-existente.
-  // Mismo forzado de `mode = "showing"` para el <track> de texto
-  // local recién montado (prefijo "Local:" en el label).
   useExternalSubMode({
     videoRef,
     activeKey:
@@ -486,12 +461,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     labelPrefix: "Local:",
   });
 
-  useExternalSubMode({
-    videoRef,
-    activeKey: activeExternalSub
-      ? `${activeExternalSub.source}:${activeExternalSub.file_id}`
-      : null,
-  });
 
   const {
     mergedSubtitleTracks,
@@ -512,7 +481,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onBurnSubtitleSelected,
     activeLocalSubIndex,
     setActiveLocalSubIndex,
-    clearActiveExternalSub: clearExternalSub,
   });
 
   const {
@@ -579,15 +547,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           handleToggleFullscreen();
         }}
       >
-        {activeExternalSub && (
-          <track
-            key={`${activeExternalSub.source}:${activeExternalSub.file_id}`}
-            kind="subtitles"
-            srcLang={activeExternalSub.language}
-            label={`External:${activeExternalSub.language}`}
-            src={api.externalSubtitleURL(itemId, activeExternalSub.source, activeExternalSub.file_id)}
-          />
-        )}
         {peerId && peerStreamSessionId && activeFederatedSubIndex !== null
           && federatedSubs[activeFederatedSubIndex] && (
             <track
@@ -680,7 +639,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
             if (open) keepControlsVisible();
             else showControls();
           }}
-          onSearchExternalSubs={openExternalSubsModal}
           onSkip={skipBy}
           onTogglePiP={
             pipSupported ? () => void handleTogglePiP() : undefined
@@ -711,17 +669,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         />
       </div>
 
-      {/* External subs picker. Mounted at the player root so it
-          covers controls but its own click-to-close (via backdrop)
-          doesn't accidentally pause the video. The picked result
-          flows into a sibling <track> on the <video> via state. */}
-      {externalSubsModalOpen && (
-        <ExternalSubsModal
-          itemId={itemId}
-          onSelect={handleExternalSubPicked}
-          onClose={closeExternalSubsModal}
-        />
-      )}
 
       {/* Skip-intro / skip-credits / skip-recap floating button.
           Sits ABOVE the controls (z-30) but below the up-next

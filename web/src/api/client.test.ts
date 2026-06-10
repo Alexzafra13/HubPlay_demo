@@ -318,3 +318,47 @@ describe("ApiClient", () => {
     expect(bodies[2].channels[499]).toBe("c-2499");
   });
 });
+
+// Causa raíz del "no salen las pistas de audio/subtítulos" (reporte de
+// usuario 2026-06-10): el backend emite stream_type/stream_index y
+// omite los campos vacíos, pero todos los consumers del player hablan
+// type/index con nulls. getItem debe normalizar en la frontera.
+describe("ApiClient — normalización de media_streams", () => {
+  it("getItem convierte la forma del wire al tipo del cliente", async () => {
+    const wireItem = {
+      id: "it-1",
+      type: "movie",
+      title: "The Batman",
+      media_streams: [
+        { stream_index: 0, stream_type: "video", codec: "h264", is_default: true, width: 1920, height: 800, profile: "High" },
+        { stream_index: 1, stream_type: "audio", codec: "eac3", is_default: true, channels: 6, language: "spa" },
+        // SUBRIP sin language/title omitidos parcialmente, como hace el backend.
+        { stream_index: 2, stream_type: "subtitle", codec: "subrip", is_default: false, language: "spa", title: "Castellano Forzados" },
+        { stream_index: 3, stream_type: "subtitle", codec: "subrip", is_default: false },
+      ],
+    };
+    vi.stubGlobal("fetch", mockFetch({ data: wireItem }));
+    const client = new ApiClient("http://test/api/v1");
+
+    const item = await client.getItem("it-1");
+    const subs = item.media_streams!.filter((s) => s.type === "subtitle");
+
+    expect(subs).toHaveLength(2);
+    expect(subs[0]).toMatchObject({
+      index: 2,
+      type: "subtitle",
+      codec: "subrip",
+      language: "spa",
+      title: "Castellano Forzados",
+    });
+    // Campos omitidos por el wire → null explícito, no undefined.
+    expect(subs[1].language).toBeNull();
+    expect(subs[1].title).toBeNull();
+    expect(subs[1].index).toBe(3);
+    // Los extras del wire (profile, width…) sobreviven para la vista
+    // de información del fichero.
+    const video = item.media_streams!.find((s) => s.type === "video")!;
+    expect((video as unknown as Record<string, unknown>).profile).toBe("High");
+    expect(item.media_streams!.find((s) => s.type === "audio")!.channels).toBe(6);
+  });
+});

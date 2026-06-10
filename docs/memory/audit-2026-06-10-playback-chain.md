@@ -299,6 +299,32 @@ salía como una columna estrecha inutilizable. **Fix aplicado:**
 `fixed inset-0` (ancla al viewport; el overlay del player es
 fullscreen y ningún ancestro lleva transform).
 
+### ✅ PB-43 · El tipo MediaStream del frontend mentía sobre el wire: pickers de audio/subs SIEMPRE vacíos (reporte de usuario, 2026-06-10)
+La causa raíz real detrás de los pickers vacíos (PB-41 era necesario
+pero no suficiente). El backend serializa `stream_type`/`stream_index`
+y OMITE los campos vacíos (`streamResponse`, `items.go:152`); el tipo
+`MediaStream` del cliente declara `type`/`index` con nulls. Todos los
+filtros `s.type === "audio"|"subtitle"` (ItemDetail → player) recibían
+`undefined` con datos reales → cero pistas siempre. Los tests pasaban
+porque los fixtures seguían el tipo TS, no el wire (la trampa clásica);
+`audioTracks.ts` ya toleraba ambas formas (`stream_type ?? type`) —
+señal de que el desajuste era conocido a medias. **Fix aplicado:**
+`normalizeMediaStream` en la frontera del cliente (patrón adapter del
+repo): getItem convierte wire→tipo una sola vez, con spread que
+conserva los extras (profile/frame_rate…) de la vista de info. Test de
+regresión en `client.test.ts` con fixtures en forma de WIRE.
+
+### Decisión de producto (2026-06-10): fuera "Buscar subtítulos online"
+A petición del owner. Eliminado el surface completo del frontend:
+`ExternalSubsModal`, fila del picker, lane externo de
+`useSubtitleSelection`/`usePlayerOverlays`, `<track>` External:,
+métodos del cliente (`searchExternalSubtitles`/`externalSubtitleURL`),
+tipo `ExternalSubtitleResult` y claves i18n. El picker muestra SOLO lo
+que trae el fichero (+ federados/burn-in). Los endpoints del backend
+(`/subtitles/external*`) y el provider OpenSubtitles quedan en el
+servidor sin consumer web — candidatos a retirarse en una pasada
+backend si se confirma que ningún cliente externo los usa.
+
 ## 🟢 Bajos
 
 - **PB-36** · Profile `"original"` fuerza `CopyAudio` pisando la decisión

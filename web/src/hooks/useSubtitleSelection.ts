@@ -93,9 +93,6 @@ interface UseSubtitleSelectionOptions {
    *  endpoint de extracción WebVTT. */
   activeLocalSubIndex: number | null;
   setActiveLocalSubIndex: (idx: number | null) => void;
-
-  /** Limpia la selección de sub externo (OpenSubtitles) si la hay. */
-  clearActiveExternalSub: () => void;
 }
 
 interface UseSubtitleSelectionReturn {
@@ -125,7 +122,6 @@ export function useSubtitleSelection({
   onBurnSubtitleSelected,
   activeLocalSubIndex,
   setActiveLocalSubIndex,
-  clearActiveExternalSub,
 }: UseSubtitleSelectionOptions): UseSubtitleSelectionReturn {
   const burnInSubtitleEntries = useMemo<BurnInTrackEntry[]>(() => {
     if (!subtitleStreams || !onBurnSubtitleSelected) return [];
@@ -214,7 +210,6 @@ export function useSubtitleSelection({
         const entry = localTextEntries.find((e) => e.id === id);
         if (!entry) return;
         setActiveFederatedSubIndex(null);
-        clearActiveExternalSub();
         setHlsTrack(-1);
         if (burnSubtitleIndex >= 0 && onBurnSubtitleSelected) {
           onBurnSubtitleSelected(-1, videoRef.current?.currentTime ?? 0);
@@ -229,7 +224,6 @@ export function useSubtitleSelection({
         // seam sea invisible.
         if (!onBurnSubtitleSelected) return;
         setActiveFederatedSubIndex(null);
-        clearActiveExternalSub();
         setActiveLocalSubIndex(null);
         setHlsTrack(-1);
         const subIdx = id - BURN_SUB_TRACK_ID_BASE;
@@ -239,7 +233,6 @@ export function useSubtitleSelection({
       if (id >= FEDERATED_TRACK_ID_BASE) {
         // Federado: suprimir HLS, externo y local. Sólo un set de cues a la vez.
         setActiveFederatedSubIndex(id - FEDERATED_TRACK_ID_BASE);
-        clearActiveExternalSub();
         setActiveLocalSubIndex(null);
         setHlsTrack(-1);
         return;
@@ -263,7 +256,6 @@ export function useSubtitleSelection({
       setActiveFederatedSubIndex,
       setActiveLocalSubIndex,
       localTextEntries,
-      clearActiveExternalSub,
     ],
   );
 

@@ -131,10 +131,6 @@ interface PlayerControlsProps {
    *  while a sheet is up, so the 3-second auto-hide timer can't
    *  evict the sheet's containing overlay mid-interaction. */
   onMenuOpenChange?: (anyOpen: boolean) => void;
-  /** Optional: when provided, renders a "search online subs" action
-   *  inside the subtitle picker. The parent owns the modal and the
-   *  resulting `<track>` injection. */
-  onSearchExternalSubs?: () => void;
   /** Salto relativo en segundos (los botones ±10s lo llaman con
    *  -10/+10). El padre aplica el clamp y dispara el SeekTide. */
   onSkip: (deltaSeconds: number) => void;
@@ -907,7 +903,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onQualityChange,
   onPlaybackRateChange,
   onMenuOpenChange,
-  onSearchExternalSubs,
   onSkip,
   onTogglePiP,
   isFavorite,
@@ -973,26 +968,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
         })
       : undefined,
   }));
-
-  // External-subs row, appended to the subtitle picker. Lives inside
-  // the picker (not as its own button on the bar) — Plex pattern. The
-  // styling is intentionally distinct from the regular rows so users
-  // see it's an action, not a track selection.
-  const externalSubsRow = onSearchExternalSubs ? (
-    <button
-      type="button"
-      onClick={() => {
-        onSearchExternalSubs();
-      }}
-      className="w-full flex items-center gap-3 p-3 mt-1 rounded-[--radius-md] text-left text-sm text-accent hover:bg-accent/10 transition-colors cursor-pointer"
-    >
-      <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-        <circle cx="11" cy="11" r="7" />
-        <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
-      </svg>
-      <span className="flex-1 font-medium">{t("playerControls.subtitlesExternal")}</span>
-    </button>
-  ) : null;
 
   return (
     <div className="absolute inset-0 flex flex-col justify-between z-10">
@@ -1171,7 +1146,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             currentId={currentSubtitleTrack}
             offLabel={t("playerControls.subtitlesOff")}
             onSelect={onSubtitleTrackChange}
-            extra={externalSubsRow}
             onOpenChange={reportMenu("subs")}
           />
 

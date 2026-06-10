@@ -354,7 +354,6 @@
     "audio": "Audio",
     "subtitles": "Subtítulos",
     "subtitlesOff": "Ninguno",
-    "subtitlesExternal": "Buscar subtítulos online",
     "settings": "Ajustes",
     "playbackRate": "Velocidad",
     "play": "Reproducir",
@@ -383,13 +382,6 @@
     "favoriteAdd": "Añadir a favoritos",
     "favoriteRemove": "Quitar de favoritos",
     "timeModeToggle": "Alternar duración total / tiempo restante"
-  },
-  "externalSubs": {
-    "title": "Subtítulos online",
-    "noResults": "No se encontraron subtítulos",
-    "searchFailed": "Búsqueda fallida. Prueba otro idioma.",
-    "providersDisabled": "Los proveedores de subtítulos no están configurados.",
-    "score": "Puntuación {{score}}"
   },
   "sort": {
     "by": "Ordenar por",

@@ -191,23 +191,19 @@ describe("PlayerControls — audio picker", () => {
 });
 
 describe("PlayerControls — subtitles picker", () => {
-  it("includes the Off row and surfaces external-subs search inside the picker", () => {
-    const onSearch = vi.fn();
+  it("lista la fila Ninguno y las pistas del fichero — sin búsqueda online", () => {
     render(
       <PlayerControls
         {...baseProps}
         subtitleTracks={[{ id: 0, name: "English", lang: "eng" }]}
-        onSearchExternalSubs={onSearch}
       />,
     );
     openPicker(/subtitles|subtítulos/i);
     expect(screen.getByText(/off|ninguno/i)).toBeInTheDocument();
-    // English row is present.
     expect(screen.getByText("English")).toBeInTheDocument();
-    // Search-online row lives inside the picker (no longer a sibling
-    // button on the bar).
-    fireEvent.click(screen.getByText(/search online|buscar.*online/i));
-    expect(onSearch).toHaveBeenCalledTimes(1);
+    // La búsqueda online se eliminó del producto (decisión del owner,
+    // 2026-06-10): el picker solo muestra lo que el fichero trae.
+    expect(screen.queryByText(/search online|buscar.*online/i)).toBeNull();
   });
 });
 

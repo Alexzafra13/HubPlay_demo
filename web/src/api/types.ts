@@ -1002,17 +1002,6 @@ export interface EpisodeSegment {
   confidence: number;
 }
 
-// One candidate from an external subtitle provider (OpenSubtitles
-// today). The `file_id` is opaque — pass it back to the download
-// endpoint along with `source` to fetch the actual VTT.
-export interface ExternalSubtitleResult {
-  source: string;     // "opensubtitles", ...
-  file_id: string;    // opaque handle for the download endpoint
-  language: string;   // ISO 639-1 (en, es, fr, ...)
-  format: string;     // "srt" | "ass" — the source format before conversion
-  score: number;      // provider-specific quality / popularity score
-}
-
 // One "more like this" entry surfaced under the cast strip on the
 // detail page. Server resolves the poster URL against TMDb's image
 // CDN and tags `in_library` + `local_id` when the user already has

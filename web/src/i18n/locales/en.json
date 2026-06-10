@@ -354,7 +354,6 @@
     "audio": "Audio",
     "subtitles": "Subtitles",
     "subtitlesOff": "Off",
-    "subtitlesExternal": "Search online subtitles",
     "settings": "Settings",
     "playbackRate": "Playback speed",
     "play": "Play",
@@ -383,13 +382,6 @@
     "favoriteAdd": "Add to favorites",
     "favoriteRemove": "Remove from favorites",
     "timeModeToggle": "Toggle total duration / remaining time"
-  },
-  "externalSubs": {
-    "title": "Online subtitles",
-    "noResults": "No subtitles found",
-    "searchFailed": "Search failed. Try another language.",
-    "providersDisabled": "Subtitle providers are not configured.",
-    "score": "Score {{score}}"
   },
   "sort": {
     "by": "Sort by",
