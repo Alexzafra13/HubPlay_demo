@@ -325,6 +325,23 @@ que trae el fichero (+ federados/burn-in). Los endpoints del backend
 servidor sin consumer web — candidatos a retirarse en una pasada
 backend si se confirma que ningún cliente externo los usa.
 
+### ✅ PB-44 · Subtítulos nativos mal posicionados en móvil: pisando controles, recortados y solapados (reporte de usuario, 2026-06-10)
+El render NATIVO de WebVTT pinta los cues en el borde inferior del
+ELEMENTO `<video>` — que en nuestro player es la pantalla entera
+(`absolute inset-0` + object-contain), no el área visible de la
+película. En móvil: cues debajo de la barra de controles, recortados
+por el borde físico (sin safe-area), cues simultáneos solapándose y
+posición rota al rotar. `::cue` no permite reposicionar — es
+incontrolable por CSS. **Fix aplicado (patrón Jellyfin/Plex web):**
+render propio — la pista activa va en modo `hidden` (el navegador
+sigue poblando activeCues y disparando cuechange pero no pinta) y
+`useSubtitleOverlay` pinta los cues en un overlay del player con
+safe-area, fuente fluida (clamp), fondo legible, apilado correcto de
+cues simultáneos y que SUBE cuando los controles están visibles.
+Sustituye a `useExternalSubMode` (borrado); las pistas federadas van
+por el mismo carril (prefijo de label). Tests:
+`useSubtitleOverlay.test.ts` (6 casos).
+
 ## 🟢 Bajos
 
 - **PB-36** · Profile `"original"` fuerza `CopyAudio` pisando la decisión
