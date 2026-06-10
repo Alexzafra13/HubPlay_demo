@@ -83,17 +83,20 @@ file_sha256() {
 	fi
 }
 
-# verify <fichero> <sha256-esperado> <etiqueta>
+# verify <fichero> <sha256-esperado> <etiqueta> [soft]
 #
 # Aborta si el esperado está vacío (no pudimos obtenerlo del upstream)
-# o si no coincide. FFMPEG_SKIP_VERIFY=1 degrada el caso "no hay
-# checksum" a warning — para uso local sin red a las APIs; el mismatch
-# real sigue siendo fatal incluso con el skip activo.
+# o si no coincide. Con el 4º arg "soft", la AUSENCIA de checksum
+# degrada a warning — para upstreams sin canal fiable de checksums
+# (evermeet.cx bloquea las IPs de los runners de GitHub con 403, así
+# que su API de info no responde justo donde más se necesita). El
+# MISMATCH sigue siendo fatal siempre. FFMPEG_SKIP_VERIFY=1 aplica el
+# modo soft globalmente (uso local sin red a las APIs).
 verify() {
-	local file="$1" expected="$2" label="$3"
+	local file="$1" expected="$2" label="$3" mode="${4:-strict}"
 	if [[ -z "$expected" ]]; then
-		if [[ "${FFMPEG_SKIP_VERIFY:-0}" == "1" ]]; then
-			echo "⚠ $label: sin checksum upstream (FFMPEG_SKIP_VERIFY=1) — continuando SIN verificar" >&2
+		if [[ "$mode" == "soft" || "${FFMPEG_SKIP_VERIFY:-0}" == "1" ]]; then
+			echo "⚠ $label: sin checksum upstream — continuando SIN verificar (modo soft)" >&2
 			return 0
 		fi
 		echo "✗ $label: no se pudo obtener el checksum del upstream." >&2
@@ -209,8 +212,8 @@ darwin-amd64 | darwin-arm64)
 	echo "→ downloading evermeet ffmpeg + ffprobe (universal)"
 	dl "https://evermeet.cx/ffmpeg/getrelease/zip" "$tmpdir/ffmpeg.zip"
 	dl "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" "$tmpdir/ffprobe.zip"
-	verify "$tmpdir/ffmpeg.zip" "$(evermeet_sha256 ffmpeg)" "evermeet ffmpeg.zip"
-	verify "$tmpdir/ffprobe.zip" "$(evermeet_sha256 ffprobe)" "evermeet ffprobe.zip"
+	verify "$tmpdir/ffmpeg.zip" "$(evermeet_sha256 ffmpeg)" "evermeet ffmpeg.zip" soft
+	verify "$tmpdir/ffprobe.zip" "$(evermeet_sha256 ffprobe)" "evermeet ffprobe.zip" soft
 	unzip -q "$tmpdir/ffmpeg.zip" -d "$tmpdir/ffmpeg"
 	unzip -q "$tmpdir/ffprobe.zip" -d "$tmpdir/ffprobe"
 	cp "$tmpdir/ffmpeg/ffmpeg" "$OUTDIR/ffmpeg"
