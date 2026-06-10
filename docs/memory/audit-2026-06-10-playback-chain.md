@@ -258,6 +258,24 @@ mapeando `video.error.code` a mensajes específicos.
   ("Playback failed: bufferStallError") en una app i18n es/en
   (`useHls.ts:262-321`). **Fix:** claves i18n + tabla detalle→humano.
 
+### ✅ PB-40 · Player alimentado con el item de la PÁGINA, no el que suena (reporte de usuario, 2026-06-10)
+`pages/ItemDetail.tsx` + `pages/itemDetail/usePlayback.ts`. No salió en
+los sweeps (vive en el wiring de la página, no en el player). Los props
+per-item del player (`audioStreams`, `subtitleStreams`, `segments`,
+`chapters`, `knownDuration`, título) venían de `item` (el de la URL), y
+`siblingEpisodes` solo se calculaba si `item.type === "episode"`.
+Consecuencia: reproducir desde la **fila de episodios de la temporada**
+o desde el **"Seguir viendo" de la serie** montaba el player sin
+selector de audio/subtítulos, sin skip-intro y sin "siguiente episodio"
+(una temporada no tiene `media_streams`); tras un **auto-advance**, el
+player seguía con los datos del episodio anterior. Solo funcionaba
+entrando hasta la página del episodio concreto. **Fix aplicado:**
+`usePlayback` ahora fetcha el detalle del item EN REPRODUCCIÓN (cache
+sembrada en `handlePlay`), deriva los hermanos de su `parent_id`, y
+expone `playingItem`; `ItemDetail` alimenta el player desde él. Test de
+regresión: "playing an episode from the season page feeds the player
+the episode's data".
+
 ## 🟢 Bajos
 
 - **PB-36** · Profile `"original"` fuerza `CopyAudio` pisando la decisión

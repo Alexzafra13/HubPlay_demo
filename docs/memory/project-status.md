@@ -37,6 +37,12 @@ audit focalizado de la cadena de playback (decisión de streaming, FFmpeg,
 probe, IPTV, player hls.js). 39 hallazgos, 4 críticos. **Es el trabajo de
 más valor de usuario pendiente** — todo lo demás son cimientos.
 
+**PB-40 ✅ (reporte de usuario, 2026-06-10):** el player se alimentaba
+del item de la página, no del que suena — reproducir desde la
+temporada/serie no mostraba selector de pistas ni "siguiente episodio",
+y el auto-advance dejaba datos stale. `usePlayback` ahora deriva todo
+del item en reproducción. Detalle: PB-40 en el audit de playback.
+
 **P0 ✅ hecha (2026-06-10)** en `claude/project-review-8tznz4`: PB-1
 (alias webm corregido con check de códecs WebM-reales en `Decide`), PB-2
 (`-hls_flags +temp_file`), PB-3 (`-force_key_frames` con forma
