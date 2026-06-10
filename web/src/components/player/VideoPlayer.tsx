@@ -12,7 +12,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
 import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { usePlayerOverlays } from "@/hooks/usePlayerOverlays";
-import { useExternalSubMode } from "@/hooks/useExternalSubMode";
+import { useSubtitleOverlay } from "@/hooks/useSubtitleOverlay";
 import { usePlayerActions } from "@/hooks/usePlayerActions";
 import { useFullscreenSync } from "@/hooks/useFullscreenSync";
 import { useStartPositionSeek } from "@/hooks/useStartPositionSeek";
@@ -231,7 +231,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     federatedSubs,
     activeFederatedSubIndex,
     setActiveFederatedSubIndex,
-  } = useFederatedSubs({ videoRef, peerId, peerStreamSessionId });
+  } = useFederatedSubs({ peerId, peerStreamSessionId });
 
   // Sub de texto local activo (SRT/mov_text embebido), por índice
   // ABSOLUTO del stream — monta el `<track>` WebVTT de abajo, servido
@@ -451,15 +451,22 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     sourceKey: masterPlaylistUrl ?? directUrl,
   });
 
-  // Tras montar el <track> de texto local, fuerza su mode a "showing"
-  // en el siguiente rAF (el DOM aún no tiene el elemento en el
-  // microtask inmediato) y suprime cualquier otro track en showing
-  // para no doble-renderizar cues de un HLS sub pre-existente.
-  useExternalSubMode({
+  // Render propio de subtítulos (PB-44): la pista activa va en
+  // "hidden" y los cues se pintan en el overlay de abajo — el render
+  // nativo los ponía en el borde inferior del ELEMENTO de vídeo
+  // (pantalla completa): pisando los controles, recortados sin
+  // safe-area y solapándose entre cues simultáneos en móvil.
+  const subtitleOverlayRef = useRef<HTMLDivElement | null>(null);
+  const activeManagedSubKey =
+    activeLocalSubIndex !== null
+      ? `local:${activeLocalSubIndex}`
+      : activeFederatedSubIndex !== null
+        ? `fed:${activeFederatedSubIndex}`
+        : null;
+  useSubtitleOverlay({
     videoRef,
-    activeKey:
-      activeLocalSubIndex !== null ? `local:${activeLocalSubIndex}` : null,
-    labelPrefix: "Local:",
+    overlayRef: subtitleOverlayRef,
+    activeKey: activeManagedSubKey,
   });
 
 
@@ -591,6 +598,19 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       {tide && (
         <SeekTide dir={tide.dir} totalSeconds={tide.total} seq={tide.seq} />
       )}
+
+      {/* Subtítulos (render propio, PB-44). Sube cuando los controles
+          están visibles para no quedar debajo de la barra; con ellos
+          ocultos baja a su posición de cine (con safe-area en móvil).
+          aria-live off: los lectores de pantalla ya tienen el track. */}
+      <div
+        ref={subtitleOverlayRef}
+        aria-live="off"
+        className={[
+          "hp-subtitle-overlay pointer-events-none absolute inset-x-0 z-20",
+          controlsVisible ? "hp-subtitle-overlay--raised" : "",
+        ].join(" ")}
+      />
 
       {/* Capa de controles. Sólo intercepta clicks/teclas para que no
           burbujeen al video (que dispararía play/pause). role="toolbar"

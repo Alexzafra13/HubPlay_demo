@@ -99,6 +99,13 @@ runners).
 |---|---|---|
 | Media | **Playback P2/P3** | VAAPI real (PB-5), ABR/caps (PB-10), surround (PB-22), Dolby Vision (PB-23), E2E smoke Playwright |
 
+**PB-44 ✅ (reporte de usuario, 2026-06-10):** subtítulos con render
+propio (`useSubtitleOverlay` + `.hp-cue`): pista en `hidden` y cues
+pintados en overlay con safe-area, que sube con los controles
+visibles. El render nativo los ponía en el borde del elemento de vídeo
+(pantalla completa): pisando controles, recortados y solapados en
+móvil. `useExternalSubMode` eliminado (superseded).
+
 **Quick wins del player ✅ (2026-06-10):** botones ±10s con icono
 propio (arco que gira al pulsar), doble-tap por zonas en móvil
 (encadenable), feedback "SeekTide" de marca (marea teal + chevrons en

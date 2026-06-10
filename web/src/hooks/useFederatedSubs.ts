@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import type { RefObject } from "react";
 import { api } from "@/api/client";
 
 interface FederatedSubTrack {
@@ -11,7 +10,6 @@ interface FederatedSubTrack {
 }
 
 interface UseFederatedSubsOptions {
-  videoRef: RefObject<HTMLVideoElement | null>;
   peerId?: string;
   peerStreamSessionId?: string;
 }
@@ -29,18 +27,14 @@ interface UseFederatedSubsReturn {
  *   (con cleanup por `cancelled` para evitar setState en componente
  *   desmontado).
  * - Estado del track activo (índice o null).
- * - Effect que fuerza `track.mode = "showing"` tras montar un
- *   `<track kind="subtitles" label="Federated:...">` — el navegador
- *   deja todos los tracks en "disabled" por defecto y necesitamos
- *   activar el elegido y desactivar el resto para que no se solapen
- *   con un sub externo / HLS.
+ * - El render del track activo lo hace useSubtitleOverlay (por el
+ *   prefijo de label "Federated:").
  *
  * El master.m3u8 que devuelve un peer no transporta `EXT-X-MEDIA
  * SUBTITLES`, así que los pintamos como `<track>` hijos del `<video>`
  * (mismo plumbing que los subs externos de OpenSubtitles).
  */
 export function useFederatedSubs({
-  videoRef,
   peerId,
   peerStreamSessionId,
 }: UseFederatedSubsOptions): UseFederatedSubsReturn {
@@ -67,21 +61,9 @@ export function useFederatedSubs({
     };
   }, [peerId, peerStreamSessionId]);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || activeFederatedSubIndex === null) return;
-    const rafID = window.requestAnimationFrame(() => {
-      const tracks = Array.from(video.textTracks);
-      const target = tracks.find((t) => t.label.startsWith("Federated:"));
-      if (target) target.mode = "showing";
-      for (const t of tracks) {
-        if (t !== target && t.mode === "showing") {
-          t.mode = "disabled";
-        }
-      }
-    });
-    return () => window.cancelAnimationFrame(rafID);
-  }, [videoRef, activeFederatedSubIndex]);
+  // El forcing de `mode` y el render de cues viven ahora en
+  // useSubtitleOverlay (PB-44): la pista federada se gestiona por su
+  // prefijo de label "Federated:" igual que las de texto local.
 
   return {
     federatedSubs,
