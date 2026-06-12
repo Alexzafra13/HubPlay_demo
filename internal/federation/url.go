@@ -3,10 +3,39 @@ package federation
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 
 	"hubplay/internal/domain"
 )
+
+// maxFederationRedirects caps how many 3xx hops an outbound peer call
+// will follow. The federation protocol itself never redirects (every
+// peer endpoint serves its bytes directly), so a handful is plenty of
+// slack for a reverse proxy doing http→https or trailing-slash
+// normalisation without opening a redirect-chain amplification vector.
+const maxFederationRedirects = 5
+
+// federationCheckRedirect is the net/http CheckRedirect hook for the
+// federation HTTP client. Without it, Go's default client follows up
+// to 10 redirects to ANY address — a hostile-but-paired peer could
+// answer a poster / stream / browse fetch with `302 → http://169.254.169.254/…`
+// (cloud metadata, link-local) or an internal service and have us
+// proxy the response back. validatePeerURL only gates the INITIAL URL;
+// this re-runs the same SSRF gate (loopback / link-local / unspecified
+// / multicast blocked, RFC1918 still allowed for LAN federation) on
+// every redirect hop. F-1 (audit 2026-06-12).
+//
+// Not DNS-rebinding-proof on its own (the lookup here races the dial),
+// but closes the metadata/internal-service reach that motivated the
+// finding; the peer is already admin-paired, so this is defence in
+// depth, not a primary trust boundary.
+func federationCheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxFederationRedirects {
+		return fmt.Errorf("%w: too many redirects (%d)", domain.ErrPeerURLUnsafe, len(via))
+	}
+	return validatePeerURL(req.URL.String())
+}
 
 // validatePeerURL is the SSRF gate for peer-controlled URLs. Called
 // when persisting `peer.BaseURL` from a remote handshake (HandleInboundHandshake)

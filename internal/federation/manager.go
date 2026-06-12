@@ -160,9 +160,9 @@ type Config struct {
 // overrides whatever they want from hubplay.yaml.
 func DefaultConfig() Config {
 	return Config{
-		AdvertisedURL:         "",
-		Version:               "0.1.0",
-		SupportedScopes:       []string{"browse", "play"},
+		AdvertisedURL:              "",
+		Version:                    "0.1.0",
+		SupportedScopes:            []string{"browse", "play"},
 		InviteTTL:                  24 * time.Hour,
 		HTTPTimeout:                15 * time.Second,
 		PeerRequestsPerMinute:      60,
@@ -238,7 +238,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		clock:          clk,
 		logger:         logger.With("module", "federation"),
 		bus:            bus,
-		httpClt:        &http.Client{Timeout: cfg.HTTPTimeout},
+		httpClt:        &http.Client{Timeout: cfg.HTTPTimeout, CheckRedirect: federationCheckRedirect},
 		auditor:        NewAuditor(repo, logger),
 		ratelimit:      NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
 		nonces:         newNonceCache(clk),
@@ -547,11 +547,30 @@ func (m *Manager) CheckAndStoreNonce(nonce string, exp time.Time) bool {
 // JWT validation on every peer.
 func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	now := m.clock.Now()
+	// Resolve the peer's ServerUUID up front so that, if the cache
+	// refresh below fails, we can still evict the in-memory entry by
+	// key — revocation must be fail-closed (F-4, audit 2026-06-12).
+	// A lookup error here is non-fatal: we proceed with the DB write
+	// and the targeted eviction is simply skipped (refresh is the
+	// primary path).
+	var serverUUID string
+	if p, err := m.repo.GetPeerByID(ctx, peerID); err == nil && p != nil {
+		serverUUID = p.ServerUUID
+	}
 	if err := m.repo.UpdatePeerRevoked(ctx, peerID, now); err != nil {
 		return err
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
-		m.logger.Warn("federation: peer cache refresh after revoke failed", "err", err)
+		// Fail-closed: a stale cache that still holds this peer as
+		// Paired would keep authorising its JWTs. Evict the entry
+		// directly so the auth gate sees PeerNotFound on the next
+		// request even though the full refresh didn't land.
+		m.logger.Warn("federation: peer cache refresh after revoke failed; evicting entry directly", "err", err, "peer_id", peerID)
+		if serverUUID != "" {
+			m.mu.Lock()
+			delete(m.peerCache, serverUUID)
+			m.mu.Unlock()
+		}
 	}
 	// Drop any in-memory rate-limit state for this peer so a future
 	// re-pairing starts with a clean bucket instead of inheriting

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"hubplay/internal/clock"
 	"hubplay/internal/domain"
 )
@@ -138,6 +140,45 @@ func TestValidatePeerToken_RejectsExpiredToken(t *testing.T) {
 	}
 	if !errors.Is(err, domain.ErrTokenExpired) {
 		t.Errorf("err = %v, want ErrTokenExpired", err)
+	}
+}
+
+// TestValidatePeerToken_RejectsFarFutureExp is the F-3 regression: a
+// peer controls its own exp, so a token minted with a year-long
+// lifetime would otherwise validate (it's not "expired") and defeat
+// the bounded-replay guarantee. The receiver must cap exp at its own
+// issuance policy.
+func TestValidatePeerToken_RejectsFarFutureExp(t *testing.T) {
+	frozen := &fixedClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+
+	// Hand-mint a token with a one-year exp (a compliant issuer would
+	// never; a hostile-but-paired peer can).
+	claims := PeerClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "issuer",
+			Audience:  jwt.ClaimStrings{"audience"},
+			IssuedAt:  jwt.NewNumericDate(frozen.now),
+			ExpiresAt: jwt.NewNumericDate(frozen.now.Add(365 * 24 * time.Hour)),
+			NotBefore: jwt.NewNumericDate(frozen.now.Add(-peerTokenSkew)),
+			ID:        "manual",
+		},
+		Nonce: "manual-nonce",
+	}
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims).SignedString(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lookup := &stubLookup{peers: map[string]*Peer{
+		"issuer": {ServerUUID: "issuer", PublicKey: pub, Status: PeerPaired},
+	}}
+	_, _, err = ValidatePeerToken(frozen, lookup, "audience", tok)
+	if err == nil {
+		t.Fatal("far-future exp should be rejected")
+	}
+	if !errors.Is(err, domain.ErrInvalidToken) {
+		t.Errorf("err = %v, want ErrInvalidToken", err)
 	}
 }
 

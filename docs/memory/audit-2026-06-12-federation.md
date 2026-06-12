@@ -43,7 +43,7 @@ confiables** — sí para federar entre tus propios servidores / amigos.
 
 ## 🟠 Altos
 
-### F-1 · SSRF por redirects no validados en el cliente saliente
+### ✅ F-1 · SSRF por redirects no validados en el cliente saliente — RESUELTO (2026-06-12)
 `internal/federation/manager.go:241` (`httpClt: &http.Client{Timeout: …}`)
 + `client.go:376,485` + `internal/api/handlers/me/me_peer_image.go`.
 *(Hallado independientemente por mi lectura y por el sweep 3 — señal de
@@ -60,9 +60,15 @@ Agravante: `validatePeerURL` **no bloquea RFC1918** a propósito
 pinada tiene por qué ser pública — los redirects lo componen.
 
 **Impacto:** SSRF a la red interna de A / metadata cloud, exfiltrable al
-usuario o a logs. **Fix:** `CheckRedirect` que corra `blockedPeerIP`
-(o un set más estricto que incluya RFC1918 para hops) en cada salto;
-reusar el patrón de `internal/imaging/safety.go:SafeGet`.
+usuario o a logs. **Fix aplicado:** `federationCheckRedirect`
+(`url.go`) re-corre `validatePeerURL` en cada salto (bloquea loopback/
+link-local/unspecified/multicast; RFC1918 sigue permitido para LAN) +
+tope de 5 saltos, cableado en el único `m.httpClt` (`manager.go:241`)
+→ cubre TODAS las llamadas salientes (browse/search/stream/póster/
+handshake). Tests en `url_test.go` (loopback, metadata link-local, cap,
+y refusal a través de un `http.Client` real). No es a prueba de
+DNS-rebinding por sí solo (el lookup compite con el dial), pero cierra
+el alcance a metadata/servicios internos que motivó el hallazgo.
 
 ### F-2 · Cuotas de recursos por peer: prometidas, no implementadas
 `internal/federation/peer.go:32-52` (struct `Peer`) +
@@ -91,29 +97,28 @@ spawnnear, y contador de bytes en el audit con corte diario.
 
 ## 🟡 Medios
 
-### F-3 · El `exp` del JWT entrante no tiene techo
+### ✅ F-3 · El `exp` del JWT entrante no tiene techo — RESUELTO (2026-06-12)
 `internal/federation/jwt.go:93-156` (`ValidatePeerToken`).
 
-El receptor solo rechaza tokens **ya expirados** (`ErrTokenExpired`); no
-comprueba que `exp` no esté absurdamente en el futuro. Un peer firma sus
-propios JWT con su privkey y controla `exp` → puede emitir un token
-válido **un año**. La garantía del doc "un token robado tiene utilidad
-acotada (5 min)" es **controlada por el emisor, no impuesta por el
-receptor**. El nonce cache evita el replay, pero un único token
-long-lived filtrado sigue siendo válido durante todo su `exp`.
-**Fix:** rechazar si `exp > now + peerTokenTTL + skew`.
+El receptor solo rechazaba tokens **ya expirados** (`ErrTokenExpired`);
+no comprobaba que `exp` no estuviera absurdamente en el futuro. Un peer
+firma sus propios JWT y controla `exp` → podía emitir un token válido
+**un año**, rompiendo la garantía "utilidad acotada a 5 min".
+**Fix aplicado:** tras parsear, `ValidatePeerToken` rechaza
+(`ErrInvalidToken`) si `claims.ExpiresAt` es nil o `> now + peerTokenTTL
++ peerTokenSkew`. Test `TestValidatePeerToken_RejectsFarFutureExp`.
 
-### F-4 · Revocación no es fail-closed ante error de refresh de cache
-`internal/federation/manager.go:548-560` (`RevokePeer`).
+### ✅ F-4 · Revocación no es fail-closed ante error de refresh de cache — RESUELTO (2026-06-12)
+`internal/federation/manager.go` (`RevokePeer`).
 
-`RevokePeer` escribe en DB y luego `refreshPeerCache`. La ventana de
-carrera del happy-path es sub-ms (aceptable, documentada). El bug real:
-si `refreshPeerCache` **falla**, solo se loguea `Warn` y la cache
-in-memory **conserva la entrada `Paired` stale** → el peer revocado
-sigue autorizado hasta el siguiente refresh exitoso. La revocación
-debería ser fail-closed. **Fix:** ante error de refresh, invalidar la
-entrada del peer en cache directamente (o marcarla revoked en memoria
-antes de tocar DB).
+Si `refreshPeerCache` fallaba, solo se logueaba `Warn` y la cache
+in-memory conservaba la entrada `Paired` stale → el peer revocado
+seguía autorizado hasta el siguiente refresh exitoso. **Fix aplicado:**
+`RevokePeer` resuelve el `ServerUUID` del peer antes de revocar; si el
+refresh post-revoke falla, hace `delete(m.peerCache, serverUUID)`
+directo bajo `m.mu` → el auth gate ve `ErrPeerNotFound` en el siguiente
+request. Test `TestRevokePeer_FailClosedOnCacheRefreshError` (fuerza el
+fallo de `ListPeers`).
 
 ### F-5 · Segmentos HLS sujetos al rate-limit pese a la exención del diseño
 `internal/api/mount_federation.go:59-87` (grupo bajo `RequirePeerJWT`) +
@@ -213,13 +218,14 @@ filtrar `ListContinueWatching` por status del peer.
 
 ---
 
-## Recomendación de orden (si se decide endurecer)
+## Estado de remediación
 
-1. **F-1 (SSRF redirects)** y **F-2 (cuotas por peer)** — son las dos que
-   el threat model del propio diseño dice cubrir y no cubre. Antes de
-   federar con peers no plenamente confiables.
-2. **F-3, F-4** — baratas y de seguridad real (token cap, revoke
-   fail-closed).
-3. **F-5, F-6, F-7, F-8** — correctness/operacional; F-6 se liga a F-2.
-4. Bajos + alinear el doc con lo realmente implementado (rotation,
-   download).
+- ✅ **F-1, F-3, F-4 aplicados (2026-06-12)** con tests de regresión.
+  Suite `./internal/federation/...` verde con `-race`.
+- ⏳ **F-2 (cuotas por peer)** — pendiente. Es la mayor: requiere campos
+  en `Peer` + migración de schema + conteo por peer en el handler de
+  stream + UI admin. Es una feature, no un fix puntual; hacer aparte
+  para no dejar una cuota a medias. Es el siguiente con más impacto.
+- ⏳ **F-5, F-6, F-7, F-8** — correctness/operacional; F-6 se liga a F-2.
+- ⏳ Bajos (F-9..F-13) + alinear el doc con lo implementado (rotation,
+  download siguen siendo Phase 2/7).

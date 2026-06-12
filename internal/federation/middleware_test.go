@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,10 @@ type inMemoryFedRepo struct {
 	items    map[string][]*SharedItem // library_id → items
 	cache    map[string]cacheEntry    // (peer_id|library_id) → entry
 	pendings []*PendingRequest        // pairing-request inbox
+
+	// failListPeers forces ListPeers to error — lets tests exercise
+	// the fail-closed cache-eviction path in RevokePeer (F-4).
+	failListPeers bool
 }
 
 type cacheEntry struct {
@@ -158,6 +163,9 @@ func (r *inMemoryFedRepo) GetPeerByServerUUID(_ context.Context, uuid string) (*
 func (r *inMemoryFedRepo) ListPeers(_ context.Context) ([]*Peer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failListPeers {
+		return nil, errors.New("forced ListPeers failure")
+	}
 	cp := make([]*Peer, len(r.peers))
 	copy(cp, r.peers)
 	return cp, nil
