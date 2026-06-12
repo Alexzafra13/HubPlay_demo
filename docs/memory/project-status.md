@@ -108,6 +108,12 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
   comentarios en español, regeneración sqlc.
 - `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback;
   P0/P1/P2 ✅, P3 abierta; PB-40..44 de reportes de usuario ✅).
+- `audit-2026-06-12-federation.md` — **NUEVO** audit del módulo P2P/
+  federación. Base cripto/auth sólida; abiertos F-1 (SSRF en redirects
+  del cliente saliente) y F-2 (cuotas por peer prometidas y no
+  implementadas → DoS de recursos locales) como 🟠, + 6 🟡 (exp sin
+  techo, revoke no fail-closed, HLS bajo rate-limit, etc.). Key
+  rotation y download siguen sin implementar (Phase 2/7).
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario
   (Fases 3–5 abiertas).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend.
