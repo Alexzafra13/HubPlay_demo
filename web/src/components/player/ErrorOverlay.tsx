@@ -14,7 +14,10 @@ interface Props {
  */
 export const ErrorOverlay: FC<Props> = ({ message, closeLabel, onClose }) => {
   return (
-    <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/80">
+    <div
+      data-testid="player-error-overlay"
+      className="absolute inset-0 flex items-center justify-center z-30 bg-black/80"
+    >
       <div className="flex flex-col items-center gap-4 max-w-md px-6 text-center">
         <svg
           className="size-12 text-error"

@@ -418,6 +418,10 @@ por el mismo carril (prefijo de label). Tests:
    UpNext → auto-advance; (c) cambio de dub mid-play mantiene posición;
    (d) LiveTV: zapear 3 canales sin spinner colgado; (e) matar backend
    mid-play → error accionable <30s (hoy: bucle infinito, PB-16).
+   **(2026-06-12)** Harness en `web/e2e/` + job `e2e-smoke` en CI:
+   (a)+(b)+(e) ✅ contra binario real con SPA embebida, ffmpeg y Chrome
+   (los Chromium de Playwright no decodifican H.264 — ver
+   `web/e2e/README.md`). Quedan (c) dub-switch y (d) LiveTV zap.
 
 ---
 

@@ -14,8 +14,8 @@
 |---|---|
 | Tests backend | `go test ./...` verde (`-race` en stream/api/iptv) |
 | Tests frontend | **748/748** vitest; `tsc`, `eslint` y `knip` limpios |
-| Rama de trabajo | `claude/revisa-trabajar-9wevyd` — Playback P2 completo |
-| Audit playback 2026-06-10 | P0 + P1a-d + PB-40..44 + **P2 ✅ (2026-06-12)**. **Queda P3** |
+| Rama de trabajo | `claude/revisa-trabajar-9wevyd` — Playback P2 completo + smoke E2E |
+| Audit playback 2026-06-10 | P0 + P1a-d + PB-40..44 + **P2 ✅ (2026-06-12)**. **P3 en curso**: smoke E2E (a)(b)(e) ✅ |
 | Audit prod 2026-06-08 | Fases 0/1/2 + B7 ✅. **Fases 3–5 abiertas** |
 
 ✔️ Checklist de retorno 2026-06-12 hecho: PR #518 mergeada, CI/Docker/
@@ -37,6 +37,23 @@ Release verdes en main (`cfafee0`), rama nueva desde main.
 - **PB-23**: DV vía `side_data_list` (DOVI record) con mapeo de
   `dv_bl_signal_compatibility_id` → base compatible o DolbyVision puro.
   ⚠️ items ya escaneados necesitan re-probe para re-etiquetar.
+
+**Sesión 2026-06-12 (cont.) — Smoke E2E Playwright (P3, gap de test 7):**
+- Harness en `web/e2e/`: cada spec arranca su servidor real (binario
+  con SPA embebida) y lo aprovisiona por API (wizard → admin →
+  bibliotecas → scan); fixtures de media generados con ffmpeg
+  (película MKV 2-audios → DirectStream/HLS; episodios MP4).
+- 3 smokes verdes: play→seek-restart→close→resume · backend SIGKILL
+  mid-play→ErrorOverlay acotado (PB-16) · ended→UpNext→siguiente.
+- Job `e2e-smoke` en ci.yml (paralelo; promover a `build.needs` cuando
+  demuestre estabilidad). data-testid nuevos: `player-error-overlay`,
+  `upnext-overlay`.
+- ⚠️ Los Chromium de Playwright NO decodifican H.264/AAC (open codecs):
+  local → `PW_CHROME` con Chrome/Chrome-for-Testing; CI → Chrome del
+  runner (`channel: "chrome"`). Documentado en `web/e2e/README.md`.
+- **Pendiente P3**: smoke (c) dub-switch (fixture ya trae eng+spa) y
+  (d) LiveTV zap (necesita upstream IPTV sintético); PB-19/26/29-31/
+  33/36-39 + resto de gaps de test del audit.
 
 ---
 

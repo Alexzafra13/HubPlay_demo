@@ -24,3 +24,6 @@ dist-ssr
 
 # capturas de verificación manual (web/verify)
 verify/*.png
+e2e/.tmp/
+test-results/
+playwright-report/

@@ -108,6 +108,7 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
   return (
     <div
       role="dialog"
+      data-testid="upnext-overlay"
       aria-live="polite"
       aria-label={t("upNext.title")}
       className="flex w-full max-w-md gap-4 rounded-[--radius-lg] border border-border bg-bg-card/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-md"
