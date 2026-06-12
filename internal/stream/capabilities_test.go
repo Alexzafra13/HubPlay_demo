@@ -263,3 +263,42 @@ func TestDecide_DeclaredCaps_TranscodeOnUnsupportedCodec(t *testing.T) {
 		t.Errorf("undeclared av1 should Transcode: got %s", d.Method)
 	}
 }
+
+// ─── PB-22: channels= en el header de capabilities ──────────────────
+
+func TestParseCapabilitiesHeader_Channels(t *testing.T) {
+	t.Parallel()
+	got := ParseCapabilitiesHeader("video=h264; audio=aac; container=mp4; channels=6")
+	if got == nil {
+		t.Fatal("expected non-nil capabilities")
+	}
+	if got.MaxAudioChannels != 6 {
+		t.Errorf("MaxAudioChannels = %d, want 6", got.MaxAudioChannels)
+	}
+}
+
+func TestParseCapabilitiesHeader_ChannelsMalformedIgnored(t *testing.T) {
+	t.Parallel()
+	got := ParseCapabilitiesHeader("video=h264; channels=lots")
+	if got == nil {
+		t.Fatal("expected non-nil capabilities (video bucket present)")
+	}
+	if got.MaxAudioChannels != 0 {
+		t.Errorf("malformed channels should stay 0, got %d", got.MaxAudioChannels)
+	}
+}
+
+func TestEffectiveCapabilities_ChannelsDefaultsToStereo(t *testing.T) {
+	t.Parallel()
+	// Cliente que declaró buckets pero no channels= → estéreo, mismo
+	// razonamiento conservador que HDR.
+	caps := ParseCapabilitiesHeader("video=h264; audio=aac")
+	eff := effectiveCapabilities(caps)
+	if eff.MaxAudioChannels != 2 {
+		t.Errorf("MaxAudioChannels = %d, want 2", eff.MaxAudioChannels)
+	}
+	// Sin header en absoluto → default web, también estéreo.
+	if got := effectiveCapabilities(nil).MaxAudioChannels; got != 2 {
+		t.Errorf("nil caps MaxAudioChannels = %d, want 2", got)
+	}
+}

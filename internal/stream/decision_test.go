@@ -540,3 +540,71 @@ func TestDecide_HEVCMain10_NotGatedWhenCapsDeclareHEVC(t *testing.T) {
 		t.Errorf("hevc Main 10 with hevc-capable client must DirectPlay, got %s", d.Method)
 	}
 }
+
+// ─── PB-22: canales de audio del transcode ───────────────────────────
+
+// Fuente 5.1 AC3 + cliente que declara channels=6: el transcode de
+// audio debe conservar el surround (-ac 6) en vez del downmix a
+// estéreo incondicional histórico.
+func TestDecide_AudioChannels_SurroundPreservedWhenClientDeclares(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "ac3", Channels: 6, IsDefault: true},
+	}
+	caps := ParseCapabilitiesHeader("video=h264; audio=aac; container=mp4; channels=6")
+
+	d := Decide(item, streams, caps, "", -1)
+	if d.Method != MethodDirectStream || d.CopyAudio {
+		t.Fatalf("expected DirectStream with audio reencode, got %s CopyAudio=%v", d.Method, d.CopyAudio)
+	}
+	if d.AudioChannels != 6 {
+		t.Errorf("AudioChannels = %d, want 6", d.AudioChannels)
+	}
+}
+
+func TestDecide_AudioChannels_Matrix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		srcChannels int
+		header      string
+		want        int
+	}{
+		{"cliente sin channels= → estéreo", 6, "video=h264; audio=aac", 2},
+		{"7.1 se pliega a 5.1", 8, "video=h264; audio=aac; channels=8", 6},
+		{"fuente estéreo no se infla", 2, "video=h264; audio=aac; channels=6", 2},
+		{"fuente sin metadata de canales → estéreo", 0, "video=h264; audio=aac; channels=6", 2},
+		{"mono se respeta", 1, "video=h264; audio=aac; channels=6", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			item := &librarymodel.Item{Container: "matroska"}
+			streams := []*librarymodel.MediaStream{
+				{StreamType: "video", Codec: "h264", IsDefault: true},
+				{StreamType: "audio", Codec: "dts", Channels: tc.srcChannels, IsDefault: true},
+			}
+			d := Decide(item, streams, ParseCapabilitiesHeader(tc.header), "", -1)
+			if d.AudioChannels != tc.want {
+				t.Errorf("AudioChannels = %d, want %d", d.AudioChannels, tc.want)
+			}
+		})
+	}
+}
+
+// El default web (sin header) mantiene el comportamiento histórico:
+// downmix a estéreo.
+func TestDecide_AudioChannels_NilCapsDefaultsToStereo(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "dts", Channels: 6, IsDefault: true},
+	}
+	d := Decide(item, streams, nil, "", -1)
+	if d.AudioChannels != 2 {
+		t.Errorf("AudioChannels = %d, want 2 (default web caps)", d.AudioChannels)
+	}
+}

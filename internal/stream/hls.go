@@ -11,7 +11,14 @@ import (
 // `audioStreamIndex` >= 0 → embed en cada variant URL para mantener
 // el dub al cambiar de calidad. `burnSubIndex` >= 0 → lleva la
 // elección de subtítulo quemado a cada variant URL.
-func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStreamIndex, burnSubIndex int) string {
+//
+// `sourceHeight` > 0 filtra las variantes que upscalearían: anunciar
+// 1080p para una fuente 480p hace que hls.js "suba de calidad" a un
+// re-encode inflado que quema un slot de transcode por nada. Si el
+// filtro dejara la lista vacía (fuente más pequeña que el perfil
+// mínimo), se conserva el perfil más bajo. 0 = sin datos, no filtra.
+// PB-10 (audit 2026-06-10).
+func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStreamIndex, burnSubIndex, sourceHeight int) string {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
 
@@ -28,12 +35,8 @@ func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStre
 		suffix = "?" + strings.Join(params, "&")
 	}
 
-	for _, name := range profiles {
-		p, ok := Profiles[name]
-		if !ok || name == "original" {
-			continue
-		}
-
+	for _, name := range eligibleProfiles(profiles, sourceHeight) {
+		p := Profiles[name]
 		bandwidth := parseBitrate(p.VideoBitrate) + parseBitrate(p.AudioBitrate)
 
 		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,FRAME-RATE=%d,NAME=\"%s\"\n",
@@ -42,6 +45,33 @@ func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStre
 	}
 
 	return b.String()
+}
+
+// eligibleProfiles devuelve los nombres de perfil válidos para el
+// master playlist: existentes, no "original", y — con sourceHeight
+// conocido — sin variantes que upscalearían. Garantiza al menos un
+// perfil (el más bajo) cuando el filtro vaciaría la lista.
+func eligibleProfiles(profiles []string, sourceHeight int) []string {
+	var out []string
+	lowest := ""
+	lowestHeight := 0
+	for _, name := range profiles {
+		p, ok := Profiles[name]
+		if !ok || name == "original" {
+			continue
+		}
+		if lowest == "" || p.Height < lowestHeight {
+			lowest, lowestHeight = name, p.Height
+		}
+		if sourceHeight > 0 && p.Height > sourceHeight {
+			continue
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 && lowest != "" {
+		return []string{lowest}
+	}
+	return out
 }
 
 // SynthesizeVODManifest construye un playlist HLS VOD completo,

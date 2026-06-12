@@ -50,6 +50,13 @@ const AUDIO_PROBES: Array<[string, string]> = [
 // can remux it to MP4 for them.
 const CONTAINERS = ["mp4", "webm", "mov"];
 
+// Max audio channels the client accepts in a transcoded stream. Every
+// mainstream browser decodes AAC 5.1 and downmixes to the output
+// device itself, so declaring 6 lets the server keep surround intact
+// instead of force-downmixing to stereo (PB-22). The server still
+// clamps to min(source, this, 6).
+const MAX_AUDIO_CHANNELS = 6;
+
 // Cache the result of the probes — they're deterministic per browser
 // session and cheap to redo, but the request hot path benefits from
 // memoising.
@@ -63,7 +70,7 @@ let cachedHeaderValue: string | null | undefined;
  *
  * Wire shape (matches the server's ParseCapabilitiesHeader):
  *
- *   video=h264,vp9,av1; audio=aac,mp3,opus; container=mp4,webm
+ *   video=h264,vp9,av1; audio=aac,mp3,opus; container=mp4,webm; channels=6
  */
 export function getClientCapabilitiesHeader(): string | null {
   if (cachedHeaderValue !== undefined) return cachedHeaderValue;
@@ -115,5 +122,6 @@ function computeHeader(): string | null {
   if (video.length > 0) parts.push(`video=${video.join(",")}`);
   if (audio.length > 0) parts.push(`audio=${audio.join(",")}`);
   parts.push(`container=${CONTAINERS.join(",")}`);
+  parts.push(`channels=${MAX_AUDIO_CHANNELS}`);
   return parts.join("; ");
 }

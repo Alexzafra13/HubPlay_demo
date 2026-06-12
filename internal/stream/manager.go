@@ -142,7 +142,7 @@ func NewManager(deps Deps) *Manager {
 	encoder := "libx264"
 	hwResult := HWAccelResult{Selected: HWAccelNone, Encoder: "libx264"}
 	if cfg.HWAccel.Enabled {
-		hwResult = DetectHWAccel(cfg.HWAccel.Preferred, logger)
+		hwResult = DetectHWAccel(cfg.HWAccel.Preferred, cfg.HWAccel.Device, logger)
 		hwAccel = hwResult.Selected
 		encoder = hwResult.Encoder
 	}
@@ -174,6 +174,7 @@ func NewManager(deps Deps) *Manager {
 			BaseDir:          cacheDir,
 			TranscodeTimeout: cfg.TranscodeTimeout,
 			HWAccel:          hwAccel,
+			HWDevice:         hwResult.Device,
 			Encoder:          encoder,
 			Libx264Preset:    cfg.TranscodePreset,
 			Logger:           logger,
@@ -327,11 +328,6 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return ms, nil
 	}
 
-	// Checks de capacidad global y per-user.
-	if err := m.checkSessionCaps(userID); err != nil {
-		return nil, err
-	}
-
 	// Fetch item y streams.
 	item, err := m.items.GetByID(ctx, itemID)
 	if err != nil {
@@ -369,8 +365,41 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return m.buildDirectPlaySession(key, userID, itemID, decision), nil
 	}
 
+	// Un switch de calidad/dub de hls.js crea una sesión con key nueva;
+	// las hermanas del mismo (user, item) seguían vivas 5 min más (idle
+	// reaper) reteniendo slots — con caps de software (global 2 / user 1)
+	// dos switches en <5 min agotaban el pool → TranscodeBusy → 503 a
+	// mitad de película. Solo una variante suena a la vez: parar las
+	// hermanas antes del check de capacidad. PB-10 (audit 2026-06-10).
+	m.stopSiblingSessions(userID, itemID, key)
+
+	// Checks de capacidad global y per-user, ya con la decisión en mano
+	// para no contar remux como full-transcode.
+	if err := m.checkSessionCaps(userID, decision); err != nil {
+		return nil, err
+	}
+
 	// Arrancar transcode/remux.
 	return m.spawnTranscodeSession(key, userID, itemID, item.Path, audioStreamIndex, burnSub, decision, startTime)
+}
+
+// stopSiblingSessions detiene todas las sesiones de (userID, itemID)
+// cuya key difiera de keepKey — las variantes de calidad/audio/sub que
+// el cliente abandonó al hacer switch. PB-10.
+func (m *Manager) stopSiblingSessions(userID, itemID, keepKey string) {
+	m.mu.Lock()
+	prefix := userID + ":" + itemID + ":"
+	var keys []string
+	for k := range m.sessions {
+		if k != keepKey && strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
+	}
+	m.mu.Unlock()
+	for _, k := range keys {
+		m.logger.Info("stopping sibling session on variant switch", "old_key", k, "new_key", keepKey)
+		m.StopSession(k)
+	}
 }
 
 // tryGetExistingSession intenta devolver una sesión ya registrada bajo
@@ -387,26 +416,38 @@ func (m *Manager) tryGetExistingSession(key string) *ManagedSession {
 
 // checkSessionCaps verifica los límites global y per-user de sesiones
 // concurrentes. Devuelve error TranscodeBusy si se excede alguno.
-func (m *Manager) checkSessionCaps(userID string) error {
+//
+// Los caps protegen CPU/GPU de encode, así que solo cuentan los
+// full-transcode (CopyVideo=false): un remux DirectStream (`-c:v copy`)
+// cuesta IO, no encoder — ni consume slot ni se bloquea por el cap.
+// Antes un remux contaba igual que un 4K HEVC→H264 y el pool de 2
+// slots de un host software se agotaba con dos remuxes. PB-10.
+func (m *Manager) checkSessionCaps(userID string, decision PlaybackDecision) error {
+	if decision.CopyVideo {
+		return nil
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
-		active := len(m.sessions)
+	var active, userActive int
+	for _, ms := range m.sessions {
+		if ms.Decision.CopyVideo {
+			continue
+		}
+		active++
+		if ms.UserID == userID {
+			userActive++
+		}
+	}
+
+	if m.cfg.MaxTranscodeSessions > 0 && active >= m.cfg.MaxTranscodeSessions {
 		m.metrics.TranscodeBusy()
 		return domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
 	}
-	if m.cfg.MaxTranscodeSessionsPerUser > 0 {
-		var userActive int
-		for _, ms := range m.sessions {
-			if ms.UserID == userID {
-				userActive++
-			}
-		}
-		if userActive >= m.cfg.MaxTranscodeSessionsPerUser {
-			m.metrics.TranscodeBusy()
-			return domain.NewTranscodeBusy(userActive, m.cfg.MaxTranscodeSessionsPerUser)
-		}
+	if m.cfg.MaxTranscodeSessionsPerUser > 0 && userActive >= m.cfg.MaxTranscodeSessionsPerUser {
+		m.metrics.TranscodeBusy()
+		return domain.NewTranscodeBusy(userActive, m.cfg.MaxTranscodeSessionsPerUser)
 	}
 	return nil
 }
@@ -516,6 +557,7 @@ func (m *Manager) spawnTranscodeSession(key, userID, itemID, inputPath string, a
 		ToneMap:            decision.ToneMap,
 		StartSegmentNumber: startSegment,
 		AudioStreamIndex:   audioStreamIndex,
+		AudioChannels:      decision.AudioChannels,
 		BurnSub:            burnSub,
 	})
 	if err != nil {
@@ -704,6 +746,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		ToneMap:            ms.Decision.ToneMap,
 		StartSegmentNumber: segmentIndex,
 		AudioStreamIndex:   ms.AudioStreamIndex,
+		AudioChannels:      ms.Decision.AudioChannels,
 		BurnSub:            ms.BurnSubtitle,
 	})
 	if err != nil {

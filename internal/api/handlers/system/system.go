@@ -257,6 +257,13 @@ type ffmpegStats struct {
 	HWAccelsAvailable []string `json:"hw_accels_available"`
 	HWAccelSelected   string   `json:"hw_accel_selected"`
 	HWAccelEncoder    string   `json:"hw_accel_encoder"`
+	// HWAccelDevice is the DRM render node in use (VAAPI/QSV only).
+	HWAccelDevice string `json:"hw_accel_device,omitempty"`
+	// HWAccelFallbackReason is non-empty when an accelerator was
+	// detected but its verification failed and transcoding silently
+	// ran on CPU. Surfaced so the admin panel can show WHY instead of
+	// a green "vaapi available" badge over a software pipeline (PB-5).
+	HWAccelFallbackReason string `json:"hw_accel_fallback_reason,omitempty"`
 }
 
 type runtimeStats struct {
@@ -351,6 +358,8 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		hw := h.streams.HWAccelInfo()
 		out.FFmpeg.HWAccelSelected = string(hw.Selected)
 		out.FFmpeg.HWAccelEncoder = hw.Encoder
+		out.FFmpeg.HWAccelDevice = hw.Device
+		out.FFmpeg.HWAccelFallbackReason = hw.FallbackReason
 		out.FFmpeg.HWAccelsAvailable = make([]string, 0, len(hw.Available))
 		for _, a := range hw.Available {
 			out.FFmpeg.HWAccelsAvailable = append(out.FFmpeg.HWAccelsAvailable, string(a))

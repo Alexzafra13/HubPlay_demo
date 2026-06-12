@@ -33,6 +33,10 @@ type PlaybackDecision struct {
 	CopyVideo  bool
 	CopyAudio  bool
 	ToneMap    bool
+	// AudioChannels es el `-ac` objetivo cuando se transcodea audio:
+	// min(canales fuente, canales cliente, 6). 0 = legacy → estéreo.
+	// Irrelevante con CopyAudio=true. PB-22 (audit 2026-06-10).
+	AudioChannels int
 }
 
 // remuxableContainers lista containers fuente que ffmpeg puede
@@ -103,6 +107,11 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 		}
 	}
 
+	// Canales objetivo si el audio acaba transcodeado. Antes era un
+	// `-ac 2` incondicional: las fuentes 5.1/7.1 perdían el surround
+	// aunque el cliente decodificara AAC multicanal. PB-22.
+	audioChannels := transcodeAudioChannels(audioStream, eff.MaxAudioChannels)
+
 	// DirectPlay: todo compatible — sin sesión ffmpeg.
 	if videoOK && audioOK && containerOK && hdrOK {
 		return PlaybackDecision{
@@ -119,28 +128,49 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 	// Requiere hdrOK porque stream-copy no permite tonemap.
 	if videoOK && hdrOK && containerInSet(item.Container, remuxableContainers) {
 		return PlaybackDecision{
-			Method:     MethodDirectStream,
-			VideoCodec: videoStream.Codec,
-			AudioCodec: audioCodecName(audioStream),
-			Container:  "mpegts",
-			Profile:    profile,
-			CopyVideo:  true,
-			CopyAudio:  audioOK,
+			Method:        MethodDirectStream,
+			VideoCodec:    videoStream.Codec,
+			AudioCodec:    audioCodecName(audioStream),
+			Container:     "mpegts",
+			Profile:       profile,
+			CopyVideo:     true,
+			CopyAudio:     audioOK,
+			AudioChannels: audioChannels,
 		}
 	}
 
 	// Transcode: codec de video incompatible o fuente HDR sin soporte
 	// en el cliente. Re-encode completo a H.264 + AAC.
 	return PlaybackDecision{
-		Method:     MethodTranscode,
-		VideoCodec: "h264",
-		AudioCodec: "aac",
-		Container:  "mpegts",
-		Profile:    profile,
-		CopyVideo:  false,
-		CopyAudio:  false,
-		ToneMap:    !hdrOK,
+		Method:        MethodTranscode,
+		VideoCodec:    "h264",
+		AudioCodec:    "aac",
+		Container:     "mpegts",
+		Profile:       profile,
+		CopyVideo:     false,
+		CopyAudio:     false,
+		ToneMap:       !hdrOK,
+		AudioChannels: audioChannels,
 	}
+}
+
+// transcodeAudioChannels calcula los canales de salida del transcode
+// de audio: min(fuente, cliente, 6). El techo de 6 es el límite
+// práctico de AAC-LC en navegadores (5.1); 7.1 se pliega a 5.1.
+// Fuente sin metadata de canales (0) cuenta como estéreo.
+func transcodeAudioChannels(audio *librarymodel.MediaStream, clientMax int) int {
+	src := 2
+	if audio != nil && audio.Channels > 0 {
+		src = audio.Channels
+	}
+	if clientMax <= 0 {
+		clientMax = 2
+	}
+	n := min(src, clientMax, 6)
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // pickStreams selecciona el video stream (default o primero) y la pista

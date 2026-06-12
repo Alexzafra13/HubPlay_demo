@@ -216,8 +216,21 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 			burnSubIndex = v
 		}
 	}
+	// Altura de la fuente para filtrar variantes que upscalearían
+	// (anunciar 1080p de una fuente 480p hace que el ABR de hls.js
+	// queme slots de transcode en re-encodes inflados). Error o sin
+	// video stream → 0 = sin filtro, el comportamiento previo. PB-10.
+	sourceHeight := 0
+	if mediaStreams, err := h.streams.ListByItem(r.Context(), itemID); err == nil {
+		for _, s := range mediaStreams {
+			if s.StreamType == "video" && s.Height > sourceHeight {
+				sourceHeight = s.Height
+			}
+		}
+	}
+
 	profiles := []string{"1080p", "720p", "480p", "360p"}
-	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles, audioStreamIndex, burnSubIndex)
+	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles, audioStreamIndex, burnSubIndex, sourceHeight)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", handlers.CacheControlNoCache)

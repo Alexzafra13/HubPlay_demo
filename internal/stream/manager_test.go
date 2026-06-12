@@ -1097,3 +1097,112 @@ func TestValidateAudioStreamIndex(t *testing.T) {
 		})
 	}
 }
+
+// ─── PB-10: caps que solo cuentan full-transcode + stop de hermanas ──
+
+// seedSession registra una sesión sintética con la decisión dada.
+// done cerrado para que Stop() no bloquee.
+func seedSession(t *testing.T, m *Manager, key, userID, itemID string, decision PlaybackDecision) {
+	t.Helper()
+	m.mu.Lock()
+	m.sessions[key] = &ManagedSession{
+		Session: &Session{
+			ID:        key,
+			ItemID:    itemID,
+			OutputDir: t.TempDir(),
+			done:      closedChan(),
+		},
+		UserID:       userID,
+		Decision:     decision,
+		LastAccessed: time.Now(),
+	}
+	m.mu.Unlock()
+}
+
+// Un remux DirectStream (CopyVideo=true) cuesta IO, no encoder: ni
+// consume slot del cap ni se bloquea por él. Antes dos remuxes
+// agotaban un pool de 2 y el tercer playback (incluso otro remux)
+// recibía 503. PB-10 (audit 2026-06-10).
+func TestManager_CheckSessionCaps_RemuxNeitherCountsNorBlocks(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+	m.cfg.MaxTranscodeSessions = 2
+	m.cfg.MaxTranscodeSessionsPerUser = 2
+
+	remux := PlaybackDecision{Method: MethodDirectStream, CopyVideo: true}
+	full := PlaybackDecision{Method: MethodTranscode, CopyVideo: false}
+
+	// Dos remuxes activos: un full-transcode nuevo debe pasar.
+	seedSession(t, m, SessionKey("u1", "i1", "720p", -1, -1), "u1", "i1", remux)
+	seedSession(t, m, SessionKey("u1", "i2", "720p", -1, -1), "u1", "i2", remux)
+	if err := m.checkSessionCaps("u1", full); err != nil {
+		t.Fatalf("remux sessions must not count toward the cap: %v", err)
+	}
+
+	// Dos full-transcode activos: el tercero se bloquea...
+	seedSession(t, m, SessionKey("u1", "i3", "720p", -1, -1), "u1", "i3", full)
+	seedSession(t, m, SessionKey("u1", "i4", "720p", -1, -1), "u1", "i4", full)
+	if err := m.checkSessionCaps("u1", full); err == nil {
+		t.Fatal("expected TranscodeBusy with the cap full of full-transcodes")
+	}
+	// ...pero un remux nuevo pasa aunque el cap esté lleno.
+	if err := m.checkSessionCaps("u1", remux); err != nil {
+		t.Fatalf("a new remux must bypass the encode cap: %v", err)
+	}
+}
+
+func TestManager_CheckSessionCaps_PerUserCountsOnlyFullTranscodes(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+	m.cfg.MaxTranscodeSessions = 10
+	m.cfg.MaxTranscodeSessionsPerUser = 1
+
+	remux := PlaybackDecision{Method: MethodDirectStream, CopyVideo: true}
+	full := PlaybackDecision{Method: MethodTranscode, CopyVideo: false}
+
+	seedSession(t, m, SessionKey("u1", "i1", "720p", -1, -1), "u1", "i1", remux)
+	if err := m.checkSessionCaps("u1", full); err != nil {
+		t.Fatalf("user remux must not eat the per-user encode slot: %v", err)
+	}
+	seedSession(t, m, SessionKey("u1", "i2", "720p", -1, -1), "u1", "i2", full)
+	if err := m.checkSessionCaps("u1", full); err == nil {
+		t.Fatal("expected per-user TranscodeBusy")
+	}
+	// Otro usuario no se ve afectado.
+	if err := m.checkSessionCaps("u2", full); err != nil {
+		t.Fatalf("other user must not be blocked: %v", err)
+	}
+}
+
+// Un switch de calidad/dub crea una key nueva; las hermanas del mismo
+// (user, item) deben pararse — solo una variante suena a la vez. PB-10.
+func TestManager_StopSiblingSessions(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	d := PlaybackDecision{Method: MethodTranscode}
+	keep := SessionKey("u1", "i1", "720p", -1, -1)
+	seedSession(t, m, keep, "u1", "i1", d)
+	seedSession(t, m, SessionKey("u1", "i1", "1080p", -1, -1), "u1", "i1", d)
+	seedSession(t, m, SessionKey("u1", "i1", "720p", 1, -1), "u1", "i1", d)
+	// Distractores: otro item y otro usuario.
+	other := SessionKey("u1", "i2", "720p", -1, -1)
+	foreign := SessionKey("u2", "i1", "720p", -1, -1)
+	seedSession(t, m, other, "u1", "i2", d)
+	seedSession(t, m, foreign, "u2", "i1", d)
+
+	m.stopSiblingSessions("u1", "i1", keep)
+
+	if _, ok := m.GetSession(keep); !ok {
+		t.Error("keepKey session must survive")
+	}
+	if _, ok := m.GetSession(other); !ok {
+		t.Error("other-item session must survive")
+	}
+	if _, ok := m.GetSession(foreign); !ok {
+		t.Error("other-user session must survive")
+	}
+	if got := m.ActiveSessions(); got != 3 {
+		t.Errorf("active = %d, want 3 (keep + 2 distractores)", got)
+	}
+}

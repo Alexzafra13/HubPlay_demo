@@ -7,7 +7,7 @@ import (
 )
 
 func TestGenerateMasterPlaylist(t *testing.T) {
-	playlist := GenerateMasterPlaylist("item123", "http://localhost:8096", []string{"1080p", "720p", "480p"}, -1, -1)
+	playlist := GenerateMasterPlaylist("item123", "http://localhost:8096", []string{"1080p", "720p", "480p"}, -1, -1, 0)
 
 	if !strings.HasPrefix(playlist, "#EXTM3U") {
 		t.Error("playlist should start with #EXTM3U")
@@ -32,13 +32,55 @@ func TestGenerateMasterPlaylist(t *testing.T) {
 }
 
 func TestGenerateMasterPlaylist_SkipsOriginal(t *testing.T) {
-	playlist := GenerateMasterPlaylist("item1", "", []string{"original", "720p"}, -1, -1)
+	playlist := GenerateMasterPlaylist("item1", "", []string{"original", "720p"}, -1, -1, 0)
 
 	if strings.Contains(playlist, "original") {
 		t.Error("should not include original profile in master playlist")
 	}
 	if !strings.Contains(playlist, "720p") {
 		t.Error("should include 720p")
+	}
+}
+
+// PB-10: con la altura de la fuente conocida, el master no debe
+// anunciar variantes que upscalearían — el ABR de hls.js las elegiría
+// y cada switch quema un slot de transcode en un re-encode inflado.
+func TestGenerateMasterPlaylist_FiltersVariantsAboveSource(t *testing.T) {
+	all := []string{"1080p", "720p", "480p", "360p"}
+	playlist := GenerateMasterPlaylist("item1", "", all, -1, -1, 480)
+
+	if strings.Contains(playlist, "RESOLUTION=1920x1080") || strings.Contains(playlist, "RESOLUTION=1280x720") {
+		t.Errorf("variants above 480p source should be filtered:\n%s", playlist)
+	}
+	if !strings.Contains(playlist, "RESOLUTION=854x480") {
+		t.Error("480p variant (== source height) should remain")
+	}
+	if !strings.Contains(playlist, "RESOLUTION=640x360") {
+		t.Error("360p variant should remain")
+	}
+}
+
+func TestGenerateMasterPlaylist_SourceHeightUnknown_NoFilter(t *testing.T) {
+	all := []string{"1080p", "720p", "480p", "360p"}
+	playlist := GenerateMasterPlaylist("item1", "", all, -1, -1, 0)
+	for _, res := range []string{"1920x1080", "1280x720", "854x480", "640x360"} {
+		if !strings.Contains(playlist, "RESOLUTION="+res) {
+			t.Errorf("with unknown source height every variant should be advertised; missing %s", res)
+		}
+	}
+}
+
+// Fuente más pequeña que el perfil mínimo: se conserva al menos el
+// perfil más bajo en vez de emitir un master vacío.
+func TestGenerateMasterPlaylist_TinySourceKeepsLowestProfile(t *testing.T) {
+	all := []string{"1080p", "720p", "480p", "360p"}
+	playlist := GenerateMasterPlaylist("item1", "", all, -1, -1, 240)
+
+	if !strings.Contains(playlist, "RESOLUTION=640x360") {
+		t.Errorf("lowest profile should survive the filter:\n%s", playlist)
+	}
+	if strings.Contains(playlist, "RESOLUTION=854x480") {
+		t.Errorf("higher profiles should still be filtered:\n%s", playlist)
 	}
 }
 
