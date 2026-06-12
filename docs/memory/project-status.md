@@ -51,9 +51,20 @@ Release verdes en main (`cfafee0`), rama nueva desde main.
 - ⚠️ Los Chromium de Playwright NO decodifican H.264/AAC (open codecs):
   local → `PW_CHROME` con Chrome/Chrome-for-Testing; CI → Chrome del
   runner (`channel: "chrome"`). Documentado en `web/e2e/README.md`.
-- **Pendiente P3**: smoke (c) dub-switch (fixture ya trae eng+spa) y
-  (d) LiveTV zap (necesita upstream IPTV sintético); PB-19/26/29-31/
-  33/36-39 + resto de gaps de test del audit.
+- **(cont. 2)** Smokes (c) dub-switch (menú Audio → `?audio=1` →
+  resume al playhead) y (d) LiveTV zap (upstream M3U+MPEG-TS sintético
+  del propio test → import → transmux → zap por "Canales similares")
+  ✅. **Los 5 escenarios E2E del audit cubiertos.**
+- 🔐 **Hallazgo (B2-adyacente)**: `isSafeUpstream` (SSRF guard de IPTV)
+  solo cubre el proxy passthrough — el **transmux lanza ffmpeg contra
+  la URL upstream sin validarla** (`transmux.go startLocked`). Es lo
+  que permite al E2E usar un upstream loopback, pero es un hueco real:
+  un M3U malicioso puede hacer que ffmpeg ataque URLs internas. Al
+  cerrarlo, añadir knob `iptv.allow_private_upstreams` (los tuners de
+  LAN — HDHomeRun, tvheadend — son caso de uso legítimo y hoy el guard
+  del proxy YA los bloquea) y actualizar `web/e2e/livetv-zap.spec.ts`.
+- **Pendiente P3**: PB-19/26/29-31/33/36-39 + resto de gaps de test
+  del audit (1-6).
 
 ---
 

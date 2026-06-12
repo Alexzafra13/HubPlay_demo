@@ -231,6 +231,43 @@ export class HubplayServer {
     return String(hit.id);
   }
 
+  /**
+   * Crea una biblioteca Live TV apuntando al M3U dado, dispara el
+   * import y espera a que aparezcan `expectedChannels` canales.
+   */
+  async provisionLiveTV(m3uURL: string, expectedChannels: number): Promise<string> {
+    const lib = this.expectOk(
+      "create livetv library",
+      await this.request("POST", "/api/v1/libraries", {
+        name: "Live",
+        content_type: "livetv",
+        m3u_url: m3uURL,
+      }),
+    );
+    const libraryId = String(lib.id ?? lib.ID ?? "");
+    if (!libraryId) throw new Error(`livetv library response missing id: ${JSON.stringify(lib)}`);
+
+    const res = await this.request("POST", `/api/v1/libraries/${libraryId}/iptv/refresh-m3u`, {});
+    if (res.status !== 202 && res.status !== 200) {
+      throw new Error(`refresh-m3u failed: HTTP ${res.status} ${JSON.stringify(res.body)}`);
+    }
+
+    // El import corre detached; polling de canales hasta el count.
+    const deadline = Date.now() + 30_000;
+    let last = 0;
+    while (Date.now() < deadline) {
+      const chRes = await this.request("GET", `/api/v1/libraries/${libraryId}/channels`);
+      if (chRes.status === 200) {
+        const data = chRes.body.data;
+        const channels = Array.isArray(data) ? data : [];
+        last = channels.length;
+        if (last >= expectedChannels) return libraryId;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error(`m3u import: expected ${expectedChannels} channels, got ${last}`);
+  }
+
   /** Muerte abrupta — el smoke de "backend caído mid-play". */
   killHard(): void {
     this.proc?.kill("SIGKILL");

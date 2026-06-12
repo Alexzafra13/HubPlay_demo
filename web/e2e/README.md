@@ -10,12 +10,16 @@ no ve nada de esto (layout, MSE, hls.js, sesiones de transcode).
 | Spec | Escenario del audit |
 |---|---|
 | `playback.spec.ts` | (a) login → play → primer frame → seek lejano (seek-restart de ffmpeg) → cerrar → resume en posición |
-| `server-down.spec.ts` | (e) SIGKILL al backend mid-play + seek → error terminal acotado (PB-16), no bucle infinito |
 | `upnext.spec.ts` | (b) fin de episodio → overlay UpNext → reproducir el siguiente |
+| `audio-switch.spec.ts` | (c) cambio de dub mid-play (`?audio=N`, sesión nueva — PB-6) mantiene la posición |
+| `livetv-zap.spec.ts` | (d) import M3U → transmux → zapear 3 canales sin spinner colgado |
+| `server-down.spec.ts` | (e) SIGKILL al backend mid-play + seek → error terminal acotado (PB-16), no bucle infinito |
 
-Pendientes (resto de P3): (c) cambio de dub mid-play mantiene posición
-(el fixture de película ya trae 2 pistas de audio eng/spa), (d) zapping
-Live TV (necesita un upstream IPTV sintético).
+Los **cinco escenarios del audit están cubiertos**. El smoke de Live TV
+levanta su propio upstream HTTP (M3U + MPEG-TS sintético) en loopback;
+funciona porque el transmux no valida `isSafeUpstream` — si ese guard
+se extiende al transmux, este spec necesitará el knob de config que lo
+acompañe (upstreams de LAN son un caso de uso legítimo).
 
 ## Cómo funciona
 

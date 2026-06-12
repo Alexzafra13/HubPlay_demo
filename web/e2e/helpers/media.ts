@@ -19,6 +19,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MEDIA_ROOT = path.resolve(HERE, "..", ".tmp", "media");
 export const MOVIES_DIR = path.join(MEDIA_ROOT, "movies");
 export const SHOWS_DIR = path.join(MEDIA_ROOT, "shows");
+const LIVE_DIR = path.join(MEDIA_ROOT, "live");
+/** Stream "en vivo" sintético para el smoke de Live TV: un MPEG-TS
+ *  h264+aac servido por HTTP. Suficientemente largo como para que el
+ *  zapping nunca alcance el EOF. */
+export const LIVE_TS_FILE = path.join(LIVE_DIR, "channel.ts");
+const LIVE_TS_DURATION = 180;
 
 /** Duración de la película de prueba (segundos). Suficiente para
  *  seeks "lejanos" (>1 min) sin que el encode del fixture tarde. */
@@ -92,4 +98,7 @@ export async function generateFixtures(): Promise<void> {
     path.join(SHOWS_DIR, "Test Show", "Season 01", "Test Show - S01E02 - Second.mp4"),
     EPISODE_DURATION,
   );
+  // La extensión .ts hace que ffmpeg muxee MPEG-TS (Annex-B), el
+  // formato que el transmux de IPTV espera de un upstream típico.
+  await generateVideo(LIVE_TS_FILE, LIVE_TS_DURATION);
 }
