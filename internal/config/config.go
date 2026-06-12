@@ -160,6 +160,9 @@ type StreamingConfig struct {
 type HWAccelConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	Preferred string `yaml:"preferred"` // auto, vaapi, qsv, nvenc, videotoolbox
+	// Device es el render node DRM para VAAPI/QSV. Vacío = auto
+	// (/dev/dri/renderD128). Relevante en hosts multi-GPU.
+	Device string `yaml:"device"`
 }
 
 type ServerConfig struct {

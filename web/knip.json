@@ -1,5 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": ["verify/**"],
-  "ignoreDependencies": ["playwright-core"]
+  "ignore": [
+    "verify/**"
+  ],
+  "ignoreDependencies": [
+    "playwright-core"
+  ],
+  "ignoreBinaries": [
+    "go"
+  ]
 }

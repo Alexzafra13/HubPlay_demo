@@ -75,16 +75,24 @@ mapeando `video.error.code` a mensajes específicos.
 
 ### Backend — decisión y transcode
 
-- **PB-5 · VAAPI/QSV no funcionan de verdad.** `transcode.go:361-362,440` +
+- ✅ **PB-5 · VAAPI/QSV no funcionan de verdad.** `transcode.go:361-362,440` +
   `hwaccel.go:139-173`. `h264_vaapi` necesita `-init_hw_device`/`
   -vaapi_device` + `format=nv12,hwupload` al final de la vf chain;
   `BuildFFmpegArgs` no emite ninguno. `verifyEncoder` falla al arrancar y
   cae a libx264 con un Warn → quien compró el target Docker `hwaccel` para
   VAAPI **transcodea por software sin saberlo**, con
   `MaxTranscodeSessions` autotuneado a 6 como si hubiera iGPU
-  (`autotune.go:28`). NVENC sí funciona. **Fix:** path VAAPI dedicado
-  (init_hw_device + hwupload, tonemap software antes del upload) y
-  visibilizar el fallback en el panel admin.
+  (`autotune.go:28`). NVENC sí funciona. **Fix aplicado (2026-06-12):**
+  `HWAccelInputArgs` emite `-init_hw_device vaapi=hw:<device>` +
+  `-hwaccel_device hw` + `-filter_hw_device hw`; la vf chain termina en
+  `format=nv12,hwupload` (tras tonemap/overlay — software antes del
+  upload); `verifyEncoder` ejercita el MISMO pipeline (device+upload) y
+  devuelve razón diagnóstica; `HWAccelResult.FallbackReason` +
+  `hw_accel_fallback_reason`/`hw_accel_device` en `/admin/system/stats`
+  → tile GPU en warning con hint. Device configurable
+  (`hardware_acceleration.device`, default `/dev/dri/renderD128`). QSV:
+  `-init_hw_device qsv=hw` (encode desde system memory). El reencode
+  del transmux IPTV emite el mismo hwupload para `h264_vaapi`.
 - ✅ **PB-6 · La decisión ignora la pista de audio seleccionada.**
   `decision.go:84-97` + `manager.go:428-446`. `Decide` evalúa `audioOK`
   solo contra la pista default; `AudioStreamIndex` no le llega. MKV con
@@ -112,16 +120,19 @@ mapeando `video.error.code` a mensajes específicos.
   restart spawnea uno nuevo **fuera del map** → nadie lo para hasta el
   timeout de 4h. **Fix:** tras `RestartAt`, re-verificar bajo `m.mu` que
   la key sigue viva; si no, `newSession.Stop()`.
-- **PB-10 · ABR + sesión-por-calidad agota los caps → 503 a mitad de película.**
+- ✅ **PB-10 · ABR + sesión-por-calidad agota los caps → 503 a mitad de película.**
   `hls.go:31-44` + `manager.go:241-245,375-397` + `autotune.go:24-49`.
   El master anuncia 4 variantes; cada switch de calidad de hls.js spawnea
   otra sesión ffmpeg y la anterior vive 5 min más. Con caps de software
   (global 2 / user 1) dos switches en <5 min → `TranscodeBusy` → 503.
   Agravante: en DirectStream las 4 variantes producen bytes idénticos con
-  `BANDWIDTH` inventados → el ABR no puede adaptar. **Fix:** parar
-  sesiones hermanas del mismo item al cambiar de profile; no contar
-  `CopyVideo` como full-transcode en el cap; filtrar variantes por
-  resolución de la fuente.
+  `BANDWIDTH` inventados → el ABR no puede adaptar. **Fix aplicado
+  (2026-06-12):** `stopSiblingSessions` para las hermanas de
+  (user, item) al spawnnear la variante nueva; `checkSessionCaps` recibe
+  la decisión y los remux (`CopyVideo`) ni cuentan ni se bloquean (el cap
+  protege encoder, no IO); `GenerateMasterPlaylist` filtra variantes por
+  encima de la altura de la fuente (con fallback al perfil más bajo) —
+  el handler pasa el max height de los video streams del item.
 
 ### Backend — probe, trickplay, scan
 
@@ -207,14 +218,21 @@ mapeando `video.error.code` a mensajes específicos.
   desregistrar con error tipado.
 - ✅ **PB-21 · `-tune zerolatency` en VOD** degrada calidad por bit sin
   ganar latencia (`transcode.go:441-446`). Quitarlo del path VOD.
-- **PB-22 · Downmix forzado `-ac 2`** en todo transcode de audio
+- ✅ **PB-22 · Downmix forzado `-ac 2`** en todo transcode de audio
   (`transcode.go:495-499`): las fuentes 5.1/7.1 pierden surround aunque el
-  cliente soporte AAC 5.1. **Fix:** `channels` en capabilities + `-ac
-  min(src, client, 6)`.
-- **PB-23 · Dolby Vision casi nunca se detecta.** `probe.go:218-229` mira
+  cliente soporte AAC 5.1. **Fix aplicado (2026-06-12):** token
+  `channels=N` en el header de capabilities (web client emite
+  `channels=6`; sin declarar → 2, conservador como HDR);
+  `Decide` calcula `AudioChannels = min(src, client, 6)` y viaja por
+  `TranscodeRequest` hasta `-ac`. El default web sigue en estéreo.
+- ✅ **PB-23 · Dolby Vision casi nunca se detecta.** `probe.go:218-229` mira
   `profile`, pero ffprobe anuncia DV en `side_data_list` (DOVI). DV
   Profile 5 (WEB-DLs) se etiqueta HDR10/SDR → colores verde/morado.
-  **Fix:** parsear `side_data_list`; DV sin base compatible → transcode.
+  **Fix aplicado (2026-06-12):** `detectHDR` parsea el "DOVI
+  configuration record" con precedencia sobre `color_transfer`:
+  `dv_bl_signal_compatibility_id` 1/6→HDR10, 4→HLG, 2→SDR, resto
+  (P5)→DolbyVision → transcode+tonemap salvo cap `dovi` del cliente.
+  Requiere re-scan/probe para items ya escaneados.
 - ✅ **PB-24 · Cover art embebido (`attached_pic`) persiste como pista de vídeo real.**
   `probe.go:137` (no lee `disposition.attached_pic`) → música con
   carátula = "transcode completo" del MP3; pista fantasma en el UI.
@@ -400,6 +418,11 @@ por el mismo carril (prefijo de label). Tests:
    UpNext → auto-advance; (c) cambio de dub mid-play mantiene posición;
    (d) LiveTV: zapear 3 canales sin spinner colgado; (e) matar backend
    mid-play → error accionable <30s (hoy: bucle infinito, PB-16).
+   **(2026-06-12)** Harness en `web/e2e/` + job `e2e-smoke` en CI:
+   **los 5 escenarios ✅** contra binario real con SPA embebida, ffmpeg
+   y Chrome (los Chromium de Playwright no decodifican H.264 — ver
+   `web/e2e/README.md`). El smoke (d) destapó que el transmux no pasa
+   por `isSafeUpstream` (hallazgo B2-adyacente, ver project-status).
 
 ---
 
@@ -412,5 +435,5 @@ por el mismo carril (prefijo de label). Tests:
 | **P1b ✅** | Trickplay + probe | PB-11, PB-12, PB-13, PB-24, PB-25 | hecho (2026-06-10) |
 | **P1c ✅** | IPTV | PB-14, PB-15, PB-27, PB-28 | hecho (2026-06-10) |
 | **P1d ✅** | Player frontend | PB-16, PB-17, PB-18, PB-32, PB-34, PB-35 + tests useHls | hecho (2026-06-10) |
-| **P2** | VAAPI real + ABR/caps + surround | PB-5, PB-10, PB-22, PB-23 | 1-2 sesiones |
+| **P2 ✅** | VAAPI real + ABR/caps + surround | PB-5, PB-10, PB-22, PB-23 | hecho (2026-06-12) |
 | **P3** | E2E smoke + resto 🟡/🟢 | gaps de test 1-7, PB-26, PB-29–34, PB-36–39 | 1-2 sesiones |

@@ -2,6 +2,7 @@ package stream
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,10 @@ type Capabilities struct {
 	// Tokens: "hdr10", "hlg", "dovi" ("dolbyvision" también aceptado).
 	// Vacío/nil = "solo SDR" — el servidor hará tonemap a BT.709.
 	HDRFormats map[string]bool
+	// MaxAudioChannels es el máximo de canales que el cliente puede
+	// decodificar (`channels=6`). 0 = no declarado → downmix a estéreo,
+	// el comportamiento histórico. PB-22 (audit 2026-06-10).
+	MaxAudioChannels int
 }
 
 // HeaderCapabilities es el header HTTP que los clientes envían para
@@ -43,6 +48,12 @@ func ParseCapabilitiesHeader(value string) *Capabilities {
 		}
 		key := strings.ToLower(strings.TrimSpace(segment[:eq]))
 		raw := segment[eq+1:]
+		if key == "channels" {
+			if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v > 0 {
+				caps.MaxAudioChannels = v
+			}
+			continue
+		}
 		var dst *map[string]bool
 		switch key {
 		case "video":
@@ -66,7 +77,7 @@ func ParseCapabilitiesHeader(value string) *Capabilities {
 			}
 		}
 	}
-	if len(caps.VideoCodecs) == 0 && len(caps.AudioCodecs) == 0 && len(caps.Containers) == 0 && len(caps.HDRFormats) == 0 {
+	if len(caps.VideoCodecs) == 0 && len(caps.AudioCodecs) == 0 && len(caps.Containers) == 0 && len(caps.HDRFormats) == 0 && caps.MaxAudioChannels == 0 {
 		return nil
 	}
 	return caps
@@ -83,12 +94,14 @@ func CapabilitiesFromRequest(r *http.Request) *Capabilities {
 // DefaultWebCapabilities es el fallback cuando el cliente no declara
 // nada (web player legacy). HDRFormats vacío intencionalmente: HDR en
 // navegador depende de OS/display/GPU/driver — mejor tonemap a BT.709.
+// MaxAudioChannels=2: sin declaración explícita, downmix a estéreo.
 func DefaultWebCapabilities() *Capabilities {
 	return &Capabilities{
-		VideoCodecs: map[string]bool{"h264": true, "vp8": true, "vp9": true, "av1": true},
-		AudioCodecs: map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true},
-		Containers:  map[string]bool{"mp4": true, "webm": true, "mov": true},
-		HDRFormats:  map[string]bool{},
+		VideoCodecs:      map[string]bool{"h264": true, "vp8": true, "vp9": true, "av1": true},
+		AudioCodecs:      map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true},
+		Containers:       map[string]bool{"mp4": true, "webm": true, "mov": true},
+		HDRFormats:       map[string]bool{},
+		MaxAudioChannels: 2,
 	}
 }
 
@@ -100,10 +113,11 @@ func effectiveCapabilities(c *Capabilities) *Capabilities {
 		return DefaultWebCapabilities()
 	}
 	out := &Capabilities{
-		VideoCodecs: c.VideoCodecs,
-		AudioCodecs: c.AudioCodecs,
-		Containers:  c.Containers,
-		HDRFormats:  c.HDRFormats,
+		VideoCodecs:      c.VideoCodecs,
+		AudioCodecs:      c.AudioCodecs,
+		Containers:       c.Containers,
+		HDRFormats:       c.HDRFormats,
+		MaxAudioChannels: c.MaxAudioChannels,
 	}
 	def := DefaultWebCapabilities()
 	if out.VideoCodecs == nil {
@@ -119,6 +133,10 @@ func effectiveCapabilities(c *Capabilities) *Capabilities {
 	// pero no `hdr=` está diciendo "no soporto HDR".
 	if out.HDRFormats == nil {
 		out.HDRFormats = def.HDRFormats
+	}
+	// Mismo razonamiento que HDR: sin `channels=` explícito, estéreo.
+	if out.MaxAudioChannels <= 0 {
+		out.MaxAudioChannels = def.MaxAudioChannels
 	}
 	return out
 }

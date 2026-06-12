@@ -281,7 +281,7 @@ func run(configPath string) error {
 			IdleTimeout:         cfg.IPTV.Transmux.IdleTimeout,
 			ReadyTimeout:        cfg.IPTV.Transmux.ReadyTimeout,
 			ReencodeEncoder:     hwInfo.Encoder,
-			ReencodeHWAccelArgs: stream.HWAccelInputArgs(hwInfo.Selected),
+			ReencodeHWAccelArgs: stream.HWAccelInputArgs(hwInfo.Selected, hwInfo.Device),
 			Metrics:             observability.NewIPTVTransmuxSink(metrics),
 			RegisterGauges: func(t *iptv.TransmuxManager) error {
 				return observability.RegisterIPTVTransmuxGauges(metrics, t)

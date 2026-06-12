@@ -69,6 +69,7 @@ type Transcoder struct {
 	ffmpeg           string
 	transcodeTimeout time.Duration
 	hwAccel          HWAccelType
+	hwDevice         string
 	encoder          string
 	libx264Preset    string
 	logger           *slog.Logger
@@ -76,12 +77,14 @@ type Transcoder struct {
 
 // TranscoderConfig agrupa los parámetros de NewTranscoder.
 // Campos opcionales: FFmpegPath ("ffmpeg"), TranscodeTimeout (4h),
-// Encoder ("libx264"), Libx264Preset ("veryfast").
+// Encoder ("libx264"), Libx264Preset ("veryfast"), HWDevice (render
+// node VAAPI/QSV, vacío = default).
 type TranscoderConfig struct {
 	BaseDir          string
 	FFmpegPath       string
 	TranscodeTimeout time.Duration
 	HWAccel          HWAccelType
+	HWDevice         string
 	Encoder          string
 	Libx264Preset    string
 	Logger           *slog.Logger
@@ -111,6 +114,7 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 		ffmpeg:           ffmpegPath,
 		transcodeTimeout: transcodeTimeout,
 		hwAccel:          cfg.HWAccel,
+		hwDevice:         cfg.HWDevice,
 		encoder:          encoder,
 		libx264Preset:    libx264Preset,
 		logger:           cfg.Logger.With("module", "transcoder"),
@@ -118,8 +122,9 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 }
 
 // Start arranca una sesión HLS. El caller llena los campos caller-side
-// de req; los 4 campos transcoder-side (OutputDir, HWAccel, Encoder,
-// Libx264Preset) se sobrescriben con el estado interno del Transcoder.
+// de req; los campos transcoder-side (OutputDir, HWAccel, HWDevice,
+// Encoder, Libx264Preset) se sobrescriben con el estado interno del
+// Transcoder.
 //
 // El Transcoder no controla unicidad por sessionID — el caller (Manager)
 // garantiza vía singleflight que no haya dos spawns concurrentes para la
@@ -134,6 +139,7 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 
 	req.OutputDir = outputDir
 	req.HWAccel = t.hwAccel
+	req.HWDevice = t.hwDevice
 	req.Encoder = t.encoder
 	req.Libx264Preset = t.libx264Preset
 
@@ -216,6 +222,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 
 	req.OutputDir = outputDir
 	req.HWAccel = t.hwAccel
+	req.HWDevice = t.hwDevice
 	req.Encoder = t.encoder
 	req.Libx264Preset = t.libx264Preset
 
@@ -320,6 +327,9 @@ type TranscodeRequest struct {
 	// HWAccelNone para path software; los HW paths añaden flags
 	// `-hwaccel ...` antes de `-i`.
 	HWAccel HWAccelType
+	// HWDevice es el render node para VAAPI/QSV (vacío = default,
+	// /dev/dri/renderD128). Transcoder-side, como HWAccel.
+	HWDevice string
 	// Encoder es el output encoder ("libx264", "h264_nvenc", ...).
 	// Empty fallback a "libx264".
 	Encoder string
@@ -353,6 +363,10 @@ type TranscodeRequest struct {
 	// del usuario seleccione una pista concreta. Es el index
 	// per-type que usa ffmpeg, NO el absolute stream id.
 	AudioStreamIndex int
+	// AudioChannels es el `-ac` del transcode de audio. <= 0 →
+	// estéreo (comportamiento histórico). La decisión lo calcula
+	// como min(fuente, cliente, 6) — PB-22.
+	AudioChannels int
 	// BurnSub (opcional, nil = sin burn-in) controla burn-in de
 	// subtítulos para codecs PGS/DVDSUB/ASS que el browser no
 	// puede renderer nativamente. Setearlo fuerza CopyVideo=false
@@ -420,7 +434,7 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 	// runs (copyVideo=true) we also skip them — there is no decode
 	// happening, so an accel context just adds setup cost for nothing.
 	if !copyVideo {
-		args = append(args, HWAccelInputArgs(req.HWAccel)...)
+		args = append(args, HWAccelInputArgs(req.HWAccel, req.HWDevice)...)
 	}
 
 	// Seek if needed
@@ -530,6 +544,16 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 		)
 
 		vfChain := buildVideoFilterChain(req.Profile, req.ToneMap)
+		// Encoders que solo aceptan frames GPU (h264_vaapi): subir los
+		// frames al device como ÚLTIMO paso, después de toda la cadena
+		// software (scale, pad, tonemap, burn-in). Sin este upload el
+		// encoder muere al arrancar y la sesión caía a software en
+		// silencio. Sufijo por rama: en burn-in bitmap el upload va tras
+		// el overlay, no dentro de la cadena de escalado. PB-5.
+		hwUpload := ""
+		if f := HWUploadVideoFilter(encoder); f != "" {
+			hwUpload = "," + f
+		}
 
 		switch {
 		case useFilterComplex:
@@ -542,8 +566,8 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 			// mid-session requires a fresh transcode (enforced by
 			// sessionKey including BurnSubtitleIndex).
 			filterComplex := fmt.Sprintf(
-				"[0:v]%s[scaled];[scaled][0:s:%d]overlay[burned]",
-				vfChain, req.BurnSub.Index,
+				"[0:v]%s[scaled];[scaled][0:s:%d]overlay%s[burned]",
+				vfChain, req.BurnSub.Index, hwUpload,
 			)
 			args = append(args,
 				"-filter_complex", filterComplex,
@@ -557,11 +581,11 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 			// before scale/pad — text stays crisper through the
 			// downscale than rendering at output resolution would.
 			subPath := ffmpegInputPathEscape(req.BurnSub.InputPath)
-			chain := fmt.Sprintf("subtitles=filename='%s':si=%d,%s",
-				subPath, req.BurnSub.Index, vfChain)
+			chain := fmt.Sprintf("subtitles=filename='%s':si=%d,%s%s",
+				subPath, req.BurnSub.Index, vfChain, hwUpload)
 			args = append(args, "-vf", chain)
 		default:
-			args = append(args, "-vf", vfChain)
+			args = append(args, "-vf", vfChain+hwUpload)
 		}
 
 		args = append(args, "-r", strconv.Itoa(req.Profile.MaxFrameRate))
@@ -571,10 +595,14 @@ func BuildFFmpegArgs(req TranscodeRequest) []string {
 	if copyAudio {
 		args = append(args, "-c:a", "copy")
 	} else {
+		audioChannels := req.AudioChannels
+		if audioChannels <= 0 {
+			audioChannels = 2
+		}
 		args = append(args,
 			"-c:a", "aac",
 			"-b:a", req.Profile.AudioBitrate,
-			"-ac", "2",
+			"-ac", strconv.Itoa(audioChannels),
 		)
 	}
 

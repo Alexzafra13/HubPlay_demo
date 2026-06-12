@@ -121,25 +121,70 @@ func TestParseOutput_Movie(t *testing.T) {
 }
 
 func TestParseOutput_HDR(t *testing.T) {
+	dovi := func(profile, compatID int) []ffprobeSideData {
+		return []ffprobeSideData{{
+			SideDataType: "DOVI configuration record",
+			DVProfile:    profile,
+			DVBLCompatID: compatID,
+		}}
+	}
 	tests := []struct {
 		name          string
 		colorTransfer string
 		profile       string
+		sideData      []ffprobeSideData
 		wantHDR       string
 	}{
-		{"HDR10", "smpte2084", "", "HDR10"},
-		{"HLG", "arib-std-b67", "", "HLG"},
-		{"DolbyVision", "", "Dolby Vision profile 5", "DolbyVision"},
-		{"SDR", "bt709", "", ""},
+		{"HDR10", "smpte2084", "", nil, "HDR10"},
+		{"HLG", "arib-std-b67", "", nil, "HLG"},
+		{"DolbyVision via profile", "", "Dolby Vision profile 5", nil, "DolbyVision"},
+		{"SDR", "bt709", "", nil, ""},
+		// PB-23: el DOVI record manda sobre color_transfer. Un DV P5
+		// (compat 0) anuncia smpte2084 y se etiquetaba HDR10 — colores
+		// verde/morado al reproducirlo como PQ normal.
+		{"DV P5 sin base compatible", "smpte2084", "Main 10", dovi(5, 0), "DolbyVision"},
+		{"DV P8.1 base HDR10", "smpte2084", "Main 10", dovi(8, 1), "HDR10"},
+		{"DV P7 base HDR10 (Blu-ray)", "smpte2084", "Main 10", dovi(7, 6), "HDR10"},
+		{"DV P8.4 base HLG", "arib-std-b67", "Main 10", dovi(8, 4), "HLG"},
+		{"DV P8.2 base SDR", "bt709", "Main 10", dovi(8, 2), ""},
+		// Otros side data (ej. Display Matrix) no disparan la rama DV.
+		{"side data no-DOVI", "smpte2084", "", []ffprobeSideData{{SideDataType: "Display Matrix"}}, "HDR10"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := detectHDR(tt.colorTransfer, tt.profile)
+			got := detectHDR(tt.colorTransfer, tt.profile, tt.sideData)
 			if got != tt.wantHDR {
 				t.Errorf("expected %q, got %q", tt.wantHDR, got)
 			}
 		})
+	}
+}
+
+// TestParseOutput_DOVISideData pinea el wire-shape: el JSON real de
+// ffprobe con side_data_list debe terminar en HDRType=DolbyVision.
+func TestParseOutput_DOVISideData(t *testing.T) {
+	raw := `{
+		"format": {"filename": "dv.mkv", "duration": "10.0", "format_name": "matroska,webm"},
+		"streams": [{
+			"index": 0,
+			"codec_type": "video",
+			"codec_name": "hevc",
+			"profile": "Main 10",
+			"color_transfer": "smpte2084",
+			"side_data_list": [
+				{"side_data_type": "DOVI configuration record",
+				 "dv_profile": 5, "dv_level": 6,
+				 "dv_bl_signal_compatibility_id": 0}
+			]
+		}]
+	}`
+	result, err := parseOutput([]byte(raw))
+	if err != nil {
+		t.Fatalf("parseOutput: %v", err)
+	}
+	if got := result.Streams[0].HDRType; got != "DolbyVision" {
+		t.Errorf("expected DolbyVision, got %q", got)
 	}
 }
 

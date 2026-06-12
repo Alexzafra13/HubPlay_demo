@@ -1421,6 +1421,14 @@ interface SystemFFmpegStats {
   hw_accels_available: string[];
   hw_accel_selected: string;
   hw_accel_encoder: string;
+  /** DRM render node in use (VAAPI/QSV only). */
+  hw_accel_device?: string;
+  /**
+   * Non-empty when an accelerator was detected but its verification
+   * failed and transcoding silently fell back to CPU (PB-5). The
+   * panel renders a warning instead of a neutral "no GPU" badge.
+   */
+  hw_accel_fallback_reason?: string;
 }
 
 interface SystemLibraryStats {

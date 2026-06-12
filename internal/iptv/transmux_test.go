@@ -950,8 +950,23 @@ func TestBuildReencodeArgs_VAAPI_PerEncoderTuning(t *testing.T) {
 	if !strings.Contains(joined, "-quality 4") {
 		t.Errorf("missing VAAPI quality flag: %s", joined)
 	}
+	// h264_vaapi solo acepta frames GPU: el upload debe estar en la
+	// cadena o ffmpeg muere al arrancar (PB-5).
+	if !strings.Contains(joined, "-vf format=nv12,hwupload") {
+		t.Errorf("missing hwupload chain for h264_vaapi: %s", joined)
+	}
 	if strings.Contains(joined, "-x264-params") {
 		t.Errorf("libx264-specific -x264-params leaked: %s", joined)
+	}
+}
+
+func TestBuildReencodeArgs_NonVAAPI_NoHWUpload(t *testing.T) {
+	for _, enc := range []string{"", "h264_nvenc", "h264_qsv", "h264_videotoolbox"} {
+		args := buildReencodeArgs("http://up/x", "/work", "", enc, nil)
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "hwupload") {
+			t.Errorf("encoder %q must not hwupload: %s", enc, joined)
+		}
 	}
 }
 

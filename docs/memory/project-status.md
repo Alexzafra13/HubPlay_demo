@@ -6,24 +6,65 @@
 
 ---
 
-## 🔭 Estado actual (2026-06-10, fin de sesión)
+## 🔭 Estado actual (2026-06-12, fin de sesión)
 
 **Salud:** MVP funcional, cerca de early-production.
 
 | Área | Estado |
 |---|---|
 | Tests backend | `go test ./...` verde (`-race` en stream/api/iptv) |
-| Tests frontend | **747/747** vitest; `tsc`, `eslint` (0 errores) y `knip` limpios |
-| Rama de trabajo | `claude/project-review-8tznz4` — **pendiente de PR final a main** |
-| Audit playback 2026-06-10 | P0 + P1a-d ✅ + PB-40..44 ✅. **Quedan P2 y P3** |
+| Tests frontend | **748/748** vitest; `tsc`, `eslint` y `knip` limpios |
+| Rama de trabajo | `claude/revisa-trabajar-9wevyd` — Playback P2 completo + smoke E2E |
+| Audit playback 2026-06-10 | P0 + P1a-d + PB-40..44 + **P2 ✅ (2026-06-12)**. **P3 en curso**: smoke E2E (a)(b)(e) ✅ |
 | Audit prod 2026-06-08 | Fases 0/1/2 + B7 ✅. **Fases 3–5 abiertas** |
 
-⚠️ **Al retomar:** (1) verificar que la PR final de la rama se mergeó y
-los 3 workflows de main están verdes (main estuvo roto por una
-resolución de squash que duplicó código — detalle en
-`archive/2026-06-10-supply-chain-and-playback.md`); (2) **empezar en
-rama NUEVA desde main** — los squash-merges repetidos de una rama viva
-generan conflictos en cascada.
+✔️ Checklist de retorno 2026-06-12 hecho: PR #518 mergeada, CI/Docker/
+Release verdes en main (`cfafee0`), rama nueva desde main.
+
+**Sesión 2026-06-12 — Playback P2 (PB-5/10/22/23):**
+- **PB-5**: pipeline VAAPI real (`-init_hw_device` + `format=nv12,
+  hwupload` al final de la vf chain, tonemap/overlay software antes del
+  upload), `verifyEncoder` ejercita el pipeline real con razón
+  diagnóstica, `FallbackReason`/`Device` expuestos en
+  `/admin/system/stats` + tile GPU en warning, device configurable
+  (`hardware_acceleration.device`), mismo hwupload en el reencode del
+  transmux IPTV.
+- **PB-10**: `stopSiblingSessions` al cambiar de variante, caps que solo
+  cuentan/bloquean full-transcode (remux exento), master playlist
+  filtrado por resolución de la fuente.
+- **PB-22**: `channels=` en capabilities (web emite 6), `AudioChannels =
+  min(src, client, 6)` de `Decide` a `-ac`.
+- **PB-23**: DV vía `side_data_list` (DOVI record) con mapeo de
+  `dv_bl_signal_compatibility_id` → base compatible o DolbyVision puro.
+  ⚠️ items ya escaneados necesitan re-probe para re-etiquetar.
+
+**Sesión 2026-06-12 (cont.) — Smoke E2E Playwright (P3, gap de test 7):**
+- Harness en `web/e2e/`: cada spec arranca su servidor real (binario
+  con SPA embebida) y lo aprovisiona por API (wizard → admin →
+  bibliotecas → scan); fixtures de media generados con ffmpeg
+  (película MKV 2-audios → DirectStream/HLS; episodios MP4).
+- 3 smokes verdes: play→seek-restart→close→resume · backend SIGKILL
+  mid-play→ErrorOverlay acotado (PB-16) · ended→UpNext→siguiente.
+- Job `e2e-smoke` en ci.yml (paralelo; promover a `build.needs` cuando
+  demuestre estabilidad). data-testid nuevos: `player-error-overlay`,
+  `upnext-overlay`.
+- ⚠️ Los Chromium de Playwright NO decodifican H.264/AAC (open codecs):
+  local → `PW_CHROME` con Chrome/Chrome-for-Testing; CI → Chrome del
+  runner (`channel: "chrome"`). Documentado en `web/e2e/README.md`.
+- **(cont. 2)** Smokes (c) dub-switch (menú Audio → `?audio=1` →
+  resume al playhead) y (d) LiveTV zap (upstream M3U+MPEG-TS sintético
+  del propio test → import → transmux → zap por "Canales similares")
+  ✅. **Los 5 escenarios E2E del audit cubiertos.**
+- 🔐 **Hallazgo (B2-adyacente)**: `isSafeUpstream` (SSRF guard de IPTV)
+  solo cubre el proxy passthrough — el **transmux lanza ffmpeg contra
+  la URL upstream sin validarla** (`transmux.go startLocked`). Es lo
+  que permite al E2E usar un upstream loopback, pero es un hueco real:
+  un M3U malicioso puede hacer que ffmpeg ataque URLs internas. Al
+  cerrarlo, añadir knob `iptv.allow_private_upstreams` (los tuners de
+  LAN — HDHomeRun, tvheadend — son caso de uso legítimo y hoy el guard
+  del proxy YA los bloquea) y actualizar `web/e2e/livetv-zap.spec.ts`.
+- **Pendiente P3**: PB-19/26/29-31/33/36-39 + resto de gaps de test
+  del audit (1-6).
 
 ---
 
@@ -34,7 +75,6 @@ con ✅/pendiente y fix propuesto).
 
 | Prioridad | Tema | Items |
 |---|---|---|
-| Media-alta | **Playback P2** | PB-5 (VAAPI real — hoy cae a software en silencio), PB-10 (ABR/sesión-por-calidad agota caps → 503), PB-22 (surround forzado a estéreo), PB-23 (Dolby Vision P5 mal detectado) |
 | Media | **Playback P3** | Smoke E2E Playwright (play→seek→resume, UpNext, dub-switch, LiveTV zap, server caído), PB-19/26/29-31/33/36-39 + gaps de test del audit |
 | Media | **Fase 3 — observabilidad/config** (audit prod) | M18–M21, M23, M24 (IP de cliente en logs, panics en métricas, validación de config, completar `example.yaml`) |
 | Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes) |
@@ -67,7 +107,7 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,
   comentarios en español, regeneración sqlc.
 - `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback;
-  P0/P1 ✅, P2/P3 abiertas; PB-40..44 de reportes de usuario ✅).
+  P0/P1/P2 ✅, P3 abierta; PB-40..44 de reportes de usuario ✅).
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario
   (Fases 3–5 abiertas).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend.

@@ -108,7 +108,7 @@ Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
 - `project-status.md` — estado actual, trabajo abierto, próximos pasos. **Entrypoint.**
 - `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
-- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback; P0/P1 ✅, quedan P2–P3)
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback; P0/P1/P2 ✅, queda P3)
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 0/1/2 + Bloques 1/2 cerrados; Fases 3–5 abiertas)
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
 - `archive/` — sesiones y audits cerrados (no se lee al inicio; solo arqueología)

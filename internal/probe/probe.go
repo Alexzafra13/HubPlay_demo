@@ -151,20 +151,35 @@ type ffprobeFormat struct {
 }
 
 type ffprobeStream struct {
-	Index         int            `json:"index"`
-	CodecType     string         `json:"codec_type"`
-	CodecName     string         `json:"codec_name"`
-	Profile       string         `json:"profile"`
-	BitRate       string         `json:"bit_rate"`
-	Width         int            `json:"width"`
-	Height        int            `json:"height"`
-	RFrameRate    string         `json:"r_frame_rate"`
-	ColorTransfer string         `json:"color_transfer"`
-	ColorSpace    string         `json:"color_space"`
-	Channels      int            `json:"channels"`
-	SampleRate    string         `json:"sample_rate"`
-	Tags          map[string]any `json:"tags"`
-	Disposition   map[string]int `json:"disposition"`
+	Index         int               `json:"index"`
+	CodecType     string            `json:"codec_type"`
+	CodecName     string            `json:"codec_name"`
+	Profile       string            `json:"profile"`
+	BitRate       string            `json:"bit_rate"`
+	Width         int               `json:"width"`
+	Height        int               `json:"height"`
+	RFrameRate    string            `json:"r_frame_rate"`
+	ColorTransfer string            `json:"color_transfer"`
+	ColorSpace    string            `json:"color_space"`
+	Channels      int               `json:"channels"`
+	SampleRate    string            `json:"sample_rate"`
+	Tags          map[string]any    `json:"tags"`
+	Disposition   map[string]int    `json:"disposition"`
+	SideDataList  []ffprobeSideData `json:"side_data_list"`
+}
+
+// ffprobeSideData captura las entradas de `side_data_list` que nos
+// interesan. El "DOVI configuration record" es donde ffprobe anuncia
+// Dolby Vision de verdad — el campo `profile` del stream casi nunca lo
+// menciona (solo algunos MKV remux). Las entradas tienen campos
+// heterogéneos según el tipo; los que no aplican quedan en cero.
+type ffprobeSideData struct {
+	SideDataType string `json:"side_data_type"`
+	DVProfile    int    `json:"dv_profile"`
+	// DVBLCompatID es `dv_bl_signal_compatibility_id`: qué puede hacer
+	// un reproductor sin soporte DV con la base layer. 1/6 = HDR10,
+	// 2 = SDR, 4 = HLG, 0 = nada (DV puro, ej. Profile 5 de WEB-DLs).
+	DVBLCompatID int `json:"dv_bl_signal_compatibility_id"`
 }
 
 func parseOutput(data []byte) (*Result, error) {
@@ -201,7 +216,7 @@ func parseOutput(data []byte) (*Result, error) {
 			SampleRate: parseInt(s.SampleRate),
 		}
 
-		stream.HDRType = detectHDR(s.ColorTransfer, s.Profile)
+		stream.HDRType = detectHDR(s.ColorTransfer, s.Profile, s.SideDataList)
 
 		if s.Tags != nil {
 			if lang, ok := s.Tags["language"].(string); ok {
@@ -246,7 +261,29 @@ func parseOutput(data []byte) (*Result, error) {
 	return result, nil
 }
 
-func detectHDR(colorTransfer, profile string) string {
+func detectHDR(colorTransfer, profile string, sideData []ffprobeSideData) string {
+	// El DOVI configuration record manda sobre color_transfer: un DV
+	// Profile 5 anuncia smpte2084 y se etiquetaba HDR10, pero su señal
+	// es IPTPQc2 (ICtCp) — reproducirlo o tonemapearlo como PQ normal
+	// da los colores verde/morado clásicos. Con base layer compatible
+	// (8.1→HDR10, 8.4→HLG, 8.2→SDR) etiquetamos la base: cualquier
+	// reproductor sin DV la decodifica bien ignorando la capa RPU.
+	// PB-23 (audit 2026-06-10).
+	for _, sd := range sideData {
+		if !strings.Contains(sd.SideDataType, "DOVI") {
+			continue
+		}
+		switch sd.DVBLCompatID {
+		case 1, 6:
+			return "HDR10"
+		case 4:
+			return "HLG"
+		case 2:
+			return "" // base layer SDR: reproducible en cualquier cliente
+		default:
+			return "DolbyVision" // sin base compatible (Profile 5 y afines)
+		}
+	}
 	switch {
 	case colorTransfer == "smpte2084":
 		return "HDR10"

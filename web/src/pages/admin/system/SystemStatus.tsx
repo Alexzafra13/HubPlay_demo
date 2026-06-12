@@ -458,20 +458,27 @@ function KpiRow({
             : "—"
         }
         hint={
-          stats.host?.gpu_model
-            ? stats.host.gpu_model
-            : stats.ffmpeg.hw_accel_enabled
-              ? t("admin.systemHost.gpuSoftware", {
-                  defaultValue: "Sin GPU dedicada",
-                })
-              : t("admin.system.hwAccelDisabledLabel")
+          stats.ffmpeg.hw_accel_fallback_reason
+            ? t("admin.systemHost.gpuFallback", {
+                defaultValue:
+                  "Aceleración detectada pero su verificación falló — transcodificando por CPU",
+              })
+            : stats.host?.gpu_model
+              ? stats.host.gpu_model
+              : stats.ffmpeg.hw_accel_enabled
+                ? t("admin.systemHost.gpuSoftware", {
+                    defaultValue: "Sin GPU dedicada",
+                  })
+                : t("admin.system.hwAccelDisabledLabel")
         }
         tone={
           stats.ffmpeg.hw_accel_enabled &&
           stats.ffmpeg.hw_accel_selected &&
           stats.ffmpeg.hw_accel_selected !== "none"
             ? "success"
-            : "neutral"
+            : stats.ffmpeg.hw_accel_fallback_reason
+              ? "warning"
+              : "neutral"
         }
       />
       <KpiTile

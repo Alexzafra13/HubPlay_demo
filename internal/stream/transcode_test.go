@@ -234,13 +234,113 @@ func TestBuildFFmpegArgs_HWAccel_NVENC_PrependsHwaccelAndSwapsEncoder(t *testing
 	assertContains(t, args, "-hwaccel", "cuda")
 }
 
-func TestBuildFFmpegArgs_HWAccel_VAAPI_PrependsHwaccel(t *testing.T) {
+// PB-5: el pipeline VAAPI necesita el device declarado y los frames
+// subidos a GPU al final de la cadena de filtros. Sin `-init_hw_device`
+// + `format=nv12,hwupload`, h264_vaapi muere al arrancar y todo host
+// VAAPI transcodeaba por software en silencio.
+func TestBuildFFmpegArgs_HWAccel_VAAPI_FullPipeline(t *testing.T) {
 	req := baseRequest(stream.Profiles["480p"])
 	req.HWAccel = stream.HWAccelVAAPI
 	req.Encoder = "h264_vaapi"
 	args := stream.BuildFFmpegArgs(req)
 	assertContains(t, args, "-c:v", "h264_vaapi")
 	assertContains(t, args, "-hwaccel", "vaapi")
+	// Device declarado (default cuando el request no trae uno).
+	assertContains(t, args, "-init_hw_device", "vaapi=hw:"+stream.DefaultVAAPIDevice)
+	assertContains(t, args, "-hwaccel_device", "hw")
+	assertContains(t, args, "-filter_hw_device", "hw")
+	// hwupload como ÚLTIMO paso de la cadena -vf.
+	vf := flagValue(args, "-vf")
+	if !strings.HasSuffix(vf, ",format=nv12,hwupload") {
+		t.Errorf("-vf must end with the hwupload suffix, got %q", vf)
+	}
+	// libx264-only flags fuera.
+	assertNotContains(t, args, "-preset")
+}
+
+func TestBuildFFmpegArgs_HWAccel_VAAPI_CustomDevice(t *testing.T) {
+	req := baseRequest(stream.Profiles["480p"])
+	req.HWAccel = stream.HWAccelVAAPI
+	req.HWDevice = "/dev/dri/renderD129"
+	req.Encoder = "h264_vaapi"
+	args := stream.BuildFFmpegArgs(req)
+	assertContains(t, args, "-init_hw_device", "vaapi=hw:/dev/dri/renderD129")
+}
+
+// El tonemap HDR→SDR corre en software ANTES del hwupload: la cadena
+// debe terminar en el upload, con zscale/tonemap por delante.
+func TestBuildFFmpegArgs_HWAccel_VAAPI_ToneMapBeforeUpload(t *testing.T) {
+	req := baseRequest(stream.Profiles["720p"])
+	req.HWAccel = stream.HWAccelVAAPI
+	req.Encoder = "h264_vaapi"
+	req.ToneMap = true
+	args := stream.BuildFFmpegArgs(req)
+	vf := flagValue(args, "-vf")
+	if !strings.HasPrefix(vf, "zscale=") {
+		t.Errorf("-vf must start with the zscale tonemap chain, got %q", vf)
+	}
+	if !strings.HasSuffix(vf, ",format=nv12,hwupload") {
+		t.Errorf("-vf must end with the hwupload suffix, got %q", vf)
+	}
+}
+
+// En burn-in bitmap (filter_complex) el upload va DESPUÉS del overlay:
+// el overlay opera sobre frames de sistema, no de GPU.
+func TestBuildFFmpegArgs_HWAccel_VAAPI_BurnSubUploadAfterOverlay(t *testing.T) {
+	req := baseRequest(stream.Profiles["720p"])
+	req.HWAccel = stream.HWAccelVAAPI
+	req.Encoder = "h264_vaapi"
+	req.BurnSub = &stream.BurnSubtitleSpec{Index: 0, Codec: "hdmv_pgs_subtitle", InputPath: "/input.mkv"}
+	args := stream.BuildFFmpegArgs(req)
+	fc := flagValue(args, "-filter_complex")
+	if !strings.Contains(fc, "overlay,format=nv12,hwupload[burned]") {
+		t.Errorf("hwupload must follow the overlay node, got %q", fc)
+	}
+}
+
+// QSV encodea desde memoria de sistema: device init sí, hwupload no.
+func TestBuildFFmpegArgs_HWAccel_QSV_InitsDeviceWithoutUpload(t *testing.T) {
+	req := baseRequest(stream.Profiles["720p"])
+	req.HWAccel = stream.HWAccelQSV
+	req.Encoder = "h264_qsv"
+	args := stream.BuildFFmpegArgs(req)
+	assertContains(t, args, "-c:v", "h264_qsv")
+	assertContains(t, args, "-init_hw_device", "qsv=hw")
+	vf := flagValue(args, "-vf")
+	if strings.Contains(vf, "hwupload") {
+		t.Errorf("QSV path must not hwupload, got %q", vf)
+	}
+}
+
+// PB-22: el `-ac` del transcode de audio viene de la decisión
+// (min(fuente, cliente, 6)); sin valor explícito cae a estéreo.
+func TestBuildFFmpegArgs_AudioChannels(t *testing.T) {
+	cases := []struct {
+		name   string
+		req    int
+		wantAC string
+	}{
+		{"default estéreo", 0, "2"},
+		{"surround 5.1", 6, "6"},
+		{"negativo cae a estéreo", -3, "2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := baseRequest(stream.Profiles["720p"])
+			req.AudioChannels = tc.req
+			args := stream.BuildFFmpegArgs(req)
+			assertContains(t, args, "-ac", tc.wantAC)
+		})
+	}
+}
+
+func TestBuildFFmpegArgs_AudioChannels_IrrelevantOnCopyAudio(t *testing.T) {
+	req := baseRequest(stream.Profiles["720p"])
+	req.CopyAudio = true
+	req.AudioChannels = 6
+	args := stream.BuildFFmpegArgs(req)
+	assertContains(t, args, "-c:a", "copy")
+	assertNotContains(t, args, "-ac")
 }
 
 func TestBuildFFmpegArgs_HWAccel_VideoToolbox_NoInputHwaccelFlag(t *testing.T) {

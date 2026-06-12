@@ -77,6 +77,17 @@ describe("getClientCapabilitiesHeader", () => {
     expect(header).toContain("container=mp4,webm,mov");
   });
 
+  it("declares channels=6 so transcoded surround survives (PB-22)", () => {
+    // Browsers decode AAC 5.1 natively and downmix to the output
+    // device themselves -- declaring 6 lets the server keep surround
+    // instead of force-downmixing to stereo.
+    (window as Window).MediaSource = {
+      isTypeSupported: (mime: string) => mime.includes('codecs="avc1'),
+    };
+    const header = getClientCapabilitiesHeader();
+    expect(header).toContain("channels=6");
+  });
+
   it("memoises the result across calls", () => {
     let callCount = 0;
     (window as Window).MediaSource = {

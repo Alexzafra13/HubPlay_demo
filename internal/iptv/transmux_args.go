@@ -171,6 +171,14 @@ func buildReencodeArgs(upstreamURL, workDir, userAgent, encoder string, hwAccelI
 		"-c:v", encoder,
 	)
 	args = append(args, encoderTuningArgs(encoder)...)
+	// h264_vaapi solo acepta frames en memoria GPU: los frames
+	// decodificados (en memoria de sistema con los input args que
+	// genera stream.HWAccelInputArgs) deben subirse al device antes
+	// del encoder o ffmpeg muere al arrancar. Mismo sufijo que
+	// stream.HWUploadVideoFilter emite en el transcoder VOD. PB-5.
+	if encoder == "h264_vaapi" {
+		args = append(args, "-vf", "format=nv12,hwupload")
+	}
 	args = append(args,
 		// Keyframe interval = HLS segment duration × frame rate.
 		// hls_time=2, assume 24 fps → 48-frame GOP. -sc_threshold 0
