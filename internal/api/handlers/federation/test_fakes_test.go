@@ -32,10 +32,11 @@ var _ handlers.ItemRepository = (*streamFakeItemRepo)(nil)
 
 // fakeStreamManager is a minimal fake for handlers.StreamManagerService.
 type fakeStreamManager struct {
-	mu             sync.Mutex
-	startSessionFn func(ctx context.Context, req stream.StartSessionRequest) (*stream.ManagedSession, error)
-	sessions       map[string]*stream.ManagedSession
-	stopped        map[string]bool
+	mu                sync.Mutex
+	startSessionFn    func(ctx context.Context, req stream.StartSessionRequest) (*stream.ManagedSession, error)
+	startSessionCalls int
+	sessions          map[string]*stream.ManagedSession
+	stopped           map[string]bool
 }
 
 func newFakeStreamManager() *fakeStreamManager {
@@ -46,6 +47,9 @@ func newFakeStreamManager() *fakeStreamManager {
 }
 
 func (m *fakeStreamManager) StartSession(ctx context.Context, req stream.StartSessionRequest) (*stream.ManagedSession, error) {
+	m.mu.Lock()
+	m.startSessionCalls++
+	m.mu.Unlock()
 	if m.startSessionFn != nil {
 		return m.startSessionFn(ctx, req)
 	}

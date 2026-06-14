@@ -154,20 +154,30 @@ type Config struct {
 	// 100 amigos pidiendo emparejarse a la vez - pero corta de raiz
 	// un flood). 0 = sin cap (NO recomendado en prod abierto).
 	MaxIncomingPendingRequests int
+	// MaxConcurrentStreamsPerPeer acota cuántos items distintos puede
+	// estar reproduciendo a la vez un mismo peer remoto. Cada stream
+	// federado spawnea (o comparte) un transcode en NUESTRO
+	// stream.Manager, que comparte el cap GLOBAL con los usuarios
+	// locales — sin este techo por peer, un único peer hostil podía
+	// abrir N transcodes y dejar sin recursos a los usuarios locales
+	// (F-2, audit 2026-06-12). Default 5; 0 = ilimitado. Re-pedir un
+	// item ya activo (retry / reconexión) nunca cuenta contra el cap.
+	MaxConcurrentStreamsPerPeer int
 }
 
 // DefaultConfig returns sensible defaults for new deployments. Caller
 // overrides whatever they want from hubplay.yaml.
 func DefaultConfig() Config {
 	return Config{
-		AdvertisedURL:              "",
-		Version:                    "0.1.0",
-		SupportedScopes:            []string{"browse", "play"},
-		InviteTTL:                  24 * time.Hour,
-		HTTPTimeout:                15 * time.Second,
-		PeerRequestsPerMinute:      60,
-		PeerBurst:                  30,
-		MaxIncomingPendingRequests: 100,
+		AdvertisedURL:               "",
+		Version:                     "0.1.0",
+		SupportedScopes:             []string{"browse", "play"},
+		InviteTTL:                   24 * time.Hour,
+		HTTPTimeout:                 15 * time.Second,
+		PeerRequestsPerMinute:       60,
+		PeerBurst:                   30,
+		MaxIncomingPendingRequests:  100,
+		MaxConcurrentStreamsPerPeer: 5,
 	}
 }
 
