@@ -69,6 +69,14 @@ interface HeroSpotlightProps {
   /** Drop the top-rounded corners so the hero can sit flush against
    * the global TopBar. The bottom corners stay rounded. */
   flushTop?: boolean;
+  /**
+   * Whether the hero may mount a muted live HLS preview of its channel.
+   * Defaults to true. The page sets this to false when the channel is
+   * already being streamed elsewhere (the corner mini-player / fullscreen
+   * overlay) so we don't decode the same stream twice — the hero then
+   * leans on its brand-tinted backdrop alone.
+   */
+  livePreview?: boolean;
 }
 
 /**
@@ -100,6 +108,7 @@ export function HeroSpotlight({
   onToggleFavorite,
   headerOverlay,
   flushTop,
+  livePreview = true,
 }: HeroSpotlightProps) {
   const { t } = useTranslation();
   // Keep the progress bar advancing without the parent re-rendering
@@ -139,7 +148,10 @@ export function HeroSpotlight({
 
   const { channel, nowPlaying } = items[0];
   const progress = nowPlaying ? getProgramProgress(nowPlaying) : 0;
-  const showPreview = previewArmed && !reducedMotion;
+  // Suppress the hero's own preview when the channel is already streaming
+  // elsewhere (mini-player / overlay) — avoids decoding the same stream
+  // twice. See `livePreview` prop.
+  const showPreview = previewArmed && !reducedMotion && livePreview;
 
   // Editorial backdrop — a soft radial in the channel's brand colour
   // anchored on the neutral base. No video, no shimmer; the brand
