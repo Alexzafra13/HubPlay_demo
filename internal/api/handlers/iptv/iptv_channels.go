@@ -433,6 +433,9 @@ func (h *iptvChannelHandler) ChannelLogo(w http.ResponseWriter, r *http.Request)
 	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
 	_ = handlers.DisableWriteDeadline(w)
 	if h.logoCache == nil {
+		// Negative-cache: el estado del cache no cambia sin reiniciar el
+		// server, así que el navegador puede recordar el 404.
+		w.Header().Set("Cache-Control", handlers.CacheControlNegative)
 		handlers.RespondError(w, r, http.StatusNotFound, "NO_LOGO", "logo cache disabled")
 		return
 	}
@@ -482,6 +485,9 @@ func (h *iptvChannelHandler) ChannelLogo(w http.ResponseWriter, r *http.Request)
 	}
 
 	if effectiveLogoURL == "" {
+		// Negative-cache el 404: ver CacheControlNegative. Evita que el
+		// navegador re-pida el logo del mismo canal en cada render.
+		w.Header().Set("Cache-Control", handlers.CacheControlNegative)
 		handlers.RespondError(w, r, http.StatusNotFound, "NO_LOGO", "channel has no upstream logo")
 		return
 	}
@@ -492,6 +498,11 @@ func (h *iptvChannelHandler) ChannelLogo(w http.ResponseWriter, r *http.Request)
 		// the frontend's onError fallback is the right answer for
 		// every "no logo to show" condition. The cache logs at
 		// debug, so operators still have visibility.
+		//
+		// Negative-cache (1h): sin esto cada <img> del mismo canal
+		// (hero + rejilla + mini-player) re-pide el 404 y el server
+		// reintenta el fetch upstream lento (~3s) en bucle.
+		w.Header().Set("Cache-Control", handlers.CacheControlNegative)
 		handlers.RespondError(w, r, http.StatusNotFound, "LOGO_UNAVAILABLE", "could not fetch upstream logo")
 		return
 	}

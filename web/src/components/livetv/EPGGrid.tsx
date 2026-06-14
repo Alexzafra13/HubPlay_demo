@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Channel, EPGProgram } from "@/api/types";
@@ -90,15 +90,16 @@ export function EPGGrid({
   // hides the ragged edge when a programme ends mid-view.
   const now = useNowTick(30_000);
 
-  // Window anchored at midnight local. The grid spans 24 h; whatever day
-  // the user is looking at is determined by the scroll position, not by
-  // a date selector. A day selector (Ayer / Hoy / Mañana) is a reasonable
-  // Phase-5 addition — slots in cleanly by re-anchoring `windowStart`.
+  // Day navigation. The grid always spans a 24 h window anchored at local
+  // midnight; `dayOffset` shifts which day (−1 Ayer / 0 Hoy / +1 Mañana).
+  // Re-anchoring `windowStart` is all it takes — every block position,
+  // the now-line and the ruler derive from it.
+  const [dayOffset, setDayOffset] = useState(0);
   const windowStart = useMemo(() => {
     const d = new Date(now);
     d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  }, [now]);
+    return d.getTime() + dayOffset * HOURS_IN_WINDOW * 60 * 60 * 1000;
+  }, [now, dayOffset]);
   const windowEnd = windowStart + HOURS_IN_WINDOW * 60 * 60 * 1000;
 
   // Hour labels along the top ruler.
@@ -141,30 +142,159 @@ export function EPGGrid({
     hasScrolledRef.current = true;
   }, [autoScrollToNow, nowLineOffset]);
 
+  // Offset of "now" within *today's* window, independent of the current
+  // dayOffset state — so returning to Hoy from another day scrolls to the
+  // live edge regardless of where the user was.
+  const todayNowOffset = useCallback(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return (Date.now() - d.getTime()) * PX_PER_MS;
+  }, []);
+
+  // Switch the visible day. Hoy scrolls to the live edge; other days
+  // reset to 00:00 so the user starts at the top of that day's schedule.
+  const goToDay = useCallback(
+    (offset: number) => {
+      setDayOffset(offset);
+      const el = scrollRef.current;
+      // scrollTo is absent under jsdom; guard so day switches don't throw
+      // in tests / non-DOM environments.
+      if (!el || typeof el.scrollTo !== "function") return;
+      const target = offset === 0 ? Math.max(0, todayNowOffset() - 120) : 0;
+      el.scrollTo({ left: target, behavior: "smooth" });
+    },
+    [todayNowOffset],
+  );
+
+  // The "Ahora" pill doubles as a "back to today + live edge" jump.
   const jumpToNow = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const target = Math.max(0, nowLineOffset - 120);
-    el.scrollTo({ left: target, behavior: "smooth" });
-  }, [nowLineOffset]);
+    goToDay(0);
+  }, [goToDay]);
+
+  // ── Keyboard zapping ───────────────────────────────────────────────
+  // Type a channel number anywhere on the page (outside a text field) to
+  // jump straight to it — the broadcast-TV muscle memory. Digits build a
+  // buffer shown in an overlay; it commits after a short pause or on
+  // Enter, and Esc/Backspace edit it. Refs hold the latest channels +
+  // handler so the global listener can stay mounted once with no deps.
+  const [zapBuffer, setZapBuffer] = useState("");
+  const channelsRef = useRef(channels);
+  const onSelectRef = useRef(onSelectChannel);
+  // Keep the refs current without touching them during render (the
+  // global keydown listener + commit timer read them on user input,
+  // which always happens after this effect has run).
+  useEffect(() => {
+    channelsRef.current = channels;
+    onSelectRef.current = onSelectChannel;
+  });
+
+  const zapMatch = useMemo(() => {
+    if (!zapBuffer) return undefined;
+    const n = Number.parseInt(zapBuffer, 10);
+    return channels.find((c) => c.number === n);
+  }, [zapBuffer, channels]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.key >= "0" && e.key <= "9") {
+        setZapBuffer((b) => (b + e.key).slice(0, 5));
+      } else if (e.key === "Backspace") {
+        setZapBuffer((b) => b.slice(0, -1));
+      } else if (e.key === "Escape") {
+        setZapBuffer("");
+      } else if (e.key === "Enter") {
+        setZapBuffer((b) => {
+          if (b) {
+            const ch = channelsRef.current.find(
+              (c) => c.number === Number.parseInt(b, 10),
+            );
+            if (ch) onSelectRef.current(ch);
+          }
+          return "";
+        });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Auto-commit the typed buffer after a brief pause (broadcast-TV feel).
+  useEffect(() => {
+    if (!zapBuffer) return;
+    const id = window.setTimeout(() => {
+      const ch = channelsRef.current.find(
+        (c) => c.number === Number.parseInt(zapBuffer, 10),
+      );
+      if (ch) onSelectRef.current(ch);
+      setZapBuffer("");
+    }, 1200);
+    return () => window.clearTimeout(id);
+  }, [zapBuffer]);
 
   return (
     <div className="flex flex-col gap-3">
       {/* ── Topbar ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-tv-fg-2">
           {t("liveTV.guideSubtitle", {
             defaultValue: "Programación de las próximas 24h",
           })}
         </div>
-        <button
-          type="button"
-          onClick={jumpToNow}
-          className="flex items-center gap-2 rounded-full border border-tv-accent/40 bg-tv-accent/[0.12] px-3 py-1.5 text-xs font-semibold text-tv-fg-0 transition-colors hover:bg-tv-accent/[0.2]"
-        >
-          <span className="size-1.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_6px_var(--tv-live)]" />
-          {t("liveTV.now", { defaultValue: "Ahora" })} · {nowLabel}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Day selector (Ayer / Hoy / Mañana). Segmented control —
+              re-anchors the 24 h window via goToDay. */}
+          <div
+            className="flex items-center rounded-full border border-tv-line bg-tv-bg-2/50 p-0.5"
+            role="group"
+            aria-label={t("liveTV.daySelectorLabel", {
+              defaultValue: "Seleccionar día",
+            })}
+          >
+            {(
+              [
+                [-1, t("liveTV.yesterday", { defaultValue: "Ayer" })],
+                [0, t("liveTV.today", { defaultValue: "Hoy" })],
+                [1, t("liveTV.tomorrow", { defaultValue: "Mañana" })],
+              ] as const
+            ).map(([offset, label]) => {
+              const active = dayOffset === offset;
+              return (
+                <button
+                  key={offset}
+                  type="button"
+                  onClick={() => goToDay(offset)}
+                  aria-current={active ? "date" : undefined}
+                  className={[
+                    "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+                    active
+                      ? "bg-tv-accent/20 text-tv-accent"
+                      : "text-tv-fg-2 hover:text-tv-fg-0",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={jumpToNow}
+            className="flex items-center gap-2 rounded-full border border-tv-accent/40 bg-tv-accent/[0.12] px-3 py-1.5 text-xs font-semibold text-tv-fg-0 transition-colors hover:bg-tv-accent/[0.2]"
+          >
+            <span className="size-1.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_6px_var(--tv-live)]" />
+            {t("liveTV.now", { defaultValue: "Ahora" })} · {nowLabel}
+          </button>
+        </div>
       </div>
 
       {/* ── Grid ────────────────────────────────────────────────────── */}
@@ -175,6 +305,26 @@ export function EPGGrid({
           defaultValue: "Guía de programación",
         })}
       >
+        {/* Keyboard-zap overlay — shows the number being typed and the
+            channel it resolves to (if any). Decorative/transient; the
+            commit is announced by the channel change itself. */}
+        {zapBuffer && (
+          <div
+            className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2 rounded-xl border border-tv-accent/50 bg-tv-bg-1/95 px-4 py-2 text-center shadow-tv-lg backdrop-blur-xl"
+            aria-hidden="true"
+          >
+            <div className="font-mono text-2xl font-bold tabular-nums text-tv-accent">
+              {zapBuffer}
+            </div>
+            <div className="mt-0.5 max-w-[14rem] truncate text-xs text-tv-fg-2">
+              {zapMatch
+                ? zapMatch.name
+                : t("liveTV.zapNoChannel", {
+                    defaultValue: "Sin canal",
+                  })}
+            </div>
+          </div>
+        )}
         <div
           ref={scrollRef}
           className="relative overflow-auto"

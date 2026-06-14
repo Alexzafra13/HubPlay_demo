@@ -35,4 +35,13 @@ const (
 	CacheControlDailyPublic   = "public, max-age=86400"
 	CacheControlDailyOpaque   = "max-age=86400"
 	CacheControlImage         = "public, max-age=86400, stale-while-revalidate=604800"
+	// CacheControlNegative permite cachear una respuesta de "no hay nada
+	// que servir" (típicamente un 404) durante una hora. Pensado para el
+	// proxy de logos de canal: muchos `tvg-logo` del M3U apuntan a hosts
+	// muertos o no-imagen, y sin esto el navegador re-pide el 404 en cada
+	// render (el mismo canal aparece en hero + rejilla + mini-player) y el
+	// server reintenta el fetch upstream lento (~3s) cada vez. Una hora es
+	// corta para que un logo que vuelva a estar disponible se recupere
+	// pronto, pero suficiente para matar la tormenta de 404 duplicados.
+	CacheControlNegative = "public, max-age=3600"
 )

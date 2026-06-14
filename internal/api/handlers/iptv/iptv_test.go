@@ -744,6 +744,7 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Post("/libraries/{id}/iptv/refresh-epg", env.handler.RefreshEPG)
 		r.Get("/channels/{channelId}", env.handler.GetChannel)
 		r.Get("/channels/{channelId}/stream", env.handler.Stream)
+		r.Get("/channels/{channelId}/logo", env.handler.ChannelLogo)
 		r.Get("/channels/{channelId}/proxy", env.handler.ProxyURL)
 		r.Get("/channels/{channelId}/schedule", env.handler.Schedule)
 		r.Get("/iptv/schedule", env.handler.BulkSchedule)
@@ -904,6 +905,26 @@ func TestIPTVHandler_GetChannel_NotFound_500(t *testing.T) {
 	rr := env.do(http.MethodGet, "/api/v1/channels/missing", "")
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status: got %d want 500", rr.Code)
+	}
+}
+
+// ─── ChannelLogo ────────────────────────────────────────────────────────────
+
+// A logo 404 must carry a Cache-Control so the browser doesn't re-request
+// the same dead logo on every render (the channel shows up in hero +
+// grid + mini-player at once) and the server doesn't re-attempt the slow
+// upstream fetch in a loop. logoCache is nil in the test env, so this
+// exercises the "cache disabled" 404 branch; the same header is set on
+// the upstream-fetch-failure branch.
+func TestIPTVHandler_ChannelLogo_NegativeCacheOn404(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1", IsActive: true}
+	rr := env.do(http.MethodGet, "/api/v1/channels/c-1/logo", "")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", rr.Code)
+	}
+	if got := rr.Header().Get("Cache-Control"); got != handlers.CacheControlNegative {
+		t.Errorf("Cache-Control: got %q want %q", got, handlers.CacheControlNegative)
 	}
 }
 

@@ -324,7 +324,11 @@
     "errorInvalidCredentials": "Usuario o contraseña incorrectos.",
     "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
     "pairPrompt": "¿Estás en una TV o consola? ",
-    "pairCta": "Vincula este dispositivo"
+    "pairCta": "Vincula este dispositivo",
+    "showPassword": "Mostrar contraseña",
+    "hidePassword": "Ocultar contraseña",
+    "capsLockOn": "Bloq Mayús está activado",
+    "language": "Idioma"
   },
   "movies": {
     "title": "Películas",

@@ -3,6 +3,7 @@ import type { Channel, EPGProgram } from "@/api/types";
 import { ChannelLogo } from "./ChannelLogo";
 import { StreamPreview } from "./StreamPreview";
 import { formatTime, getProgramProgress } from "./epgHelpers";
+import { hasLogoFailed, markLogoFailed } from "./logoFailureCache";
 
 interface ChannelCardProps {
   channel: Channel;
@@ -75,7 +76,9 @@ export function ChannelCard({
   // the URL itself (not a boolean) so a new channel whose logo happens
   // to share the broken URL doesn't auto-hide, and so a fresh URL resets
   // the state at render time — no setState-in-effect plumbing.
-  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(() =>
+    hasLogoFailed(channel.logo_url) ? (channel.logo_url ?? null) : null,
+  );
   const showLogoImg =
     !!channel.logo_url && failedLogoUrl !== channel.logo_url;
 
@@ -158,7 +161,10 @@ export function ChannelCard({
               alt=""
               className="max-h-[55%] max-w-[65%] object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)] [filter:saturate(0.9)_brightness(0.95)]"
               loading="lazy"
-              onError={() => setFailedLogoUrl(channel.logo_url ?? null)}
+              onError={() => {
+                markLogoFailed(channel.logo_url);
+                setFailedLogoUrl(channel.logo_url ?? null);
+              }}
             />
           ) : (
             <ChannelLogo
