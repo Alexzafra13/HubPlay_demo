@@ -41,6 +41,12 @@ const HEADER_HEIGHT = 36;
 const ROW_HEIGHT = 72;
 
 const TIMELINE_WIDTH = HOURS_IN_WINDOW * PX_PER_HOUR;
+// Full content width = sticky channel column + the 24 h timeline. The
+// header row, the rows wrapper and each ChannelRow are pinned to this
+// width so `position: sticky` on the channel column has a containing
+// block as wide as the scroll content — otherwise the column un-sticks
+// (scrolls away) once the user pans past the viewport width.
+const TOTAL_WIDTH = CHANNEL_COL_WIDTH + TIMELINE_WIDTH;
 const PX_PER_MS = PX_PER_HOUR / (60 * 60 * 1000);
 
 interface EPGGridProps {
@@ -163,7 +169,7 @@ export function EPGGrid({
 
       {/* ── Grid ────────────────────────────────────────────────────── */}
       <div
-        className="relative overflow-hidden rounded-tv-lg border border-tv-line bg-tv-bg-1"
+        className="relative overflow-hidden rounded-tv-lg border border-tv-line-strong bg-[linear-gradient(180deg,var(--tv-bg-1),#0b1015)] shadow-tv-lg"
         role="grid"
         aria-label={t("liveTV.epgGridLabel", {
           defaultValue: "Guía de programación",
@@ -176,13 +182,13 @@ export function EPGGrid({
         >
           {/* Header (sticky top) */}
           <div
-            className="sticky top-0 z-20 flex border-b border-tv-line bg-tv-bg-1/95 backdrop-blur"
-            style={{ height: HEADER_HEIGHT }}
+            className="sticky top-0 z-20 flex border-b border-tv-line-strong bg-tv-bg-1/90 backdrop-blur-xl"
+            style={{ height: HEADER_HEIGHT, width: TOTAL_WIDTH }}
             role="row"
           >
             {/* Sticky corner */}
             <div
-              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-tv-line bg-tv-bg-1/95 px-4 text-[10px] font-semibold uppercase tracking-widest text-tv-fg-3"
+              className="sticky left-0 z-30 flex shrink-0 items-center border-r border-tv-line-strong bg-tv-bg-1/90 px-4 text-[10px] font-semibold uppercase tracking-widest text-tv-fg-3"
               style={{ width: CHANNEL_COL_WIDTH, height: HEADER_HEIGHT }}
               role="columnheader"
             >
@@ -196,14 +202,26 @@ export function EPGGrid({
               {hours.map((h) => (
                 <div
                   key={h.hour}
-                  className={[
-                    "absolute top-0 flex h-full items-center border-l border-tv-line px-2 font-mono text-[11px] tabular-nums",
-                    h.isNow ? "text-tv-accent" : "text-tv-fg-3",
-                  ].join(" ")}
+                  className="absolute top-0 flex h-full items-center border-l border-tv-line px-2"
                   style={{ left: h.hour * PX_PER_HOUR, width: PX_PER_HOUR }}
                   role="columnheader"
                 >
-                  {h.label}
+                  {/* decorative half-hour minor tick */}
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-tv-line"
+                    style={{ left: PX_PER_HOUR / 2 }}
+                  />
+                  <span
+                    className={[
+                      "font-mono text-[11px] tabular-nums",
+                      h.isNow
+                        ? "rounded-full bg-tv-accent/15 px-2 py-0.5 font-semibold text-tv-accent"
+                        : "text-tv-fg-3",
+                    ].join(" ")}
+                  >
+                    {h.label}
+                  </span>
                 </div>
               ))}
             </div>
@@ -234,10 +252,12 @@ export function EPGGrid({
                 defaultValue: "Sin guía disponible",
               })}
             >
-              {nowLineVisible && <NowLine offset={nowLineOffset} />}
+              {nowLineVisible && (
+              <NowLine offset={nowLineOffset} label={nowLabel} />
+            )}
             </VirtualizedRows>
           ) : (
-            <div className="relative">
+            <div className="relative" style={{ width: TOTAL_WIDTH }}>
               {channels.map((channel) => (
                 <ChannelRow
                   key={channel.id}
@@ -254,7 +274,9 @@ export function EPGGrid({
                   })}
                 />
               ))}
-              {nowLineVisible && <NowLine offset={nowLineOffset} />}
+              {nowLineVisible && (
+              <NowLine offset={nowLineOffset} label={nowLabel} />
+            )}
             </div>
           )}
         </div>
@@ -267,15 +289,18 @@ export function EPGGrid({
 // across all rows. Extracted so both the virtualised and non-
 // virtualised branches share the exact same DOM (same z-index, same
 // shadow) without copy-pasting.
-function NowLine({ offset }: { offset: number }) {
+function NowLine({ offset, label }: { offset: number; label: string }) {
   return (
     <div
-      className="pointer-events-none absolute top-0 bottom-0 z-[5]"
+      className="pointer-events-none absolute top-0 bottom-0 z-[6]"
       style={{ left: CHANNEL_COL_WIDTH + offset, width: 2 }}
       aria-hidden="true"
     >
-      <div className="h-full w-0.5 bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
-      <div className="absolute -top-1 -left-[3px] size-2 rounded-full bg-tv-live" />
+      <div className="h-full w-0.5 bg-tv-live shadow-[0_0_10px_var(--tv-live),0_0_22px_rgba(255,59,77,0.35)]" />
+      {/* time bubble pinned to the top of the line */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 rounded-full bg-tv-live px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums text-white shadow-[0_0_10px_var(--tv-live)]">
+        {label}
+      </div>
     </div>
   );
 }
@@ -322,7 +347,7 @@ function VirtualizedRows({
   return (
     <div
       className="relative"
-      style={{ height: rowVirtualizer.getTotalSize() }}
+      style={{ height: rowVirtualizer.getTotalSize(), width: TOTAL_WIDTH }}
     >
       {rowVirtualizer.getVirtualItems().map((virtualRow) => {
         const channel = channels[virtualRow.index];
@@ -378,6 +403,14 @@ function ChannelRow({
   onSelectProgram,
   noEpgLabel,
 }: ChannelRowProps) {
+  // Is the channel airing something right now? Drives the live dot in the
+  // sticky column so a viewer scanning the channel list can see which
+  // channels are "on air" without reading the timeline.
+  const liveNow = programs.some((p) => {
+    const s = new Date(p.start_time).getTime();
+    const e = new Date(p.end_time).getTime();
+    return s <= now && e > now;
+  });
   return (
     <div
       className={[
@@ -403,6 +436,13 @@ function ChannelRow({
         style={{ width: CHANNEL_COL_WIDTH }}
         role="gridcell"
       >
+        {/* active-channel accent spine */}
+        {isActive ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 w-[3px] bg-tv-accent shadow-[0_0_10px_var(--tv-accent)]"
+          />
+        ) : null}
         <ChannelLogo
           logoUrl={channel.logo_url}
           initials={channel.logo_initials}
@@ -413,16 +453,31 @@ function ChannelRow({
           textClassName="text-[12px] font-bold"
         />
         <div className="min-w-0 flex-1">
-          <div
-            className={[
-              "truncate text-[13px] font-semibold leading-tight",
-              isActive ? "text-tv-accent" : "text-tv-fg-0",
-            ].join(" ")}
-          >
-            {channel.name}
+          <div className="flex items-center gap-1.5">
+            {liveNow ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 flex-none rounded-full bg-tv-live shadow-[0_0_6px_var(--tv-live)]"
+              />
+            ) : null}
+            <span
+              className={[
+                "truncate text-[13px] font-semibold leading-tight",
+                isActive ? "text-tv-accent" : "text-tv-fg-0",
+              ].join(" ")}
+            >
+              {channel.name}
+            </span>
           </div>
-          <div className="mt-0.5 truncate font-mono text-[10px] uppercase tracking-widest text-tv-fg-3">
-            CH {channel.number}
+          <div className="mt-0.5 flex items-center gap-2">
+            <span className="truncate font-mono text-[10px] uppercase tracking-widest text-tv-fg-3">
+              CH {channel.number}
+            </span>
+            {channel.quality ? (
+              <span className="flex-none rounded-tv-xs border border-tv-accent/40 px-1 font-mono text-[9px] font-bold text-tv-accent">
+                {channel.quality}
+              </span>
+            ) : null}
           </div>
         </div>
       </button>
@@ -430,7 +485,13 @@ function ChannelRow({
       {/* Programmes track */}
       <div
         className="relative shrink-0"
-        style={{ width: TIMELINE_WIDTH, height: ROW_HEIGHT }}
+        style={{
+          width: TIMELINE_WIDTH,
+          height: ROW_HEIGHT,
+          // Decorative hour (stronger) + half-hour (fainter) gridlines so
+          // the timeline reads like a broadcast guide grid.
+          backgroundImage: `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${PX_PER_HOUR}px), repeating-linear-gradient(to right, rgba(255,255,255,0.022) 0, rgba(255,255,255,0.022) 1px, transparent 1px, transparent ${PX_PER_HOUR / 2}px)`,
+        }}
         role="gridcell"
       >
         {programs.length === 0 ? (
@@ -520,20 +581,28 @@ function ProgramBlock({
         // their text but keep the chrome so the row stays readable.
         "absolute top-1.5 bottom-1.5 flex flex-col justify-center overflow-hidden rounded-tv-xs px-3 py-1.5 text-left transition",
         isLive
-          ? "bg-tv-accent/[0.22] ring-1 ring-tv-accent/60 hover:bg-tv-accent/[0.30]"
+          ? "bg-tv-accent/[0.22] ring-1 ring-tv-accent/70 shadow-[0_0_20px_-6px_var(--tv-accent)] hover:bg-tv-accent/[0.30]"
           : isPast
             ? "bg-tv-bg-2/40 hover:bg-tv-bg-2/70"
-            : "bg-tv-accent/[0.06] hover:bg-tv-accent/[0.12]",
+            : "border-l border-tv-line bg-tv-accent/[0.06] hover:bg-tv-accent/[0.12]",
       ].join(" ")}
       style={{ left, width }}
     >
-      <div
-        className={[
-          "truncate text-[13px] font-semibold leading-tight",
-          isPast ? "text-tv-fg-3" : "text-tv-fg-0",
-        ].join(" ")}
-      >
-        {program.title}
+      <div className="flex items-center gap-1.5">
+        {isLive ? (
+          <span
+            aria-hidden="true"
+            className="size-1.5 flex-none rounded-full bg-tv-live shadow-[0_0_6px_var(--tv-live)]"
+          />
+        ) : null}
+        <span
+          className={[
+            "truncate text-[13px] font-semibold leading-tight",
+            isPast ? "text-tv-fg-3" : "text-tv-fg-0",
+          ].join(" ")}
+        >
+          {program.title}
+        </span>
       </div>
       <div className="mt-0.5 truncate text-[10.5px] tabular-nums text-tv-fg-2">
         {timeLabel}
