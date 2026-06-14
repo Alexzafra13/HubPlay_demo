@@ -139,6 +139,20 @@ func ValidatePeerToken(clk clock.Clock, lookup PeerLookup, ourServerUUID, raw st
 	if !ok || !parsed.Valid {
 		return nil, nil, domain.ErrInvalidToken
 	}
+	// Cap the token's lifetime at the receiver. The jwt library only
+	// rejects an *already-expired* exp; a peer signs its own tokens and
+	// fully controls exp, so without this a hostile-but-paired peer
+	// could mint a token valid for a year, defeating the "5-minute
+	// bounded utility of a stolen token" guarantee the design relies on.
+	// We enforce that exp is no further out than our own issuance policy
+	// (TTL + skew). F-3 (audit 2026-06-12).
+	if claims.ExpiresAt == nil {
+		return nil, nil, domain.ErrInvalidToken
+	}
+	maxExp := clk.Now().Add(peerTokenTTL + peerTokenSkew)
+	if claims.ExpiresAt.After(maxExp) {
+		return nil, nil, domain.ErrInvalidToken
+	}
 	// Audience must be us — defends against a stolen token being
 	// replayed against a third peer.
 	audOk := false

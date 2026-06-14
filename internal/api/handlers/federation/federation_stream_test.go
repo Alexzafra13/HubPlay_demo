@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -267,6 +268,36 @@ func TestFederationStream_StartSession_CanPlay_Returns200(t *testing.T) {
 	mp, _ := body["master_path"].(string)
 	if !strings.HasPrefix(mp, "/api/v1/peer/stream/session/") {
 		t.Errorf("master_path = %q, missing peer-session prefix", mp)
+	}
+}
+
+// TestFederationStream_StartSession_PerPeerCap_Returns429 is the F-2
+// regression at the HTTP layer: once the peer is already streaming
+// MaxConcurrentStreamsPerPeer distinct items, a new item is refused
+// with 429 + Retry-After instead of spawning another transcode.
+func TestFederationStream_StartSession_PerPeerCap_Returns429(t *testing.T) {
+	env := newFedTestEnv(t)
+	env.share(federation.ShareScopes{CanBrowse: true, CanPlay: true})
+
+	// Saturate the peer's budget (default cap = 5) with distinct items
+	// other than the one we'll request. These are pure registry entries
+	// (no transcode) — enough to make the real request the cap+1th.
+	for i := 0; i < 5; i++ {
+		env.mgr.RegisterPeerStreamSession(env.peerID, "seed-item-"+strconv.Itoa(i), "1080p")
+	}
+
+	resp := env.postSession(t)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	if ra := resp.Header.Get("Retry-After"); ra == "" {
+		t.Error("429 response missing Retry-After header")
+	}
+	// And the transcode must NOT have been started — the cap fires
+	// before StartSession.
+	if env.streams.startSessionCalls != 0 {
+		t.Errorf("StartSession was called %d times; cap must short-circuit before transcode", env.streams.startSessionCalls)
 	}
 }
 

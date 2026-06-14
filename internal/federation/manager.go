@@ -154,20 +154,30 @@ type Config struct {
 	// 100 amigos pidiendo emparejarse a la vez - pero corta de raiz
 	// un flood). 0 = sin cap (NO recomendado en prod abierto).
 	MaxIncomingPendingRequests int
+	// MaxConcurrentStreamsPerPeer acota cuántos items distintos puede
+	// estar reproduciendo a la vez un mismo peer remoto. Cada stream
+	// federado spawnea (o comparte) un transcode en NUESTRO
+	// stream.Manager, que comparte el cap GLOBAL con los usuarios
+	// locales — sin este techo por peer, un único peer hostil podía
+	// abrir N transcodes y dejar sin recursos a los usuarios locales
+	// (F-2, audit 2026-06-12). Default 5; 0 = ilimitado. Re-pedir un
+	// item ya activo (retry / reconexión) nunca cuenta contra el cap.
+	MaxConcurrentStreamsPerPeer int
 }
 
 // DefaultConfig returns sensible defaults for new deployments. Caller
 // overrides whatever they want from hubplay.yaml.
 func DefaultConfig() Config {
 	return Config{
-		AdvertisedURL:         "",
-		Version:               "0.1.0",
-		SupportedScopes:       []string{"browse", "play"},
-		InviteTTL:                  24 * time.Hour,
-		HTTPTimeout:                15 * time.Second,
-		PeerRequestsPerMinute:      60,
-		PeerBurst:                  30,
-		MaxIncomingPendingRequests: 100,
+		AdvertisedURL:               "",
+		Version:                     "0.1.0",
+		SupportedScopes:             []string{"browse", "play"},
+		InviteTTL:                   24 * time.Hour,
+		HTTPTimeout:                 15 * time.Second,
+		PeerRequestsPerMinute:       60,
+		PeerBurst:                   30,
+		MaxIncomingPendingRequests:  100,
+		MaxConcurrentStreamsPerPeer: 5,
 	}
 }
 
@@ -238,7 +248,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		clock:          clk,
 		logger:         logger.With("module", "federation"),
 		bus:            bus,
-		httpClt:        &http.Client{Timeout: cfg.HTTPTimeout},
+		httpClt:        &http.Client{Timeout: cfg.HTTPTimeout, CheckRedirect: federationCheckRedirect},
 		auditor:        NewAuditor(repo, logger),
 		ratelimit:      NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
 		nonces:         newNonceCache(clk),
@@ -547,11 +557,30 @@ func (m *Manager) CheckAndStoreNonce(nonce string, exp time.Time) bool {
 // JWT validation on every peer.
 func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	now := m.clock.Now()
+	// Resolve the peer's ServerUUID up front so that, if the cache
+	// refresh below fails, we can still evict the in-memory entry by
+	// key — revocation must be fail-closed (F-4, audit 2026-06-12).
+	// A lookup error here is non-fatal: we proceed with the DB write
+	// and the targeted eviction is simply skipped (refresh is the
+	// primary path).
+	var serverUUID string
+	if p, err := m.repo.GetPeerByID(ctx, peerID); err == nil && p != nil {
+		serverUUID = p.ServerUUID
+	}
 	if err := m.repo.UpdatePeerRevoked(ctx, peerID, now); err != nil {
 		return err
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
-		m.logger.Warn("federation: peer cache refresh after revoke failed", "err", err)
+		// Fail-closed: a stale cache that still holds this peer as
+		// Paired would keep authorising its JWTs. Evict the entry
+		// directly so the auth gate sees PeerNotFound on the next
+		// request even though the full refresh didn't land.
+		m.logger.Warn("federation: peer cache refresh after revoke failed; evicting entry directly", "err", err, "peer_id", peerID)
+		if serverUUID != "" {
+			m.mu.Lock()
+			delete(m.peerCache, serverUUID)
+			m.mu.Unlock()
+		}
 	}
 	// Drop any in-memory rate-limit state for this peer so a future
 	// re-pairing starts with a clean bucket instead of inheriting

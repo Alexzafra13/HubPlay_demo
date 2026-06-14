@@ -2,13 +2,64 @@ package federation
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"hubplay/internal/clock"
 	"hubplay/internal/domain"
 )
+
+// TestFederationCheckRedirect_BlocksLoopbackHop is the F-1 regression:
+// a redirect to a blocked address (loopback / link-local) must abort
+// the request. A hostile peer 302-ing a fetch toward cloud metadata
+// (169.254.169.254 is link-local) or our own localhost is the SSRF.
+func TestFederationCheckRedirect_BlocksLoopbackHop(t *testing.T) {
+	t.Parallel()
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:9999/evil", nil)
+	if err := federationCheckRedirect(req, nil); !errors.Is(err, domain.ErrPeerURLUnsafe) {
+		t.Errorf("loopback redirect target should be blocked, got: %v", err)
+	}
+	linklocal, _ := http.NewRequest(http.MethodGet, "http://169.254.169.254/latest/meta-data/", nil)
+	if err := federationCheckRedirect(linklocal, nil); !errors.Is(err, domain.ErrPeerURLUnsafe) {
+		t.Errorf("link-local (cloud metadata) redirect should be blocked, got: %v", err)
+	}
+}
+
+// TestFederationCheckRedirect_CapsHops bounds redirect-chain length.
+func TestFederationCheckRedirect_CapsHops(t *testing.T) {
+	t.Parallel()
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com/x", nil)
+	via := make([]*http.Request, maxFederationRedirects)
+	if err := federationCheckRedirect(req, via); !errors.Is(err, domain.ErrPeerURLUnsafe) {
+		t.Errorf("redirect past the cap should be rejected, got: %v", err)
+	}
+}
+
+// TestFederationClient_RefusesRedirectToLoopback exercises the guard
+// through a real *http.Client.Do: a server that 302s to loopback must
+// surface an error instead of transparently proxying the internal hop.
+func TestFederationClient_RefusesRedirectToLoopback(t *testing.T) {
+	t.Parallel()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Redirect to a loopback target the client must refuse to follow.
+		http.Redirect(w, r, "http://127.0.0.1:1/internal", http.StatusFound)
+	}))
+	defer upstream.Close()
+
+	client := &http.Client{CheckRedirect: federationCheckRedirect}
+	resp, err := client.Get(upstream.URL) //nolint:bodyclose // err path
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("client should have refused the loopback redirect")
+	}
+	if !errors.Is(err, domain.ErrPeerURLUnsafe) {
+		t.Errorf("wrong error: %v (want ErrPeerURLUnsafe)", err)
+	}
+}
 
 func TestValidatePeerURL_AcceptsPublicHTTPS(t *testing.T) {
 	t.Parallel()
@@ -121,6 +172,53 @@ func TestValidatePeerURL_TestSeamRespected(t *testing.T) {
 
 	if err := validatePeerURL("http://127.0.0.1:8096"); err != nil {
 		t.Fatalf("with permissive predicate, loopback should pass: %v", err)
+	}
+}
+
+// TestRevokePeer_FailClosedOnCacheRefreshError is the F-4 regression:
+// if the post-revoke cache refresh fails (DB read error), the manager
+// must still evict the peer from the in-memory cache so its JWTs stop
+// validating. Otherwise a revoked peer keeps authorising until a later
+// successful refresh.
+func TestRevokePeer_FailClosedOnCacheRefreshError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clk := clock.New()
+
+	repo := &inMemoryFedRepo{}
+	if _, err := LoadOrCreate(ctx, repo, clk, "ServerA"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a paired peer directly so NewManager's refresh caches it.
+	repo.peers = append(repo.peers, &Peer{
+		ID:         "peer-1",
+		ServerUUID: "peer-1-uuid",
+		Name:       "Peer One",
+		BaseURL:    "https://peer.example.com",
+		PublicKey:  ed25519.PublicKey(make([]byte, ed25519.PublicKeySize)),
+		Status:     PeerPaired,
+	})
+
+	mgr, err := NewManager(ctx, DefaultConfig(), repo, clk, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Close)
+
+	// Sanity: the peer is in the auth cache before revoke.
+	if _, err := mgr.LookupByServerUUID("peer-1-uuid"); err != nil {
+		t.Fatalf("peer should be cached pre-revoke: %v", err)
+	}
+
+	// Force the refresh inside RevokePeer to fail. The fail-closed path
+	// must evict the entry directly instead of leaving it Paired.
+	repo.failListPeers = true
+	if err := mgr.RevokePeer(ctx, "peer-1"); err != nil {
+		t.Fatalf("RevokePeer returned error: %v", err)
+	}
+
+	if _, err := mgr.LookupByServerUUID("peer-1-uuid"); !errors.Is(err, domain.ErrPeerNotFound) {
+		t.Errorf("revoked peer must be evicted from cache even when refresh fails; got err=%v", err)
 	}
 }
 
