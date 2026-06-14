@@ -165,9 +165,9 @@ func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) 
 		return nil, ErrNoFiles
 	}
 	s := &Session{
-		infoHash: ih,
-		torrent:  t,
-		file:     file,
+		infoHash:  ih,
+		torrent:   t,
+		file:      file,
 		readahead: m.opts.Readahead,
 	}
 	s.touch(m.now())

@@ -64,6 +64,13 @@ var outOfScopeExact = map[string]string{
 	// ── Admin auth setup (creates first user) ─────────────────────────
 	"POST /auth/setup": "first-run only, web wizard",
 
+	// ── Torrent streaming (legal sources; web feature, opt-in) ────────
+	// Free-text search over Internet Archive + a streaming endpoint for
+	// magnets / archive.org torrents. Off by default, web-only; the
+	// Kotlin TV client doesn't consume it, so it stays out of the spec.
+	"GET /torrent/search": "legal torrent search (Internet Archive), web-only opt-in",
+	"GET /torrent/stream": "legal torrent streaming, web-only opt-in",
+
 	// ── Liveness / readiness probes (infra, not user-facing) ──────────
 	// /health is documented in openapi.yaml; /health/live and
 	// /health/ready are operator-side probes for Kubernetes /

@@ -39,6 +39,7 @@ type Dependencies struct {
 	Catalog    CatalogDeps
 	Streaming  StreamingDeps
 	IPTV       IPTVDeps
+	Torrent    TorrentDeps
 	Federation FederationDeps
 	Providers  ProvidersDeps
 	Admin      AdminDeps
@@ -165,6 +166,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			mountHome(r, deps)
 			mountStreaming(r, deps)
 			mountLibrariesItemsAndIPTV(r, deps, fedImageDir)
+			mountTorrent(r, deps)
 			mountImagesPeopleStudiosCollections(r, deps, fedImgSrv, fedImageDir)
 			mountProviders(r, deps)
 		})

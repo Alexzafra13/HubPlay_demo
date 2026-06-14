@@ -105,6 +105,20 @@ iptv:
     idle_timeout: "30s"       # vida sin segment-requests antes del reap.
     ready_timeout: "15s"      # espera al primer segmento antes de fallar.
 
+torrent:
+  # Motor de streaming BitTorrent para fuentes LEGALES: Internet Archive,
+  # dominio público / Creative Commons, o magnets que TÚ añades y tienes
+  # derecho a usar. El buscador integrado consulta SOLO catálogos legales
+  # (Internet Archive); no hay scraping de indexers de terceros.
+  # OFF por defecto: con enabled:false no se arranca el cliente torrent
+  # ni se montan las rutas /torrent/*.
+  enabled: false
+  data_dir: ""               # vacío ⇒ <streaming.cache_dir>/torrent (scratch efímero).
+  max_sessions: 4            # torrents activos simultáneos (compartidos por viewers).
+  idle_timeout: "5m"         # cierra la sesión tras este tiempo sin lecturas.
+  readahead_bytes: 16777216  # ventana de lectura secuencial (16 MiB) para "ver mientras descarga".
+  metadata_timeout: "60s"    # espera máxima a resolver metadatos del magnet.
+
 mdns:
   # Anuncia el servidor en la LAN como "<hostname>.local". Permite
   # acceder desde móviles/otros PCs sin saber la IP. Requiere UDP/5353

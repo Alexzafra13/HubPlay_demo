@@ -21,6 +21,7 @@ import (
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
+	"hubplay/internal/torrentstream"
 	"hubplay/internal/user"
 )
 
@@ -138,6 +139,12 @@ type IPTVDeps struct {
 	LogoCache *iptv.LogoCache
 	Scheduler *iptv.Scheduler
 	Schedules IPTVSchedulesRepo
+}
+
+// TorrentDeps es el motor de streaming BitTorrent para fuentes legales.
+// nil (Enabled=false en config) = el surface /torrent/* no se monta.
+type TorrentDeps struct {
+	Manager *torrentstream.Manager
 }
 
 // FederationDeps es el manager de peer-to-peer sharing. nil = todo el
