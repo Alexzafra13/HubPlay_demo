@@ -1,10 +1,52 @@
 package federation
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrPeerStreamLimit is returned by AdmitPeerStream when a peer is
+// already streaming MaxConcurrentStreamsPerPeer distinct items. The
+// handler maps it to 429 + Retry-After so the peer backs off rather
+// than spawning yet another transcode against our local budget.
+var ErrPeerStreamLimit = errors.New("federation: peer concurrent stream limit reached")
+
+// AdmitPeerStream enforces the per-peer concurrent-stream ceiling
+// BEFORE a federated stream session is started (i.e. before a transcode
+// spawns). It counts the DISTINCT items the peer currently has active
+// in the session registry; re-requesting an item the peer is already
+// streaming is always admitted, so retries / reconnects of an existing
+// stream never trip the cap. Cap <= 0 means unlimited. F-2.
+//
+// There is a small TOCTOU window between this check and the subsequent
+// RegisterPeerStreamSession (which happens after the transcode starts),
+// but federation traffic is already token-bucket rate-limited per peer,
+// so the worst case is one extra session past the cap under a tight
+// race — acceptable for a resource-exhaustion ceiling.
+func (m *Manager) AdmitPeerStream(peerID, itemID string) error {
+	limit := m.cfg.MaxConcurrentStreamsPerPeer
+	if limit <= 0 {
+		return nil
+	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	distinct := make(map[string]struct{})
+	for _, s := range m.streamSessions {
+		if s.PeerID != peerID {
+			continue
+		}
+		if s.ItemID == itemID {
+			return nil // already streaming this item — retries are free
+		}
+		distinct[s.ItemID] = struct{}{}
+	}
+	if len(distinct) >= limit {
+		return ErrPeerStreamLimit
+	}
+	return nil
+}
 
 // PeerStreamSession is the bookkeeping entry for one active streaming
 // session that originates from a paired peer browsing our catalog.
@@ -84,4 +126,3 @@ func (m *Manager) SweepStreamSessions() {
 		}
 	}
 }
-

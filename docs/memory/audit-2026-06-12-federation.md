@@ -70,7 +70,7 @@ y refusal a través de un `http.Client` real). No es a prueba de
 DNS-rebinding por sí solo (el lookup compite con el dial), pero cierra
 el alcance a metadata/servicios internos que motivó el hallazgo.
 
-### F-2 · Cuotas de recursos por peer: prometidas, no implementadas
+### 🟡 F-2 · Cuotas de recursos por peer — PARCIALMENTE RESUELTO (2026-06-14)
 `internal/federation/peer.go:32-52` (struct `Peer`) +
 `federation_stream.go`. *(Sweeps 2 y 3; confirmado por grep.)*
 
@@ -89,9 +89,33 @@ Matiz importante: los **scopes por share SÍ existen** (`CanBrowse` /
 `CanPlay` / `CanDownload`, verificados en cada handler) — lo que falta
 son los **techos de cantidad/ancho de banda**, no el control de acceso.
 
-**Impacto:** DoS de recursos locales por un peer. **Fix:** campos de
-cuota en `Peer` + schema, contados en el handler de stream antes de
-spawnnear, y contador de bytes en el audit con corte diario.
+**Impacto:** DoS de recursos locales por un peer.
+
+**Fix aplicado (2026-06-14) — límite de concurrencia:**
+`Config.MaxConcurrentStreamsPerPeer` (default 5, 0=ilimitado) +
+`Manager.AdmitPeerStream(peerID, itemID)` (`stream.go`) que cuenta los
+**items distintos** activos del peer en `streamSessions` y rechaza con
+`ErrPeerStreamLimit` al superar el cap (re-pedir un item ya activo
+nunca cuenta → los retries no se bloquean). El handler `StartSession`
+lo llama **antes** de `stream.Manager.StartSession`, así que un peer
+sobre su cupo nunca llega a spawnear el transcode; responde 429 +
+`Retry-After`. Tests: `stream_test.go` (cap, re-pedido, cap=0) +
+`federation_stream_test.go` (429 end-to-end + asserción de que el
+transcode NO arrancó). Esto cierra el vector "un peer abre N streams
+y starva a los locales".
+
+**Pendiente (segundo paso, NO en este cambio):**
+- `MaxConcurrentTranscodes` separado de streams (hoy el cap es por
+  ítems distintos en reproducción, que es la aproximación correcta de
+  "streams concurrentes"; un cap específico de transcodes activos
+  requeriría distinguir directplay/remux/transcode por sesión).
+- `DailyBytesQuota` + `MaxBandwidthMbps`: requieren contar bytes en el
+  `peerResponseRecorder` (ya existe en `middleware.go`) con corte
+  diario y un limitador de ancho de banda en el response writer.
+- **Override per-peer en DB**: hoy el cap es uniforme vía config
+  (consistente con los demás caps de federación, que tampoco se
+  exponen por peer). El override granular necesita columna en
+  `federation_peers` + migración dual-dialect + sqlc + UI admin.
 
 ---
 
@@ -221,11 +245,11 @@ filtrar `ListContinueWatching` por status del peer.
 ## Estado de remediación
 
 - ✅ **F-1, F-3, F-4 aplicados (2026-06-12)** con tests de regresión.
-  Suite `./internal/federation/...` verde con `-race`.
-- ⏳ **F-2 (cuotas por peer)** — pendiente. Es la mayor: requiere campos
-  en `Peer` + migración de schema + conteo por peer en el handler de
-  stream + UI admin. Es una feature, no un fix puntual; hacer aparte
-  para no dejar una cuota a medias. Es el siguiente con más impacto.
-- ⏳ **F-5, F-6, F-7, F-8** — correctness/operacional; F-6 se liga a F-2.
+- 🟡 **F-2 — límite de concurrencia aplicado (2026-06-14)**: cap de
+  streams concurrentes por peer (config, default 5), enforce 429 antes
+  del transcode. Pendiente el segundo paso: bytes/bandwidth quota y
+  override per-peer en DB (ver detalle arriba).
+- ⏳ **F-5, F-6, F-7, F-8** — correctness/operacional; F-6 se liga a F-2
+  (el cap de concurrencia ya mitiga parte del leak de F-6).
 - ⏳ Bajos (F-9..F-13) + alinear el doc con lo implementado (rotation,
   download siguen siendo Phase 2/7).

@@ -2,7 +2,9 @@ package federation
 
 import (
 	"context"
+	"errors"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -142,4 +144,64 @@ func TestManager_CloseIdempotent(t *testing.T) {
 	}
 	mgr.Close()
 	mgr.Close() // must not panic, must not deadlock
+}
+
+// TestAdmitPeerStream_EnforcesPerPeerCap is the F-2 regression: a peer
+// already streaming `cap` distinct items is refused a new one, but
+// re-requesting an item it's already streaming (retry/reconnect) is
+// allowed, and other peers are unaffected.
+func TestAdmitPeerStream_EnforcesPerPeerCap(t *testing.T) {
+	repo := &inMemoryFedRepo{}
+	clk := clock.New()
+	if _, err := LoadOrCreate(context.Background(), repo, clk, "T"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	cfg.MaxConcurrentStreamsPerPeer = 2
+	mgr, err := NewManager(context.Background(), cfg, repo, clk, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Close)
+
+	// Peer A fills its cap with two distinct items.
+	mgr.RegisterPeerStreamSession("peerA", "item1", "1080p")
+	mgr.RegisterPeerStreamSession("peerA", "item2", "1080p")
+
+	// A third DISTINCT item is refused.
+	if err := mgr.AdmitPeerStream("peerA", "item3"); !errors.Is(err, ErrPeerStreamLimit) {
+		t.Errorf("third distinct item should hit the cap, got: %v", err)
+	}
+	// Re-requesting an already-active item is always allowed.
+	if err := mgr.AdmitPeerStream("peerA", "item1"); err != nil {
+		t.Errorf("re-requesting an active item must be admitted, got: %v", err)
+	}
+	// A different peer has its own budget.
+	if err := mgr.AdmitPeerStream("peerB", "item9"); err != nil {
+		t.Errorf("a different peer must not be affected, got: %v", err)
+	}
+}
+
+// TestAdmitPeerStream_UnlimitedWhenZero pins that cap=0 disables the
+// ceiling entirely (back-compat for deployments that don't set it).
+func TestAdmitPeerStream_UnlimitedWhenZero(t *testing.T) {
+	repo := &inMemoryFedRepo{}
+	clk := clock.New()
+	if _, err := LoadOrCreate(context.Background(), repo, clk, "T"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	cfg.MaxConcurrentStreamsPerPeer = 0
+	mgr, err := NewManager(context.Background(), cfg, repo, clk, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Close)
+
+	for i := 0; i < 50; i++ {
+		mgr.RegisterPeerStreamSession("peerA", "item"+strconv.Itoa(i), "1080p")
+	}
+	if err := mgr.AdmitPeerStream("peerA", "another"); err != nil {
+		t.Errorf("cap=0 means unlimited, got: %v", err)
+	}
 }

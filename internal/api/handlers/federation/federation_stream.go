@@ -21,6 +21,7 @@ package fedhandler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -128,6 +129,24 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 	}
 	if share == nil || !share.CanPlay {
 		handlers.RespondError(w, r, http.StatusNotFound, "ITEM_NOT_FOUND", "item not found")
+		return
+	}
+
+	// Per-peer concurrent-stream ceiling (F-2). Checked BEFORE
+	// StartSession so a peer over its budget never spawns a transcode
+	// against our local stream.Manager (which shares its global cap
+	// with local users). Re-requesting an already-active item is
+	// admitted, so retries don't 429. Exceeding it returns 429 +
+	// Retry-After so the peer's HTTP client backs off.
+	if err := h.mgr.AdmitPeerStream(peer.ID, itemID); err != nil {
+		if errors.Is(err, federation.ErrPeerStreamLimit) {
+			w.Header().Set("Retry-After", "10")
+			handlers.RespondError(w, r, http.StatusTooManyRequests, "PEER_STREAM_LIMIT",
+				"concurrent stream limit reached for this peer")
+			return
+		}
+		h.logger.Error("federation: admit peer stream", "error", err, "peer_id", peer.ID, "item_id", itemID)
+		handlers.RespondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream admission failed")
 		return
 	}
 
