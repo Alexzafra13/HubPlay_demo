@@ -134,22 +134,3 @@ func trimYear(raw json.RawMessage) string {
 	}
 	return s
 }
-
-// httpGet fetches a URL (used by the manager to pull a .torrent file).
-// Returns the body as an io.ReadCloser the caller must close.
-func httpGet(rawURL string) (io.ReadCloser, error) {
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", userAgent)
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	return resp.Body, nil
-}

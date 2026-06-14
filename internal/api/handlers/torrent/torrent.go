@@ -1,9 +1,10 @@
-// Package torrenthandler exposes the legal torrent-streaming feature over
-// HTTP: a free-text search against Internet Archive and a streaming
-// endpoint that plays a result (or an operator-supplied magnet) while it
-// downloads. There is NO third-party indexer integration — `/search`
-// hits Internet Archive only, and `/stream` accepts magnets or
-// archive.org .torrent URLs, nothing else.
+// Package torrenthandler exposes the torrent-streaming feature over HTTP:
+// a free-text search and a streaming endpoint that plays a result (or an
+// operator-supplied magnet / .torrent URL) while it downloads. The
+// built-in search provider is Internet Archive, but the provider registry
+// (internal/torrentstream) is extensible. `/stream` accepts any magnet or
+// http(s) .torrent URL — http(s) fetches are SSRF-guarded by the engine
+// (imaging.SafeGet), so an arbitrary URL can't reach internal services.
 package torrenthandler
 
 import (
@@ -170,13 +171,13 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, sess.FileName(), time.Now(), reader)
 }
 
-// isAllowedSource restricts streaming to magnets and archive.org torrent
-// URLs. This keeps the .torrent fetch from becoming an open SSRF (it can
-// only reach archive.org) and ties the HTTP path to the legal catalogue.
+// isAllowedSource gates the source *scheme*: a magnet, or an http(s)
+// .torrent URL. It is not tied to any single catalogue — the operator
+// chooses what to add. SSRF safety for http(s) URLs (blocking
+// loopback/LAN/metadata) is enforced downstream by imaging.SafeGet in the
+// engine, so this only rejects non-fetchable schemes (ftp, file, …).
 func isAllowedSource(src string) bool {
-	if strings.HasPrefix(src, "magnet:") {
-		return true
-	}
-	return strings.HasPrefix(src, "https://archive.org/") ||
-		strings.HasPrefix(src, "https://ia") && strings.Contains(src, ".archive.org/")
+	return strings.HasPrefix(src, "magnet:") ||
+		strings.HasPrefix(src, "http://") ||
+		strings.HasPrefix(src, "https://")
 }

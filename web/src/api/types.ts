@@ -1933,3 +1933,15 @@ export class ApiError extends Error {
     this.details = body.error.details;
   }
 }
+
+// TorrentSearchResult is one item from the legal catalogue search
+// (/torrent/search). `torrent_url` (or magnet) is passed to /torrent/stream
+// to play it; `provider` labels the source.
+export interface TorrentSearchResult {
+  identifier: string;
+  title: string;
+  mediatype: string;
+  year?: string;
+  torrent_url: string;
+  provider?: string;
+}

@@ -33,15 +33,19 @@ func adminTrue(*http.Request) bool  { return true }
 func adminFalse(*http.Request) bool { return false }
 
 func TestIsAllowedSource(t *testing.T) {
+	// isAllowedSource gates the scheme only: magnet or http(s). It is NOT
+	// catalogue-restricted — any public source is accepted. SSRF safety
+	// for http(s) URLs (blocking 169.254.x / LAN / loopback) is enforced
+	// downstream by imaging.SafeGet in the engine, not here.
 	cases := map[string]bool{
 		"magnet:?xt=urn:btih:abc":                                    true,
 		"https://archive.org/download/sintel/sintel_archive.torrent": true,
-		"https://ia800000.us.archive.org/x/sintel_archive.torrent":   true,
-		"https://example.com/evil.torrent":                           false,
-		"http://archive.org/x.torrent":                               false, // only https archive.org
-		"http://169.254.169.254/latest/meta-data":                    false, // SSRF target
-		"":                    false,
-		"ftp://archive.org/x": false,
+		"https://example.com/any.torrent":                            true,
+		"http://my-tracker.example/x.torrent":                        true,
+		"":                                                           false,
+		"ftp://example.com/x":                                        false,
+		"file:///etc/passwd":                                         false,
+		"notaurl":                                                    false,
 	}
 	for src, want := range cases {
 		if got := isAllowedSource(src); got != want {
@@ -71,12 +75,14 @@ func TestStream_MissingSource(t *testing.T) {
 }
 
 func TestStream_InvalidSource(t *testing.T) {
+	// A non-magnet, non-http(s) scheme is rejected at the handler (400);
+	// SSRF for http(s) is handled later by the engine, not here.
 	h := NewHandler(&fakeManager{}, adminFalse, nil)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=https://example.com/x.torrent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=ftp://example.com/x.torrent", nil)
 	h.Stream(rr, req)
 	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status: got %d want 400 for disallowed host", rr.Code)
+		t.Fatalf("status: got %d want 400 for disallowed scheme", rr.Code)
 	}
 }
 

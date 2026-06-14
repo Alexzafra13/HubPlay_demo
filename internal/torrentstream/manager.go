@@ -13,6 +13,7 @@
 package torrentstream
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,7 +26,13 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+
+	"hubplay/internal/imaging"
 )
+
+// maxTorrentFileBytes caps how large a fetched .torrent metainfo file may
+// be. Generous for big multi-file torrents, small enough to bound memory.
+const maxTorrentFileBytes = 8 << 20
 
 // Sentinel errors. Handlers map these to HTTP status codes; keeping them
 // here (rather than constructing AppError in the engine) preserves the
@@ -191,9 +198,10 @@ func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) 
 }
 
 func (m *Manager) addTorrent(uri string) (*torrent.Torrent, error) {
-	// .torrent over HTTP vs magnet. The caller is responsible for the
-	// source being legal (operator-added magnet, or a legal-catalogue
-	// .torrent URL surfaced by search.go).
+	// .torrent over HTTP vs magnet. The source is not restricted to any
+	// single catalogue — the operator chooses what to add. For HTTP
+	// .torrent URLs the fetch is SSRF-guarded (see addTorrentFromURL);
+	// magnets resolve over the BitTorrent network, not a server fetch.
 	if strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://") {
 		return m.addTorrentFromURL(uri)
 	}
@@ -204,13 +212,17 @@ func (m *Manager) addTorrent(uri string) (*torrent.Torrent, error) {
 	return t, nil
 }
 
-func (m *Manager) addTorrentFromURL(url string) (*torrent.Torrent, error) {
-	resp, err := httpGet(url)
+func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
+	// SSRF-guarded fetch: imaging.SafeGet rejects URLs resolving to
+	// loopback / LAN / link-local / cloud-metadata and re-validates every
+	// redirect hop, so an arbitrary .torrent URL can't make the server
+	// reach internal services. This is what lets us accept any *public*
+	// source (not just one catalogue) without opening an SSRF hole.
+	data, _, err := imaging.SafeGet(rawURL, maxTorrentFileBytes, 20*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("torrentstream: fetch .torrent: %w", err)
 	}
-	defer resp.Close()
-	mi, err := metainfo.Load(resp)
+	mi, err := metainfo.Load(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("torrentstream: parse .torrent: %w", err)
 	}

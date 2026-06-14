@@ -67,6 +67,7 @@ import type {
   UploadBrowseResponse,
   UserData,
   ApiErrorBody,
+  TorrentSearchResult,
 } from "./types";
 import { ApiError } from "./types";
 import { getClientCapabilitiesHeader } from "./clientCapabilities";
@@ -456,6 +457,20 @@ export class ApiClient {
 
   async getMe(): Promise<User> {
     return this.request<User>("GET", "/me");
+  }
+
+  // ── Torrent streaming (legal sources: Internet Archive) ─────────────
+  // searchTorrents runs a free-text query against the server's legal
+  // catalogue providers. torrentStreamURL builds the same-origin URL a
+  // <video> element plays (cookie auth travels automatically).
+  async searchTorrents(query: string, limit = 30): Promise<TorrentSearchResult[]> {
+    return this.request<TorrentSearchResult[]>("GET", "/torrent/search", {
+      params: { q: query, limit },
+    });
+  }
+
+  torrentStreamURL(src: string): string {
+    return `${this.baseUrl}/torrent/stream?src=${encodeURIComponent(src)}`;
   }
 
   async getUsers(): Promise<User[]> {

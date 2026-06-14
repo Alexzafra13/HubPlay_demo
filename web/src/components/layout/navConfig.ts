@@ -3,6 +3,7 @@ import {
   Film,
   Tv,
   Radio,
+  Library as LibraryIcon,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -160,6 +161,13 @@ export const MAIN_NAV: NavItem[] = [
         links: LIVETV_CATEGORIES,
       },
     ],
+  },
+  {
+    kind: "link",
+    id: "archive",
+    to: "/archive",
+    labelKey: "nav.archive",
+    icon: LibraryIcon,
   },
 ];
 
