@@ -68,6 +68,7 @@ import type {
   UserData,
   ApiErrorBody,
   TorrentSearchResult,
+  TorrentDiscoverResult,
 } from "./types";
 import { ApiError } from "./types";
 import { getClientCapabilitiesHeader } from "./clientCapabilities";
@@ -466,6 +467,15 @@ export class ApiClient {
   async searchTorrents(query: string, limit = 30): Promise<TorrentSearchResult[]> {
     return this.request<TorrentSearchResult[]>("GET", "/torrent/search", {
       params: { q: query, limit },
+    });
+  }
+
+  // discoverTorrents enriches the browse with TMDb metadata (poster /
+  // overview / year / id). Picking a result then resolves playable
+  // sources via searchTorrents — sourcing stays on the legal catalogue.
+  async discoverTorrents(query: string): Promise<TorrentDiscoverResult[]> {
+    return this.request<TorrentDiscoverResult[]>("GET", "/torrent/discover", {
+      params: { q: query },
     });
   }
 

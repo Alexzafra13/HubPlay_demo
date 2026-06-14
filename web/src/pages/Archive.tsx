@@ -2,47 +2,64 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { m } from "framer-motion";
-import { Film, Music, Radio, Play, X, Search as SearchIcon } from "lucide-react";
+import { Film, Radio, Play, X, Search as SearchIcon } from "lucide-react";
 import { api } from "@/api/client";
-import { ApiError, type TorrentSearchResult } from "@/api/types";
+import {
+  ApiError,
+  type TorrentDiscoverResult,
+  type TorrentSearchResult,
+} from "@/api/types";
 import { useAuthStore } from "@/store/auth";
 import { Button, Input, Spinner, EmptyState } from "@/components/common";
 
-// Archive — free-text search over the server's LEGAL catalogue (Internet
-// Archive) with in-browser playback. The engine + provider registry live
-// in the Go backend (internal/torrentstream); this page is a thin client
-// over /torrent/search + /torrent/stream.
+// Archive — discover-first browse with in-browser playback, over LEGAL
+// sources. Flow:
+//   1. Search → TMDb metadata (posters/overview/year/id) via /torrent/discover.
+//   2. Pick a title → resolve playable sources via /torrent/search (Internet
+//      Archive + any provider the operator registered) by title+year.
+//   3. Play in the browser.
+// When no TMDb provider is configured, the page falls back to a plain
+// catalogue text search (still legal sources). The engine + provider
+// registry live in the Go backend (internal/torrentstream).
 //
-// Permission model (enforced server-side): admins START a torrent
-// (spending the one-time download bandwidth); any user can PLAY one that's
-// already active. A non-admin who hits "play" on inactive content gets a
-// 403 → the player surfaces a "ask an admin to add it" message.
+// Permission model (server-enforced): admins START a torrent (the one-time
+// download bandwidth); any user PLAYS one that's already active.
 export default function Archive() {
   const { t } = useTranslation();
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
   const [term, setTerm] = useState("");
   const [submitted, setSubmitted] = useState("");
-  const [playing, setPlaying] = useState<TorrentSearchResult | null>(null);
+  const [selected, setSelected] = useState<TorrentDiscoverResult | null>(null);
+  const [playing, setPlaying] = useState<{ src: string; title: string } | null>(
+    null,
+  );
 
-  const { data, isFetching, error } = useQuery({
-    queryKey: ["torrent-search", submitted],
-    queryFn: () => api.searchTorrents(submitted, 36),
+  const discover = useQuery({
+    queryKey: ["torrent-discover", submitted],
+    queryFn: () => api.discoverTorrents(submitted),
     enabled: submitted.length > 0,
     retry: false,
     staleTime: 5 * 60_000,
   });
-  const results = data ?? [];
+
+  // Feature fully off (route not mounted / engine disabled).
+  const featureDisabled =
+    discover.error instanceof ApiError &&
+    (discover.error.status === 404 ||
+      (discover.error.status === 503 &&
+        discover.error.code === "TORRENT_DISABLED"));
+  // TMDb not configured → fall back to plain catalogue search.
+  const noMetadata =
+    discover.error instanceof ApiError &&
+    discover.error.code === "NO_METADATA_PROVIDER";
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitted(term.trim());
   }
 
-  // A 404/503 from the search endpoint means the feature is off on this
-  // server (torrent.enabled=false / route not mounted).
-  const featureDisabled =
-    error instanceof ApiError && (error.status === 404 || error.status === 503);
+  const results = discover.data ?? [];
 
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-8 px-6 py-8 sm:px-10">
@@ -56,7 +73,7 @@ export default function Archive() {
         <p className="max-w-2xl text-[13.5px] text-text-secondary">
           {t("archive.subtitle", {
             defaultValue:
-              "Busca y reproduce contenido de archivo (Internet Archive): dominio público, Creative Commons y material libre.",
+              "Busca una película y reprodúcela desde fuentes de archivo legales (dominio público, Creative Commons, Internet Archive).",
           })}
         </p>
 
@@ -67,7 +84,7 @@ export default function Archive() {
               value={term}
               onChange={(e) => setTerm(e.target.value)}
               placeholder={t("archive.searchPlaceholder", {
-                defaultValue: "Ej. Charlie Chaplin, NASA, jazz…",
+                defaultValue: "Ej. Nosferatu, Chaplin, NASA…",
               })}
               icon={<SearchIcon className="size-4" strokeWidth={1.8} />}
               autoFocus
@@ -88,7 +105,6 @@ export default function Archive() {
         )}
       </header>
 
-      {/* States */}
       {featureDisabled ? (
         <EmptyState
           title={t("archive.disabledTitle", { defaultValue: "Función no activada" })}
@@ -98,78 +114,89 @@ export default function Archive() {
           })}
           icon={<Radio strokeWidth={1.5} />}
         />
-      ) : error ? (
-        <EmptyState
-          title={t("archive.errorTitle", { defaultValue: "No se pudo buscar" })}
-          description={
-            error instanceof Error ? error.message : String(error)
-          }
-          icon={<SearchIcon strokeWidth={1.5} />}
+      ) : noMetadata ? (
+        // No TMDb → degrade to plain catalogue text search.
+        <CatalogFallback
+          query={submitted}
+          onPlay={(src, title) => setPlaying({ src, title })}
         />
       ) : !submitted ? (
         <EmptyState
           title={t("archive.idleTitle", { defaultValue: "Empieza a buscar" })}
           description={t("archive.idleDesc", {
-            defaultValue: "Escribe arriba para buscar en el catálogo.",
+            defaultValue: "Escribe el título de una película.",
           })}
           icon={<SearchIcon strokeWidth={1.5} />}
         />
-      ) : isFetching ? (
+      ) : discover.isFetching ? (
         <div className="flex items-center justify-center py-24">
           <Spinner size="md" />
         </div>
+      ) : discover.error ? (
+        <EmptyState
+          title={t("archive.errorTitle", { defaultValue: "No se pudo buscar" })}
+          description={
+            discover.error instanceof Error
+              ? discover.error.message
+              : String(discover.error)
+          }
+          icon={<SearchIcon strokeWidth={1.5} />}
+        />
       ) : results.length === 0 ? (
         <EmptyState
           title={t("archive.noResultsTitle", { defaultValue: "Sin resultados" })}
           description={t("archive.noResultsDesc", {
-            defaultValue: "Prueba con otros términos.",
+            defaultValue: "Prueba con otro título.",
           })}
           icon={<SearchIcon strokeWidth={1.5} />}
         />
       ) : (
-        <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {results.map((r, i) => (
-            <ResultCard
-              key={r.identifier}
-              result={r}
+            <MovieCard
+              key={r.tmdb_id || `${r.title}-${i}`}
+              movie={r}
               index={i}
-              onPlay={() => setPlaying(r)}
+              onSelect={() => setSelected(r)}
             />
           ))}
         </ul>
       )}
 
+      {selected && (
+        <MovieDetailModal
+          movie={selected}
+          onClose={() => setSelected(null)}
+          onPlay={(src) => {
+            setSelected(null);
+            setPlaying({ src, title: selected.title });
+          }}
+        />
+      )}
+
       {playing && (
-        <PlayerModal result={playing} onClose={() => setPlaying(null)} />
+        <PlayerModal
+          src={playing.src}
+          title={playing.title}
+          onClose={() => setPlaying(null)}
+        />
       )}
     </div>
   );
 }
 
-// MediaGlyph renders the placeholder icon for a mediatype (we don't load
-// external poster images — CSP keeps img-src locked to self).
-function MediaGlyph({ mediatype, className }: { mediatype: string; className: string }) {
-  if (mediatype === "audio" || mediatype === "etree") {
-    return <Music className={className} strokeWidth={1.2} />;
-  }
-  return <Film className={className} strokeWidth={1.2} />;
-}
+// ─── Movie card (TMDb poster, CSP allows image.tmdb.org) ───────────────
 
-function ResultCard({
-  result,
+function MovieCard({
+  movie,
   index,
-  onPlay,
+  onSelect,
 }: {
-  result: TorrentSearchResult;
+  movie: TorrentDiscoverResult;
   index: number;
-  onPlay: () => void;
+  onSelect: () => void;
 }) {
   const { t } = useTranslation();
-  // Deterministic hue from the identifier so each card keeps a stable
-  // tint without any external image.
-  const hue = hashHue(result.identifier);
-  const bg = `linear-gradient(150deg, hsl(${hue} 45% 22%) 0%, hsl(${(hue + 40) % 360} 40% 12%) 100%)`;
-
   return (
     <m.li
       initial={{ opacity: 0, y: 8 }}
@@ -179,58 +206,265 @@ function ResultCard({
     >
       <button
         type="button"
-        onClick={onPlay}
-        className="relative aspect-video w-full overflow-hidden rounded-xl border border-border text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent group-hover:-translate-y-0.5 group-hover:border-border-strong group-hover:shadow-xl"
-        style={{ background: bg }}
-        aria-label={t("archive.playAria", {
-          defaultValue: "Reproducir {{title}}",
-          title: result.title,
+        onClick={onSelect}
+        className="relative aspect-[2/3] w-full overflow-hidden rounded-xl border border-border bg-bg-card text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent group-hover:-translate-y-0.5 group-hover:border-border-strong group-hover:shadow-xl"
+        aria-label={t("archive.detailAria", {
+          defaultValue: "Ver fuentes de {{title}}",
+          title: movie.title,
         })}
       >
-        <MediaGlyph
-          mediatype={result.mediatype}
-          className="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2 text-white/20"
-        />
-        <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-          <span className="flex size-12 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/30 backdrop-blur transition group-hover:bg-accent/85">
+        {movie.poster_url ? (
+          <img
+            src={movie.poster_url}
+            alt=""
+            loading="lazy"
+            className="size-full object-cover"
+          />
+        ) : (
+          <span className="flex size-full items-center justify-center bg-gradient-to-br from-bg-hover to-bg-card">
+            <Film className="size-10 text-text-muted" strokeWidth={1.2} />
+          </span>
+        )}
+        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+          <span className="flex size-12 items-center justify-center rounded-full bg-black/50 ring-1 ring-white/30 backdrop-blur group-hover:bg-accent/85">
             <Play className="size-5 text-white" fill="currentColor" />
           </span>
         </span>
-        {result.provider && (
-          <span className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white/85 backdrop-blur">
-            {result.provider}
-          </span>
-        )}
       </button>
       <div className="flex min-w-0 flex-col px-0.5">
-        <span className="truncate text-sm font-medium text-text-primary" title={result.title}>
-          {result.title || result.identifier}
+        <span className="truncate text-sm font-medium text-text-primary" title={movie.title}>
+          {movie.title}
         </span>
-        <span className="truncate text-xs text-text-muted">
-          {[result.mediatype, result.year].filter(Boolean).join(" · ")}
-        </span>
+        {movie.year ? (
+          <span className="text-xs text-text-muted">{movie.year}</span>
+        ) : null}
       </div>
     </m.li>
   );
 }
 
-function PlayerModal({
-  result,
+// ─── Detail modal: metadata + legal sources resolved by title+year ─────
+
+function MovieDetailModal({
+  movie,
   onClose,
+  onPlay,
 }: {
-  result: TorrentSearchResult;
+  movie: TorrentDiscoverResult;
   onClose: () => void;
+  onPlay: (src: string) => void;
 }) {
   const { t } = useTranslation();
-  const [errored, setErrored] = useState(false);
-  const src = api.torrentStreamURL(result.torrent_url);
+  const q = [movie.title, movie.year].filter(Boolean).join(" ");
+  const sources = useQuery({
+    queryKey: ["torrent-sources", q],
+    queryFn: () => api.searchTorrents(q, 20),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const list = sources.data ?? [];
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label={result.title}
+      aria-label={movie.title}
+      onClick={onClose}
+    >
+      <div
+        className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-border bg-bg-card shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("common.close", { defaultValue: "Cerrar" })}
+          className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-black/40 text-white/80 backdrop-blur transition-colors hover:bg-black/60 hover:text-white"
+        >
+          <X className="size-4" />
+        </button>
+
+        <div className="flex flex-col gap-4 p-5 sm:flex-row">
+          {movie.poster_url ? (
+            <img
+              src={movie.poster_url}
+              alt=""
+              className="h-60 w-40 flex-shrink-0 self-center rounded-lg object-cover sm:self-start"
+            />
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-semibold text-text-primary">
+              {movie.title}
+              {movie.year ? (
+                <span className="ml-2 text-base font-normal text-text-muted">
+                  {movie.year}
+                </span>
+              ) : null}
+            </h2>
+            {movie.overview ? (
+              <p className="mt-2 line-clamp-5 text-[13px] text-text-secondary">
+                {movie.overview}
+              </p>
+            ) : null}
+
+            <div className="mt-4">
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-text-muted">
+                {t("archive.sources", { defaultValue: "Fuentes legales" })}
+              </h3>
+              {sources.isFetching ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-text-muted">
+                  <Spinner size="sm" />
+                  {t("archive.sourcesLoading", { defaultValue: "Buscando fuentes…" })}
+                </div>
+              ) : list.length === 0 ? (
+                <p className="py-3 text-sm text-text-muted">
+                  {t("archive.noSources", {
+                    defaultValue:
+                      "No se encontraron fuentes legales para este título.",
+                  })}
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1.5">
+                  {list.map((s) => (
+                    <SourceRow
+                      key={s.identifier}
+                      source={s}
+                      onPlay={() => onPlay(api.torrentStreamURL(s.torrent_url))}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourceRow({
+  source,
+  onPlay,
+}: {
+  source: TorrentSearchResult;
+  onPlay: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <li className="flex items-center gap-2 rounded-lg border border-border bg-bg-base/40 px-3 py-2">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] text-text-primary" title={source.title}>
+          {source.title || source.identifier}
+        </p>
+        <p className="truncate text-[11px] text-text-muted">
+          {[source.provider, source.mediatype, source.year]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onPlay}
+        className="flex shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+      >
+        <Play className="size-3.5" fill="currentColor" />
+        {t("archive.play", { defaultValue: "Reproducir" })}
+      </button>
+    </li>
+  );
+}
+
+// ─── Plain catalogue fallback (no TMDb provider configured) ────────────
+
+function CatalogFallback({
+  query,
+  onPlay,
+}: {
+  query: string;
+  onPlay: (src: string, title: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { data, isFetching, error } = useQuery({
+    queryKey: ["torrent-search", query],
+    queryFn: () => api.searchTorrents(query, 36),
+    enabled: query.length > 0,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const list = data ?? [];
+
+  if (!query) {
+    return (
+      <EmptyState
+        title={t("archive.idleTitle", { defaultValue: "Empieza a buscar" })}
+        description={t("archive.idleDescCatalog", {
+          defaultValue: "Busca en el catálogo de archivo.",
+        })}
+        icon={<SearchIcon strokeWidth={1.5} />}
+      />
+    );
+  }
+  if (isFetching) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Spinner size="md" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <EmptyState
+        title={t("archive.errorTitle", { defaultValue: "No se pudo buscar" })}
+        description={error instanceof Error ? error.message : String(error)}
+        icon={<SearchIcon strokeWidth={1.5} />}
+      />
+    );
+  }
+  if (list.length === 0) {
+    return (
+      <EmptyState
+        title={t("archive.noResultsTitle", { defaultValue: "Sin resultados" })}
+        description={t("archive.noResultsDesc", { defaultValue: "Prueba con otro título." })}
+        icon={<SearchIcon strokeWidth={1.5} />}
+      />
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {list.map((s) => (
+        <SourceRow
+          key={s.identifier}
+          source={s}
+          onPlay={() =>
+            onPlay(api.torrentStreamURL(s.torrent_url), s.title || s.identifier)
+          }
+        />
+      ))}
+    </ul>
+  );
+}
+
+// ─── Player overlay ────────────────────────────────────────────────────
+
+function PlayerModal({
+  src,
+  title,
+  onClose,
+}: {
+  src: string;
+  title: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [errored, setErrored] = useState(false);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       onClick={onClose}
     >
       <div
@@ -239,7 +473,7 @@ function PlayerModal({
       >
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <span className="truncate text-sm font-semibold text-text-primary">
-            {result.title || result.identifier}
+            {title}
           </span>
           <button
             type="button"
@@ -252,7 +486,7 @@ function PlayerModal({
         </div>
         <div className="relative aspect-video w-full bg-black">
           {errored ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+            <div className="flex h-full items-center justify-center px-6 text-center">
               <p className="text-sm text-text-secondary">
                 {t("archive.playError", {
                   defaultValue:
@@ -274,13 +508,4 @@ function PlayerModal({
       </div>
     </div>
   );
-}
-
-// hashHue maps a string to a stable hue (0-359) for the placeholder tint.
-function hashHue(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  }
-  return h % 360;
 }

@@ -18,6 +18,7 @@ import (
 
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
+	"hubplay/internal/provider"
 	"hubplay/internal/torrentstream"
 )
 
@@ -34,23 +35,34 @@ type Manager interface {
 	GetOrStart(ctx context.Context, uri string) (*torrentstream.Session, error)
 }
 
+// MetadataSearcher is the slice of *provider.Manager used to ENRICH the
+// catalogue browse with TMDb metadata (poster / overview / year / id).
+// It's metadata only — it does not resolve playable sources; sources come
+// from the legal provider registry via Manager.Search. nil when no
+// metadata provider is configured.
+type MetadataSearcher interface {
+	SearchMetadata(ctx context.Context, query provider.SearchQuery) ([]provider.SearchResult, error)
+}
+
 type Handler struct {
 	mgr        Manager
+	meta       MetadataSearcher
 	adminCheck func(*http.Request) bool
 	logger     *slog.Logger
 }
 
-// NewHandler builds the handler. adminCheck reports whether the caller may
-// START a torrent (spend bandwidth); pass nil to use the default claims
-// role check.
-func NewHandler(mgr Manager, adminCheck func(*http.Request) bool, logger *slog.Logger) *Handler {
+// NewHandler builds the handler. meta may be nil (no TMDb configured →
+// /discover returns 503). adminCheck reports whether the caller may START
+// a torrent (spend bandwidth); pass nil to use the default claims role
+// check.
+func NewHandler(mgr Manager, meta MetadataSearcher, adminCheck func(*http.Request) bool, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if adminCheck == nil {
 		adminCheck = claimsAdmin
 	}
-	return &Handler{mgr: mgr, adminCheck: adminCheck, logger: logger}
+	return &Handler{mgr: mgr, meta: meta, adminCheck: adminCheck, logger: logger}
 }
 
 // claimsAdmin is the default "may start a download" gate: admin role.
@@ -91,6 +103,59 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handlers.RespondData(w, http.StatusOK, results)
+}
+
+// discoverResult is one enriched movie candidate for the browse grid.
+type discoverResult struct {
+	TMDbID    string `json:"tmdb_id"`
+	Title     string `json:"title"`
+	Year      int    `json:"year,omitempty"`
+	Overview  string `json:"overview,omitempty"`
+	PosterURL string `json:"poster_url,omitempty"`
+}
+
+// Discover runs a metadata (TMDb) search so the UI can present a poster
+// grid the user picks from ("by id" UX). Picking a result then resolves
+// playable sources via /torrent/search — sourcing stays on the legal
+// provider registry, this is metadata only.
+//
+// GET /torrent/discover?q=<text>
+func (h *Handler) Discover(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		handlers.RespondError(w, r, http.StatusBadRequest, "MISSING_QUERY", "q parameter required")
+		return
+	}
+	if h.meta == nil {
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "NO_METADATA_PROVIDER",
+			"no metadata provider configured (set up TMDb to enable enriched discovery)")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	results, err := h.meta.SearchMetadata(ctx, provider.SearchQuery{
+		Title:    query,
+		ItemType: provider.ItemMovie,
+	})
+	if err != nil {
+		h.logger.Warn("torrent discover failed", "query", query, "error", err)
+		handlers.RespondError(w, r, http.StatusBadGateway, "DISCOVER_FAILED", "could not search metadata")
+		return
+	}
+
+	out := make([]discoverResult, 0, len(results))
+	for _, m := range results {
+		out = append(out, discoverResult{
+			TMDbID:    m.ExternalID,
+			Title:     m.Title,
+			Year:      m.Year,
+			Overview:  m.Overview,
+			PosterURL: m.PosterURL,
+		})
+	}
+	handlers.RespondData(w, http.StatusOK, out)
 }
 
 // Stream resolves the source (magnet or archive.org .torrent URL) and

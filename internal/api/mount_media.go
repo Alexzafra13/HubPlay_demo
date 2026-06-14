@@ -468,9 +468,15 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 	}
 	// adminCheck nil → default claims-role gate: only admins may START a
 	// torrent (spend bandwidth); any authenticated user can play one
-	// that's already active.
-	h := torrenthandler.NewHandler(deps.Torrent.Manager, nil, deps.Infra.Logger)
+	// that's already active. The metadata searcher (TMDb) enriches
+	// /discover; nil when no provider is configured.
+	var meta torrenthandler.MetadataSearcher
+	if deps.Providers.Manager != nil {
+		meta = deps.Providers.Manager
+	}
+	h := torrenthandler.NewHandler(deps.Torrent.Manager, meta, nil, deps.Infra.Logger)
 	r.Route("/torrent", func(r chi.Router) {
+		r.Get("/discover", h.Discover)
 		r.Get("/search", h.Search)
 		r.Get("/stream", h.Stream)
 	})

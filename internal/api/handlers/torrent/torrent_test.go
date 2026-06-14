@@ -4,10 +4,22 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"hubplay/internal/provider"
 	"hubplay/internal/torrentstream"
 )
+
+// fakeMeta stands in for the TMDb-backed metadata searcher.
+type fakeMeta struct {
+	results []provider.SearchResult
+	err     error
+}
+
+func (f fakeMeta) SearchMetadata(context.Context, provider.SearchQuery) ([]provider.SearchResult, error) {
+	return f.results, f.err
+}
 
 // fakeManager stands in for the live engine. The serve path needs a real
 // torrent reader (network), so these tests only cover the decision logic
@@ -55,7 +67,7 @@ func TestIsAllowedSource(t *testing.T) {
 }
 
 func TestSearch_MissingQuery(t *testing.T) {
-	h := NewHandler(&fakeManager{}, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/search", nil)
 	h.Search(rr, req)
@@ -65,7 +77,7 @@ func TestSearch_MissingQuery(t *testing.T) {
 }
 
 func TestStream_MissingSource(t *testing.T) {
-	h := NewHandler(&fakeManager{}, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream", nil)
 	h.Stream(rr, req)
@@ -77,7 +89,7 @@ func TestStream_MissingSource(t *testing.T) {
 func TestStream_InvalidSource(t *testing.T) {
 	// A non-magnet, non-http(s) scheme is rejected at the handler (400);
 	// SSRF for http(s) is handled later by the engine, not here.
-	h := NewHandler(&fakeManager{}, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=ftp://example.com/x.torrent", nil)
 	h.Stream(rr, req)
@@ -87,7 +99,7 @@ func TestStream_InvalidSource(t *testing.T) {
 }
 
 func TestStream_DisabledWhenNoManager(t *testing.T) {
-	h := NewHandler(nil, adminFalse, nil)
+	h := NewHandler(nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=magnet:?xt=urn:btih:abc", nil)
 	h.Stream(rr, req)
@@ -100,7 +112,7 @@ func TestStream_DisabledWhenNoManager(t *testing.T) {
 // and must NOT trigger a download.
 func TestStream_NonAdmin_NotActive_Forbidden(t *testing.T) {
 	fm := &fakeManager{active: false}
-	h := NewHandler(fm, adminFalse, nil)
+	h := NewHandler(fm, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=magnet:?xt=urn:btih:abc", nil)
 	h.Stream(rr, req)
@@ -116,7 +128,7 @@ func TestStream_NonAdmin_NotActive_Forbidden(t *testing.T) {
 // busy mapping without needing a live torrent reader.
 func TestStream_Admin_StartsAndMapsBusy(t *testing.T) {
 	fm := &fakeManager{startErr: torrentstream.ErrTooManySessions}
-	h := NewHandler(fm, adminTrue, nil)
+	h := NewHandler(fm, nil, adminTrue, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=magnet:?xt=urn:btih:abc", nil)
 	h.Stream(rr, req)
@@ -125,5 +137,43 @@ func TestStream_Admin_StartsAndMapsBusy(t *testing.T) {
 	}
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status: got %d want 503 (busy)", rr.Code)
+	}
+}
+
+func TestDiscover_MissingQuery(t *testing.T) {
+	h := NewHandler(&fakeManager{}, fakeMeta{}, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/discover", nil)
+	h.Discover(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+func TestDiscover_NoProvider(t *testing.T) {
+	// meta nil → TMDb not configured → 503.
+	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/discover?q=nosferatu", nil)
+	h.Discover(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d want 503", rr.Code)
+	}
+}
+
+func TestDiscover_ReturnsMappedResults(t *testing.T) {
+	meta := fakeMeta{results: []provider.SearchResult{
+		{ExternalID: "653", Title: "Nosferatu", Year: 1922, Overview: "vamp", PosterURL: "https://image.tmdb.org/p.jpg"},
+	}}
+	h := NewHandler(&fakeManager{}, meta, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/discover?q=nosferatu", nil)
+	h.Discover(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), `"tmdb_id":"653"`) ||
+		!strings.Contains(rr.Body.String(), `"poster_url":"https://image.tmdb.org/p.jpg"`) {
+		t.Errorf("body missing mapped fields: %s", rr.Body.String())
 	}
 }

@@ -1945,3 +1945,13 @@ export interface TorrentSearchResult {
   torrent_url: string;
   provider?: string;
 }
+
+// TorrentDiscoverResult is a TMDb-enriched browse candidate (/torrent/discover).
+// Picking one resolves playable sources via /torrent/search by title+year.
+export interface TorrentDiscoverResult {
+  tmdb_id: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_url?: string;
+}

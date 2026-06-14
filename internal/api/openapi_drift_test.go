@@ -68,8 +68,9 @@ var outOfScopeExact = map[string]string{
 	// Free-text search over Internet Archive + a streaming endpoint for
 	// magnets / archive.org torrents. Off by default, web-only; the
 	// Kotlin TV client doesn't consume it, so it stays out of the spec.
-	"GET /torrent/search": "legal torrent search (Internet Archive), web-only opt-in",
-	"GET /torrent/stream": "legal torrent streaming, web-only opt-in",
+	"GET /torrent/discover": "TMDb-enriched browse for torrent feature, web-only opt-in",
+	"GET /torrent/search":   "legal torrent search (Internet Archive), web-only opt-in",
+	"GET /torrent/stream":   "legal torrent streaming, web-only opt-in",
 
 	// ── Liveness / readiness probes (infra, not user-facing) ──────────
 	// /health is documented in openapi.yaml; /health/live and
