@@ -374,6 +374,13 @@ func (h *iptvChannelHandler) HLSManifest(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, iptv.ErrTransmuxFailed):
 			handlers.RespondError(w, r, http.StatusBadGateway, "TRANSMUX_FAILED",
 				"upstream stream could not be transmuxed; channel may be offline or use an unsupported codec")
+		case errors.Is(err, iptv.ErrUnsafeUpstream):
+			// Guard SSRF: el upstream resuelve a una dirección bloqueada
+			// (loopback/LAN/metadata). Operador con tuners de LAN: activar
+			// `iptv.allow_private_upstreams`.
+			h.logger.Warn("transmux upstream blocked by SSRF guard", "channel", channelID, "error", err)
+			handlers.RespondError(w, r, http.StatusBadGateway, "UPSTREAM_BLOCKED",
+				"channel upstream resolves to a blocked (private/loopback) address")
 		case errors.Is(err, r.Context().Err()):
 			// Client gave up — no response needed.
 		default:

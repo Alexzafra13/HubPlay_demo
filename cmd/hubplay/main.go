@@ -301,6 +301,7 @@ func run(configPath string) error {
 		ChannelWatchHistory:   repos.ChannelWatchHistory,
 		Schedules:             repos.IPTVSchedules,
 		EventBus:              eventBus,
+		AllowPrivateUpstreams: cfg.IPTV.AllowPrivateUpstreams,
 		Transmux:              iptvTransmuxOpts,
 		LogoCacheDir:          filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-logos"),
 		IPTVOrgLogosCachePath: filepath.Join(filepath.Dir(cfg.Database.Path), "images", "iptv-org-channels.json"),

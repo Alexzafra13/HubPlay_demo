@@ -47,6 +47,11 @@ type Deps struct {
 
 	EventBus *event.Bus
 
+	// AllowPrivateUpstreams relaja el guard SSRF de upstreams IPTV
+	// (proxy + transmux) para permitir tuners de LAN / loopback. Default
+	// false. main.go lo rellena desde `iptv.allow_private_upstreams`.
+	AllowPrivateUpstreams bool
+
 	// Transmux: zero-value (Enabled=false) deshabilita el TransmuxManager
 	// y los demás campos del struct se ignoran.
 	Transmux TransmuxOpts
@@ -109,6 +114,7 @@ func New(ctx context.Context, deps Deps) (*Module, error) {
 	// El proxy registra outcomes de probe contra el channel repo a
 	// través del service (dead upstreams ⇒ user view filtrada).
 	proxy.SetHealthReporter(service)
+	proxy.SetAllowPrivateUpstreams(deps.AllowPrivateUpstreams)
 
 	var transmux *TransmuxManager
 	if deps.Transmux.Enabled {
@@ -123,6 +129,7 @@ func New(ctx context.Context, deps Deps) (*Module, error) {
 			Metrics:                  deps.Transmux.Metrics,
 			ReencodeEncoder:          deps.Transmux.ReencodeEncoder,
 			ReencodeHWAccelInputArgs: deps.Transmux.ReencodeHWAccelArgs,
+			AllowPrivateUpstreams:    deps.AllowPrivateUpstreams,
 		}, deps.Logger)
 		if deps.Transmux.RegisterGauges != nil {
 			if err := deps.Transmux.RegisterGauges(transmux); err != nil {

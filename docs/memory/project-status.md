@@ -6,7 +6,7 @@
 
 ---
 
-## 🔭 Estado actual (2026-06-12, fin de sesión)
+## 🔭 Estado actual (2026-06-14, fin de sesión)
 
 **Salud:** MVP funcional, cerca de early-production.
 
@@ -14,7 +14,7 @@
 |---|---|
 | Tests backend | `go test ./...` verde (`-race` en stream/api/iptv) |
 | Tests frontend | **748/748** vitest; `tsc`, `eslint` y `knip` limpios |
-| Rama de trabajo | `claude/revisa-trabajar-9wevyd` — Playback P2 completo + smoke E2E |
+| Rama de trabajo | `claude/review-recent-work-9j5lg7` — SSRF transmux cerrado |
 | Audit playback 2026-06-10 | P0 + P1a-d + PB-40..44 + **P2 ✅ (2026-06-12)**. **P3 en curso**: smoke E2E (a)(b)(e) ✅ |
 | Audit prod 2026-06-08 | Fases 0/1/2 + B7 ✅. **Fases 3–5 abiertas** |
 
@@ -55,14 +55,24 @@ Release verdes en main (`cfafee0`), rama nueva desde main.
   resume al playhead) y (d) LiveTV zap (upstream M3U+MPEG-TS sintético
   del propio test → import → transmux → zap por "Canales similares")
   ✅. **Los 5 escenarios E2E del audit cubiertos.**
-- 🔐 **Hallazgo (B2-adyacente)**: `isSafeUpstream` (SSRF guard de IPTV)
-  solo cubre el proxy passthrough — el **transmux lanza ffmpeg contra
-  la URL upstream sin validarla** (`transmux.go startLocked`). Es lo
-  que permite al E2E usar un upstream loopback, pero es un hueco real:
-  un M3U malicioso puede hacer que ffmpeg ataque URLs internas. Al
-  cerrarlo, añadir knob `iptv.allow_private_upstreams` (los tuners de
-  LAN — HDHomeRun, tvheadend — son caso de uso legítimo y hoy el guard
-  del proxy YA los bloquea) y actualizar `web/e2e/livetv-zap.spec.ts`.
+- ✅ **Hallazgo (B2-adyacente) CERRADO (2026-06-14)**: `isSafeUpstream`
+  solo cubría el proxy passthrough — el **transmux lanzaba ffmpeg
+  contra la URL upstream sin validarla**. Cerrado: `GetOrStart` valida
+  `isSafeUpstream` antes de spawnear (métrica `unsafe_upstream`, error
+  → 502 `UPSTREAM_BLOCKED` en el handler). Knob nuevo
+  `iptv.allow_private_upstreams` (default false) que relaja el guard en
+  AMBOS planos (proxy + transmux) para tuners de LAN (HDHomeRun,
+  tvheadend) y loopback. El E2E (`helpers/server.ts`) lo activa para su
+  upstream sintético. Tests: `TestIsSafeUpstream_AllowPrivate`,
+  `TestTransmuxManager_GetOrStart_RejectsUnsafeUpstream`. Documentado en
+  `hubplay.example.yaml`.
+
+**Sesión 2026-06-14 — SSRF transmux (cierre del hallazgo arriba):**
+Ver bloque ✅. Nota: PB-29 (LookupIP sin ctx) y PB-30 (TOCTOU
+DNS-rebind vía dialer Control) siguen abiertos — son un endurecimiento
+distinto (validar en el `Control` del `net.Dialer`), no el hueco de
+cobertura que se acaba de cerrar.
+
 - **Pendiente P3**: PB-19/26/29-31/33/36-39 + resto de gaps de test
   del audit (1-6).
 

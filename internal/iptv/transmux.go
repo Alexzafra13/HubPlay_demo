@@ -160,6 +160,13 @@ type TransmuxManagerConfig struct {
 	// Vacío usa defaultTransmuxUserAgent.
 	UserAgent string
 
+	// AllowPrivateUpstreams relaja el guard SSRF (mismo knob que el
+	// proxy). Default false: GetOrStart rechaza upstreams que resuelvan
+	// a loopback / link-local / RFC1918 / multicast ANTES de lanzar
+	// ffmpeg contra ellos. true permite tuners de LAN (HDHomeRun,
+	// tvheadend) y loopback.
+	AllowPrivateUpstreams bool
+
 	// Gate es el circuit breaker per-channel opcional. Si Allow
 	// devuelve false, GetOrStart rechaza con CircuitOpenError.
 	Gate ChannelGate
@@ -450,6 +457,16 @@ func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL
 	}
 	if upstreamURL == "" {
 		return nil, fmt.Errorf("iptv-transmux: empty upstream URL")
+	}
+	// Guard SSRF: validamos el upstream ANTES de lanzar ffmpeg contra él.
+	// Sin esto un M3U malicioso podía hacer que ffmpeg alcanzara servicios
+	// internos (loopback/RFC1918/metadata cloud). El proxy passthrough ya
+	// lo hacía; el transmux era el hueco. Mismo knob de relax para LAN.
+	if err := isSafeUpstream(upstreamURL, m.cfg.AllowPrivateUpstreams); err != nil {
+		if m.cfg.Metrics != nil {
+			m.cfg.Metrics.IncStarts("unsafe_upstream")
+		}
+		return nil, err
 	}
 
 	m.mu.Lock()

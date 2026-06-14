@@ -4,11 +4,10 @@
 // "Canales similares".
 //
 // El upstream es un servidor HTTP del propio test sirviendo un MPEG-TS
-// sintético en loopback. Nota: esto pasa porque el transmux NO valida
-// isSafeUpstream (el guard SSRF solo cubre el proxy passthrough) — si
-// ese hueco se cierra, este smoke necesitará el knob de config que lo
-// acompañe (p. ej. `iptv.allow_private_upstreams`) para upstreams de
-// LAN/loopback. Ver docs/memory/project-status.md (hallazgo 2026-06-12).
+// sintético en loopback. El guard SSRF del transmux (y del proxy) lo
+// bloquearía por defecto; el harness arranca el server con
+// `iptv.allow_private_upstreams: true` (ver helpers/server.ts) para
+// permitir upstreams de LAN/loopback en este smoke.
 import http from "node:http";
 import { createReadStream } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
