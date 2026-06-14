@@ -92,6 +92,15 @@ type RetentionConfig struct {
 // el resto (proxy timeouts, scheduler) sigue hard-coded y migrará cuando
 // necesite tuning operator-facing.
 type IPTVConfig struct {
+	// AllowPrivateUpstreams: por defecto false, el guard SSRF rechaza
+	// upstreams IPTV que resuelvan a loopback / link-local / RFC1918 /
+	// multicast — tanto el proxy passthrough como el transmux (ffmpeg).
+	// Activar SÓLO si tus fuentes IPTV viven en la LAN (tuners tipo
+	// HDHomeRun, tvheadend) o en loopback: relaja el guard para permitir
+	// esas direcciones privadas. Cierra un hueco SSRF: un M3U malicioso
+	// podía hacer que el server alcanzara servicios internos.
+	AllowPrivateUpstreams bool `yaml:"allow_private_upstreams"`
+
 	Transmux IPTVTransmuxConfig `yaml:"transmux"`
 }
 

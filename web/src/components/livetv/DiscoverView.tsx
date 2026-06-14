@@ -11,6 +11,8 @@ import type {
 import { CategoryChips, type CategoryFilter } from "./CategoryChips";
 import { ChannelCard } from "./ChannelCard";
 import { ChannelRail } from "./ChannelRail";
+import { NowNextRow } from "./NowNextRow";
+import { NowNextList } from "./NowNextList";
 import { HeroSpotlight, type HeroSpotlightItem } from "./HeroSpotlight";
 import type { HeroMode } from "./HeroSettings";
 import { CHANNEL_CATEGORY_ORDER } from "./categoryOrder";
@@ -76,13 +78,12 @@ export function DiscoverView({
   // through every channel in that category without horizontal-scroll
   // fatigue.
   const isAggregate = category === "all" || category === "no-signal";
-  // Cap each rail at 30 channels — beyond that horizontal scrolling
-  // becomes a hostile interaction (you'd be clicking the chevron 30
-  // times) AND the DOM cost of mounting 5000 cards per rail kills
-  // navigation on big libraries. The clickable rail header doubles as
-  // "see all 5000 in a vertical grid", which is the right surface for
-  // exhaustive browsing.
-  const RAIL_PREVIEW_SIZE = 30;
+  // In the aggregate ("all") view each category renders as a vertical
+  // "now & next" guide list, so a short preview keeps the page
+  // scannable instead of stacking dozens of tall rows per category.
+  // The section's "Ver todo" jumps to the concrete category, which is
+  // the paginated surface for exhaustive browsing.
+  const RAIL_PREVIEW_SIZE = 6;
   // Una pasada: por cada categoría, mete el par sólo si tiene canales.
   // Antes hacíamos map + filter (dos recorridos) sobre la lista de
   // categorías. El tipo del primer elemento se preserva (ChannelCategory)
@@ -198,12 +199,12 @@ export function DiscoverView({
       </div>
 
       {showFavorites ? (
-        <ChannelRail
+        <NowNextList
           title={t("liveTV.favorites", { defaultValue: "Favoritos" })}
           count={favoriteChannels.length}
         >
           {favoriteChannels.map((ch) => (
-            <ChannelCard
+            <NowNextRow
               key={ch.id}
               channel={ch}
               nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
@@ -213,18 +214,18 @@ export function DiscoverView({
               onToggleFavorite={() => onToggleFavorite(ch.id)}
             />
           ))}
-        </ChannelRail>
+        </NowNextList>
       ) : null}
 
       {showContinueWatching ? (
-        <ChannelRail
+        <NowNextList
           title={t("liveTV.continueWatching", {
             defaultValue: "Continuar viendo",
           })}
           count={continueWatching.length}
         >
           {continueWatching.map((ch) => (
-            <ChannelCard
+            <NowNextRow
               key={ch.id}
               channel={ch}
               nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
@@ -234,7 +235,7 @@ export function DiscoverView({
               onToggleFavorite={() => onToggleFavorite(ch.id)}
             />
           ))}
-        </ChannelRail>
+        </NowNextList>
       ) : null}
 
       {/* Empty state — fires when the active filter has no channels.
@@ -268,7 +269,7 @@ export function DiscoverView({
       >
       {isAggregate &&
         visibleRails.map(([cat, list]) => (
-          <ChannelRail
+          <NowNextList
             key={cat}
             title={t(`liveTV.category.${cat}`, {
               defaultValue: capitalize(cat),
@@ -277,9 +278,10 @@ export function DiscoverView({
             onSeeAll={
               category === "all" ? () => onCategoryChange(cat) : undefined
             }
+            seeAllLabel={t("liveTV.seeAll", { defaultValue: "Ver todo" })}
           >
             {list.slice(0, RAIL_PREVIEW_SIZE).map((ch) => (
-              <ChannelCard
+              <NowNextRow
                 key={ch.id}
                 channel={ch}
                 nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
@@ -289,7 +291,7 @@ export function DiscoverView({
                 onToggleFavorite={() => onToggleFavorite(ch.id)}
               />
             ))}
-          </ChannelRail>
+          </NowNextList>
         ))}
 
       {/* Concrete category — flat vertical grid. Top-to-bottom flow so
@@ -297,37 +299,28 @@ export function DiscoverView({
           fatigue. Card width tracks the rail's 260 px so the visual
           rhythm survives switching between modes. */}
       {!isAggregate && concreteList.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <header className="flex items-baseline justify-between gap-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-tv-fg-0">
-              {t(`liveTV.category.${category}`, {
-                defaultValue: capitalize(category),
-              })}
-              <span className="rounded-full bg-tv-bg-2 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-tv-fg-2">
-                {concreteList.length}
-              </span>
-            </h2>
-            <p className="text-xs text-tv-fg-3">
-              {t("liveTV.showingCount", {
-                defaultValue: "Mostrando {{visible}} de {{total}}",
-                visible: concreteVisible.length,
-                total: concreteList.length,
-              })}
-            </p>
-          </header>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-            {concreteVisible.map((ch) => (
-              <ChannelCard
-                key={ch.id}
-                channel={ch}
-                nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
-                upNext={getUpNext(scheduleByChannel[ch.id])}
-                isFavorite={favoriteSet.has(ch.id)}
-                onClick={() => onOpen(ch)}
-                onToggleFavorite={() => onToggleFavorite(ch.id)}
-              />
-            ))}
-          </div>
+        <NowNextList
+          title={t(`liveTV.category.${category}`, {
+            defaultValue: capitalize(category),
+          })}
+          count={concreteList.length}
+          subtitle={t("liveTV.showingCount", {
+            defaultValue: "Mostrando {{visible}} de {{total}}",
+            visible: concreteVisible.length,
+            total: concreteList.length,
+          })}
+        >
+          {concreteVisible.map((ch) => (
+            <NowNextRow
+              key={ch.id}
+              channel={ch}
+              nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
+              upNext={getUpNext(scheduleByChannel[ch.id])}
+              isFavorite={favoriteSet.has(ch.id)}
+              onClick={() => onOpen(ch)}
+              onToggleFavorite={() => onToggleFavorite(ch.id)}
+            />
+          ))}
           {concreteHasMore ? (
             <div
               ref={concreteSentinelRef}
@@ -335,7 +328,7 @@ export function DiscoverView({
               className="h-px w-full"
             />
           ) : null}
-        </section>
+        </NowNextList>
       )}
       </div>
 

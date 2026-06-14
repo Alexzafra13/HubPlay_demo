@@ -250,6 +250,11 @@ func newTestManagerWithOpts(t *testing.T, mode string, idle time.Duration, extra
 		UserAgent:              extra.UserAgent,
 		Metrics:                extra.Metrics,
 		EnableReencodeFallback: extra.EnableReencodeFallback,
+		// Los tests usan upstreams sintéticos (`http://upstream/...`, sin
+		// DNS real) con un ffmpeg falso: saltamos el guard SSRF. La
+		// cobertura del guard vive en proxy_security_test.go y en
+		// TestTransmuxManager_GetOrStart_RejectsUnsafeUpstream.
+		AllowPrivateUpstreams: true,
 	}
 	if mode != "" {
 		t.Setenv("FAKE_FFMPEG_MODE", mode)
@@ -578,6 +583,33 @@ func TestTransmuxManager_GetOrStart_RefusedByGate(t *testing.T) {
 	// errors.Is checks at the handler boundary keep working.
 	if !errors.Is(err, ErrCircuitOpen) {
 		t.Errorf("CircuitOpenError must unwrap to ErrCircuitOpen, got %v", err)
+	}
+}
+
+// SSRF guard: con AllowPrivateUpstreams=false (default de producción),
+// GetOrStart rechaza un upstream que resuelve a una IP bloqueada ANTES
+// de lanzar ffmpeg. Cierra el hueco donde un M3U malicioso hacía que
+// ffmpeg alcanzara servicios internos.
+func TestTransmuxManager_GetOrStart_RejectsUnsafeUpstream(t *testing.T) {
+	metrics := newFakeMetrics()
+	m, _ := newTestManagerWithOpts(t, "ok", 0, TransmuxManagerConfig{Metrics: metrics})
+	// El helper activa AllowPrivateUpstreams; lo desactivamos para que el
+	// guard de producción muerda.
+	m.cfg.AllowPrivateUpstreams = false
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := m.GetOrStart(ctx, "ch-ssrf", "http://169.254.169.254/latest/meta-data/")
+	if !errors.Is(err, ErrUnsafeUpstream) {
+		t.Fatalf("expected ErrUnsafeUpstream, got %v", err)
+	}
+	if got := m.ActiveSessions(); got != 0 {
+		t.Errorf("no ffmpeg debe lanzarse para un upstream bloqueado, got %d sesiones", got)
+	}
+	if starts, _, _ := metrics.snapshot(); starts["unsafe_upstream"] != 1 {
+		t.Errorf("esperado 1 start outcome unsafe_upstream, got %d", starts["unsafe_upstream"])
 	}
 }
 
@@ -1163,12 +1195,13 @@ func TestTransmuxManager_ReapsStartupZombies(t *testing.T) {
 	t.Setenv("FAKE_FFMPEG_MODE", "noseg")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	m := NewTransmuxManager(TransmuxManagerConfig{
-		CacheDir:       cacheDir,
-		FFmpegPath:     fakeFFmpeg(t),
-		MaxSessions:    3,
-		IdleTimeout:    1 * time.Hour, // disable idle path so we observe startup_timeout in isolation
-		ReadyTimeout:   200 * time.Millisecond,
-		ReaperInterval: 50 * time.Millisecond,
+		CacheDir:              cacheDir,
+		FFmpegPath:            fakeFFmpeg(t),
+		MaxSessions:           3,
+		IdleTimeout:           1 * time.Hour, // disable idle path so we observe startup_timeout in isolation
+		ReadyTimeout:          200 * time.Millisecond,
+		ReaperInterval:        50 * time.Millisecond,
+		AllowPrivateUpstreams: true, // upstream sintético sin DNS real
 	}, logger)
 	t.Cleanup(m.Shutdown)
 
@@ -1236,12 +1269,13 @@ func TestTransmuxManager_PreSpawnFailureCountsAsSpawnError(t *testing.T) {
 	metrics := newFakeMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	m := NewTransmuxManager(TransmuxManagerConfig{
-		CacheDir:     t.TempDir(),
-		FFmpegPath:   filepath.Join(t.TempDir(), "ffmpeg-does-not-exist"),
-		MaxSessions:  3,
-		IdleTimeout:  1 * time.Second,
-		ReadyTimeout: 500 * time.Millisecond,
-		Metrics:      metrics,
+		CacheDir:              t.TempDir(),
+		FFmpegPath:            filepath.Join(t.TempDir(), "ffmpeg-does-not-exist"),
+		MaxSessions:           3,
+		IdleTimeout:           1 * time.Second,
+		ReadyTimeout:          500 * time.Millisecond,
+		Metrics:               metrics,
+		AllowPrivateUpstreams: true, // upstream sintético sin DNS real
 	}, logger)
 	t.Cleanup(m.Shutdown)
 

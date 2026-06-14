@@ -38,7 +38,7 @@ func TestIsSafeUpstream_RejectsNonHTTP(t *testing.T) {
 		"",
 	}
 	for _, in := range cases {
-		err := isSafeUpstream(in)
+		err := isSafeUpstream(in, false)
 		if !errors.Is(err, ErrUnsafeUpstream) {
 			t.Errorf("%q: want ErrUnsafeUpstream, got %v", in, err)
 		}
@@ -58,9 +58,32 @@ func TestIsSafeUpstream_RejectsLiteralPrivateIPs(t *testing.T) {
 		"http://0.0.0.0/",
 	}
 	for _, in := range cases {
-		err := isSafeUpstream(in)
+		err := isSafeUpstream(in, false)
 		if !errors.Is(err, ErrUnsafeUpstream) {
 			t.Errorf("%q: want ErrUnsafeUpstream, got %v", in, err)
+		}
+	}
+}
+
+// AllowPrivate=true salta el block de IP: los upstreams de LAN/loopback
+// (tuners HDHomeRun/tvheadend) pasan, pero scheme/host se siguen validando.
+func TestIsSafeUpstream_AllowPrivate(t *testing.T) {
+	t.Parallel()
+	allowed := []string{
+		"http://127.0.0.1:8080/x",
+		"http://10.0.0.1/playlist.m3u8",
+		"http://192.168.1.50/stream.ts",
+		"http://hdhomerun.local/auto/v5.1",
+	}
+	for _, in := range allowed {
+		if err := isSafeUpstream(in, true); err != nil {
+			t.Errorf("%q: con allowPrivate debería pasar, got %v", in, err)
+		}
+	}
+	// Scheme/host siguen validados aunque allowPrivate esté activo.
+	for _, in := range []string{"file:///etc/passwd", "http:///nohost"} {
+		if err := isSafeUpstream(in, true); !errors.Is(err, ErrUnsafeUpstream) {
+			t.Errorf("%q: scheme/host inválido debe fallar aún con allowPrivate, got %v", in, err)
 		}
 	}
 }
@@ -71,10 +94,10 @@ func TestIsSafeUpstream_RejectsLiteralPrivateIPs(t *testing.T) {
 func TestIsSafeUpstream_AcceptsPublicIPs(t *testing.T) {
 	// Override blockedIP so only the scheme + parse checks apply.
 	unblockLoopback(t)
-	if err := isSafeUpstream("http://1.1.1.1/"); err != nil {
+	if err := isSafeUpstream("http://1.1.1.1/", false); err != nil {
 		t.Errorf("1.1.1.1 should be allowed, got %v", err)
 	}
-	if err := isSafeUpstream("https://example.com/"); err != nil {
+	if err := isSafeUpstream("https://example.com/", false); err != nil {
 		t.Errorf("example.com should be allowed, got %v", err)
 	}
 }

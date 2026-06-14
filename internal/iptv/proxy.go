@@ -58,6 +58,18 @@ type StreamProxy struct {
 	// proceso: las URLs de segmento son efímeras (el player re-pide el
 	// manifest en segundos), así que rotarla al reiniciar es inocuo.
 	signKey []byte
+
+	// allowPrivate relaja el guard SSRF para permitir upstreams en LAN /
+	// loopback (tuners HDHomeRun/tvheadend). Default false. Lo fija
+	// main.go desde `iptv.allow_private_upstreams`.
+	allowPrivate bool
+}
+
+// SetAllowPrivateUpstreams relaja (true) o aplica (false, default) el
+// guard SSRF de upstreams privados. Se fija una vez en el wiring, antes
+// de servir tráfico, así que no necesita sincronización.
+func (p *StreamProxy) SetAllowPrivateUpstreams(allow bool) {
+	p.allowPrivate = allow
 }
 
 // SetHealthReporter wires the reporter after construction so main.go
@@ -230,7 +242,11 @@ var ErrUnsafeUpstream = errors.New("iptv: unsafe upstream address")
 // isSafeUpstream reports whether the given URL resolves entirely to
 // internet-routable addresses. Called before every upstream fetch. Follows
 // the same ruleset as imaging.BlockedIP (the image SafeGet helper).
-func isSafeUpstream(rawURL string) error {
+//
+// allowPrivate=true (operator opt-in `iptv.allow_private_upstreams`) skips
+// the IP block so LAN/loopback tuners (HDHomeRun, tvheadend) work; scheme
+// and host are still validated.
+func isSafeUpstream(rawURL string, allowPrivate bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("%w: parse: %v", ErrUnsafeUpstream, err)
@@ -241,6 +257,11 @@ func isSafeUpstream(rawURL string) error {
 	host := u.Hostname()
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrUnsafeUpstream)
+	}
+	if allowPrivate {
+		// Operador confía en su LAN: scheme/host ya validados, no
+		// bloqueamos por rango de IP.
+		return nil
 	}
 	// If the host is a literal IP we can check it directly without a DNS
 	// lookup; literal IPv6 in URL is bracketed and Hostname() strips it.
@@ -382,7 +403,7 @@ func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWr
 // could 302 us to http://169.254.169.254/ (cloud metadata) or
 // http://127.0.0.1/admin (a local service) and bypass the initial guard.
 func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*http.Response, string, error) {
-	if err := isSafeUpstream(targetURL); err != nil {
+	if err := isSafeUpstream(targetURL, p.allowPrivate); err != nil {
 		return nil, "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
@@ -409,7 +430,7 @@ func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*htt
 		if len(via) >= 10 {
 			return errors.New("too many redirects")
 		}
-		return isSafeUpstream(req.URL.String())
+		return isSafeUpstream(req.URL.String(), p.allowPrivate)
 	}
 
 	resp, err := redirectingClient.Do(req)

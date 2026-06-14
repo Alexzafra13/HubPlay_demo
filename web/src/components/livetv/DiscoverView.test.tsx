@@ -42,6 +42,29 @@ vi.mock("./ChannelCard", () => ({
   ),
 }));
 
+// NowNextRow drives the discovery surface ("En directo") rows. Same
+// minimal harness as the ChannelCard mock: announce the channel id and
+// surface `dimmed` so the existing layout/order assertions keep working
+// against `data-testid="card"`.
+vi.mock("./NowNextRow", () => ({
+  NowNextRow: (props: {
+    channel: { id: string; name: string };
+    dimmed?: boolean;
+    onClick: () => void;
+    onToggleFavorite: () => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="card"
+      data-channel={props.channel.id}
+      data-dimmed={props.dimmed ? "1" : "0"}
+      onClick={props.onClick}
+    >
+      {props.channel.name}
+    </button>
+  ),
+}));
+
 // CategoryChips — render chips as buttons so we can click them from tests.
 vi.mock("./CategoryChips", () => ({
   CategoryChips: (props: {

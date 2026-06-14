@@ -75,6 +75,10 @@ export class HubplayServer {
       '  level: "warn"',
       "streaming:",
       `  cache_dir: "${path.join(this.workDir, "transcode")}"`,
+      // El smoke de LiveTV sirve el upstream M3U/MPEG-TS sintético en
+      // loopback; el guard SSRF del transmux lo bloquearía sin esto.
+      "iptv:",
+      "  allow_private_upstreams: true",
       "mdns:",
       "  enabled: false",
       "",
