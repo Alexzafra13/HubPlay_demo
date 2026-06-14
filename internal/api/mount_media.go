@@ -466,7 +466,10 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 	if deps.Torrent.Manager == nil {
 		return
 	}
-	h := torrenthandler.NewHandler(deps.Torrent.Manager, deps.Infra.Logger)
+	// adminCheck nil → default claims-role gate: only admins may START a
+	// torrent (spend bandwidth); any authenticated user can play one
+	// that's already active.
+	h := torrenthandler.NewHandler(deps.Torrent.Manager, nil, deps.Infra.Logger)
 	r.Route("/torrent", func(r chi.Router) {
 		r.Get("/search", h.Search)
 		r.Get("/stream", h.Stream)

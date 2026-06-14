@@ -79,8 +79,11 @@ type Manager struct {
 	client *torrent.Client
 	logger *slog.Logger
 
+	providers []SearchProvider
+
 	mu       sync.Mutex
 	sessions map[string]*Session // keyed by infohash hex
+	bySrc    map[string]*Session // keyed by the src (magnet/URL) used to start it
 
 	reaperStop chan struct{}
 	reaperDone chan struct{}
@@ -116,7 +119,9 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 		opts:       opts,
 		client:     client,
 		logger:     logger,
+		providers:  defaultProviders(),
 		sessions:   make(map[string]*Session),
+		bySrc:      make(map[string]*Session),
 		reaperStop: make(chan struct{}),
 		reaperDone: make(chan struct{}),
 		now:        time.Now,
@@ -129,6 +134,13 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 // starting it if needed. It blocks until the metadata resolves or
 // MetadataTimeout / ctx fires.
 func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) {
+	// Fast path: this exact src is already streaming — re-join without
+	// re-adding the torrent or waiting on metadata again.
+	if s, ok := m.GetActive(uri); ok {
+		s.touch(m.now())
+		return s, nil
+	}
+
 	t, err := m.addTorrent(uri)
 	if err != nil {
 		return nil, err
@@ -172,6 +184,7 @@ func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) 
 	}
 	s.touch(m.now())
 	m.sessions[ih] = s
+	m.bySrc[uri] = s
 	m.logger.Info("torrentstream: session started",
 		"infohash", ih, "name", t.Name(), "file", file.DisplayPath(), "bytes", file.Length())
 	return s, nil
@@ -242,9 +255,26 @@ func (m *Manager) reapIdle(now time.Time) {
 				s.torrent.Drop()
 			}
 			delete(m.sessions, ih)
+			// Drop every src alias pointing at this reaped session.
+			for src, bs := range m.bySrc {
+				if bs == s {
+					delete(m.bySrc, src)
+				}
+			}
 			m.logger.Info("torrentstream: session reaped (idle)", "infohash", ih)
 		}
 	}
+}
+
+// GetActive returns the session previously started for src, if it is
+// still live. Unlike GetOrStart it never starts a download — it's the
+// "play what's already running" path, so any user can call it without
+// spending bandwidth.
+func (m *Manager) GetActive(src string) (*Session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.bySrc[src]
+	return s, ok
 }
 
 // activeCount is a test/observability helper.

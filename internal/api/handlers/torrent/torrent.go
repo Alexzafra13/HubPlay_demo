@@ -16,26 +16,46 @@ import (
 	"time"
 
 	"hubplay/internal/api/handlers"
+	"hubplay/internal/auth"
 	"hubplay/internal/torrentstream"
 )
 
 // Manager is the slice of *torrentstream.Manager the handler needs. An
-// interface keeps the handler testable (validation paths can run against
-// a nil/stub manager).
+// interface keeps the handler testable (a stub can stand in for the live
+// engine).
 type Manager interface {
+	Search(ctx context.Context, query string, limit int) ([]torrentstream.SearchResult, error)
+	// GetActive returns an already-running session without starting a
+	// download — the "play what's live" path open to any user.
+	GetActive(src string) (*torrentstream.Session, bool)
+	// GetOrStart starts a download if needed — the bandwidth-spending
+	// path, gated to admins.
 	GetOrStart(ctx context.Context, uri string) (*torrentstream.Session, error)
 }
 
 type Handler struct {
-	mgr    Manager
-	logger *slog.Logger
+	mgr        Manager
+	adminCheck func(*http.Request) bool
+	logger     *slog.Logger
 }
 
-func NewHandler(mgr Manager, logger *slog.Logger) *Handler {
+// NewHandler builds the handler. adminCheck reports whether the caller may
+// START a torrent (spend bandwidth); pass nil to use the default claims
+// role check.
+func NewHandler(mgr Manager, adminCheck func(*http.Request) bool, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{mgr: mgr, logger: logger}
+	if adminCheck == nil {
+		adminCheck = claimsAdmin
+	}
+	return &Handler{mgr: mgr, adminCheck: adminCheck, logger: logger}
+}
+
+// claimsAdmin is the default "may start a download" gate: admin role.
+func claimsAdmin(r *http.Request) bool {
+	c := auth.GetClaims(r.Context())
+	return c != nil && c.Role == "admin"
 }
 
 // Search runs a free-text query against the legal catalogue (Internet
@@ -48,6 +68,11 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		handlers.RespondError(w, r, http.StatusBadRequest, "MISSING_QUERY", "q parameter required")
 		return
 	}
+	if h.mgr == nil {
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "TORRENT_DISABLED",
+			"torrent streaming is not enabled on this server")
+		return
+	}
 	limit := 30
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -58,7 +83,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	results, err := torrentstream.SearchArchive(ctx, query, limit)
+	results, err := h.mgr.Search(ctx, query, limit)
 	if err != nil {
 		h.logger.Warn("torrent search failed", "query", query, "error", err)
 		handlers.RespondError(w, r, http.StatusBadGateway, "SEARCH_FAILED", "could not search the catalogue")
@@ -93,7 +118,25 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.mgr.GetOrStart(r.Context(), src)
+	// Bandwidth model: a torrent's download is shared across all viewers,
+	// so only admins may START a new one (spend the bandwidth). Any user
+	// can play one that's already active — that just serves the local
+	// HTTP stream, no extra download.
+	var (
+		sess *torrentstream.Session
+		err  error
+	)
+	if h.adminCheck(r) {
+		sess, err = h.mgr.GetOrStart(r.Context(), src)
+	} else {
+		var ok bool
+		sess, ok = h.mgr.GetActive(src)
+		if !ok {
+			handlers.RespondError(w, r, http.StatusForbidden, "TORRENT_NOT_STARTED",
+				"this content is not active; ask an administrator to add it")
+			return
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, torrentstream.ErrTooManySessions):

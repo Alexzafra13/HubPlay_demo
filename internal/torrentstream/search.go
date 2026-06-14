@@ -34,6 +34,9 @@ type SearchResult struct {
 	Mediatype  string `json:"mediatype"`
 	Year       string `json:"year,omitempty"`
 	TorrentURL string `json:"torrent_url"`
+	// Provider is the name of the SearchProvider that produced this
+	// result, so a multi-source UI can group / label results.
+	Provider string `json:"provider,omitempty"`
 }
 
 // archiveResponse mirrors the slice of the Archive.org JSON we consume.
