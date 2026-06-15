@@ -199,12 +199,18 @@ func (s *IndexerStore) Indexers(ctx context.Context) []TorznabIndexer {
 	return out
 }
 
-// toTorznabIndexer resolves a record into a search-ready indexer (composing
-// the Prowlarr Torznab path from base_url when no full url is set).
+// toTorznabIndexer resolves a record into a search-ready indexer. The URL
+// field is forgiving: a Prowlarr root (no torznab path) gets the standard
+// path composed; a full Torznab/Jackett endpoint is used as-is. base_url is
+// the fallback when url is empty.
 func (r IndexerRecord) toTorznabIndexer() TorznabIndexer {
-	resolved := r.URL
-	if resolved == "" && r.BaseURL != "" {
-		resolved = ProwlarrTorznabURL(r.BaseURL)
+	raw := r.URL
+	if raw == "" {
+		raw = r.BaseURL
+	}
+	resolved := ""
+	if raw != "" {
+		resolved = resolveTorznabEndpoint(raw)
 	}
 	return TorznabIndexer{
 		Name:             r.Name,

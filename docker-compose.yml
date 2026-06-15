@@ -20,12 +20,13 @@ services:
       # operator type a connection string. SQLite remains the default
       # until the operator explicitly flips the switch in the UI.
       - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
-      # Agregación de fuentes Torznab/Newznab (opcional). Apunta a tu propio
-      # Prowlarr/Jackett para habilitar la búsqueda de fuentes por IMDb id.
-      # Vacío ⇒ los endpoints /torrent/sources/* no se montan. Para
-      # reproducir un resultado, además pon torrent.enabled:true en el YAML.
-      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-}
-      - HUBPLAY_TORZNAB_API_KEY=${HUBPLAY_TORZNAB_API_KEY:-}
+      # Agregación de fuentes Torznab/Prowlarr — TURNKEY. Por defecto apunta
+      # al Prowlarr empaquetado abajo, con la MISMA api key, así que HubPlay
+      # se autoconecta en el primer arranque (se siembra el indexer en BD).
+      # No tienes que buscar ninguna api key ni tocar el panel: solo abre
+      # Prowlarr (http://TU_IP:9696) UNA vez para elegir qué trackers activar.
+      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696/api/v1/indexers/all/results/torznab}
+      - HUBPLAY_TORZNAB_API_KEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
     # The hubplay process never crashes on a missing/unreachable
     # `db` — SQLite is the default, the bundled DSN is just an
     # *offer*. `depends_on` with `service_healthy` keeps the boot
@@ -34,6 +35,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      prowlarr:
+        condition: service_started
     restart: unless-stopped
     # La app drena en hasta 30s (transcodes/uploads en vuelo + checkpoint
     # WAL). El default de Docker (10s) la mataría a mitad; damos margen.
@@ -86,5 +89,39 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Prowlarr empaquetado: el AGREGADOR de indexers. HubPlay solo consume su
+  # API Torznab. Viene con la api key preconfigurada (PROWLARR_API_KEY) para
+  # que HubPlay se conecte solo — sin que tengas que copiar claves.
+  #
+  # Único paso manual (una vez): abre http://TU_IP:9696 y, en "Indexers",
+  # añade los trackers que quieras usar. Eso NO se preconfigura a propósito:
+  # qué fuentes activas es tu decisión y tu responsabilidad.
+  #
+  # Seguridad: la auth de la UI está abierta para direcciones de LAN
+  # (DisabledForLocalAddresses). Si expones este puerto a Internet, cambia
+  # PROWLARR_API_KEY en .env y pon una auth real en Prowlarr.
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: hubplay-prowlarr
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+      - PROWLARR__AUTH__APIKEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
+      - PROWLARR__AUTH__METHOD=External
+      - PROWLARR__AUTH__REQUIRED=DisabledForLocalAddresses
+    ports:
+      # Para abrir la UI de Prowlarr y elegir trackers.
+      - "${PROWLARR_HOST_PORT:-9696}:9696"
+    volumes:
+      - prowlarr_config:/config
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   hubplay_pgdata:
+  prowlarr_config:

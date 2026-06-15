@@ -17,6 +17,18 @@ func TestProwlarrTorznabURL(t *testing.T) {
 	}
 }
 
+func TestResolveTorznabEndpoint(t *testing.T) {
+	// A Prowlarr root composes the standard path.
+	if got := resolveTorznabEndpoint("http://localhost:9696"); got != "http://localhost:9696/api/v1/indexers/all/results/torznab" {
+		t.Errorf("prowlarr root: got %q", got)
+	}
+	// A full Torznab endpoint (contains "torznab") is left as-is.
+	jackett := "http://localhost:9117/api/v2.0/indexers/all/results/torznab"
+	if got := resolveTorznabEndpoint(jackett); got != jackett {
+		t.Errorf("jackett full url should be untouched: got %q", got)
+	}
+}
+
 func TestNormalizeIMDbAttr(t *testing.T) {
 	cases := map[string]string{
 		"0133093":   "tt0133093",
