@@ -78,8 +78,10 @@ func NewHandler(mgr Manager, sources SourceSearcher, meta MetadataSearcher, admi
 	return &Handler{mgr: mgr, sources: sources, meta: meta, adminCheck: adminCheck, logger: logger}
 }
 
-// imdbIDPattern is the canonical IMDb id form: "tt" + 7 or 8 digits.
-var imdbIDPattern = regexp.MustCompile(`^tt\d{7,8}$`)
+// imdbIDPattern is the canonical IMDb id form: "tt" followed by digits.
+// We don't pin the digit count — IMDb has grown past 7–8 digits and will
+// keep growing, so a fixed width would reject valid (newer) ids.
+var imdbIDPattern = regexp.MustCompile(`^tt\d+$`)
 
 // SourcesMovie resolves streamable sources for a movie by IMDb id.
 //

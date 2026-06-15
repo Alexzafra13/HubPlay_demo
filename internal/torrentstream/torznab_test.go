@@ -1,9 +1,14 @@
 package torrentstream
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 const sampleFeed = `<?xml version="1.0" encoding="UTF-8"?>
@@ -184,6 +189,44 @@ func TestExtractQuality(t *testing.T) {
 		if got := extractQuality(title); got != want {
 			t.Errorf("%q: got %q want %q", title, got, want)
 		}
+	}
+}
+
+// TestSearchPerIndexerTimeout verifies the fan-out is concurrent and a
+// hung indexer is bounded by perIndexerTO without blocking a healthy one.
+func TestSearchPerIndexerTimeout(t *testing.T) {
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = io.WriteString(w, sampleFeed)
+	}))
+	defer fast.Close()
+
+	// Slow server hangs until its request context is cancelled.
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	}))
+	defer slow.Close()
+
+	c := NewTorznabClient([]TorznabIndexer{
+		{Name: "slow", URL: slow.URL},
+		{Name: "fast", URL: fast.URL},
+	}, nil)
+	c.perIndexerTO = 150 * time.Millisecond
+
+	start := time.Now()
+	res, err := c.Search(context.Background(), MediaTypeMovie, "tt0133093", "")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("expected results from the fast indexer despite the slow one timing out")
+	}
+	if elapsed > time.Second {
+		t.Errorf("slow indexer blocked the fan-out: took %v (per-indexer TO 150ms)", elapsed)
 	}
 }
 

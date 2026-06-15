@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,12 +51,17 @@ type TorznabIndexer struct {
 	Trackers []string
 }
 
+// perIndexerTimeout bounds a single indexer round-trip so one hung/slow
+// endpoint can't hold up the whole fan-out (which runs concurrently).
+const perIndexerTimeout = 8 * time.Second
+
 // TorznabClient queries a fixed set of indexers. Safe for concurrent use
 // (the http.Client is, and the indexer slice is read-only after New).
 type TorznabClient struct {
-	indexers   []TorznabIndexer
-	httpClient *http.Client
-	logger     *slog.Logger
+	indexers     []TorznabIndexer
+	httpClient   *http.Client
+	perIndexerTO time.Duration
+	logger       *slog.Logger
 }
 
 // NewTorznabClient builds a client over the given indexers.
@@ -64,41 +70,66 @@ func NewTorznabClient(indexers []TorznabIndexer, logger *slog.Logger) *TorznabCl
 		logger = slog.Default()
 	}
 	return &TorznabClient{
-		indexers:   indexers,
-		httpClient: &http.Client{Timeout: 20 * time.Second},
-		logger:     logger,
+		indexers:     indexers,
+		httpClient:   &http.Client{Timeout: 15 * time.Second},
+		perIndexerTO: perIndexerTimeout,
+		logger:       logger,
 	}
 }
 
-// Search fans the query out across every configured indexer, normalises
-// and merges the results, drops duplicate infohashes and sorts by
-// availability/quality. An indexer that errors is logged and skipped so
-// one bad endpoint doesn't sink the whole search; an all-empty run
-// surfaces the first error so the caller can report a failure.
+// Search fans the query out across every configured indexer CONCURRENTLY,
+// normalises and merges the results, drops duplicate infohashes and sorts
+// by availability/quality. Each indexer gets its own strict timeout
+// (perIndexerTO), so one hung/slow endpoint can't hold up the others or
+// the API response. An indexer that errors is logged and skipped so one
+// bad endpoint doesn't sink the whole search; an all-empty run surfaces
+// the first error so the caller can report a failure.
 //
-// imdbID is the canonical "ttNNNNNNN" form (the handler validates it);
-// term is an optional free-text fallback for indexers that don't resolve
-// by IMDb id.
+// imdbID is the canonical "ttNNN…" form (the handler validates it); term
+// is an optional free-text fallback for indexers that don't resolve by
+// IMDb id.
 func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term string) ([]SearchResult, error) {
+	// Per-indexer result slots, written by index so the merged order is
+	// deterministic (indexer order) regardless of which goroutine finishes
+	// first.
+	results := make([][]SearchResult, len(c.indexers))
+	errs := make([]error, len(c.indexers))
+
+	var wg sync.WaitGroup
+	for i, idx := range c.indexers {
+		wg.Add(1)
+		go func(i int, idx TorznabIndexer) {
+			defer wg.Done()
+			ictx, cancel := context.WithTimeout(ctx, c.perIndexerTO)
+			defer cancel()
+
+			items, err := c.queryIndexer(ictx, idx, mt, imdbID, term)
+			if err != nil {
+				// Note: we log the indexer NAME, never the built URL — it
+				// carries the apikey.
+				c.logger.Warn("torznab: indexer query failed", "indexer", idx.Name, "error", err)
+				errs[i] = err
+				return
+			}
+			out := make([]SearchResult, 0, len(items))
+			for _, it := range items {
+				if r, ok := normalizeItem(it, idx); ok {
+					out = append(out, r)
+				}
+			}
+			results[i] = out
+		}(i, idx)
+	}
+	wg.Wait()
+
 	var (
 		out      []SearchResult
 		firstErr error
 	)
-	for _, idx := range c.indexers {
-		items, err := c.queryIndexer(ctx, idx, mt, imdbID, term)
-		if err != nil {
-			// Note: we log the indexer NAME, never the built URL — it
-			// carries the apikey.
-			c.logger.Warn("torznab: indexer query failed", "indexer", idx.Name, "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		for _, it := range items {
-			if r, ok := normalizeItem(it, idx); ok {
-				out = append(out, r)
-			}
+	for i := range c.indexers {
+		out = append(out, results[i]...)
+		if firstErr == nil && errs[i] != nil {
+			firstErr = errs[i]
 		}
 	}
 	if len(out) == 0 && firstErr != nil {
