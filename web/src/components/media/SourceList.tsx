@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, X, Users, HardDrive, RefreshCw } from "lucide-react";
+import { Play, X, HardDrive, RefreshCw } from "lucide-react";
 import { api } from "@/api/client";
 import { ApiError, type MediaSourceType, type TorrentSearchResult } from "@/api/types";
 import { useMediaSources } from "@/hooks/useMediaSources";
@@ -19,11 +19,30 @@ interface SourceListProps {
   onPlay?: (source: TorrentSearchResult) => void;
 }
 
-// formatSize renders bytes as GB (decimal). Returns "" when unknown so the
-// row can hide the chip.
+// formatSize renders bytes as GB (decimal). Returns "" when unknown.
 function formatSize(bytes?: number): string {
   if (!bytes || bytes <= 0) return "";
   return `${(bytes / 1e9).toFixed(2)} GB`;
+}
+
+// langFlag maps a detected language tag to a flag/emoji (Torrentio-style).
+// "Original" is treated as no tag.
+const LANG_FLAG: Record<string, string> = {
+  Spanish: "🇪🇸",
+  Latino: "🌎",
+  English: "🇬🇧",
+  French: "🇫🇷",
+  Dual: "🔀",
+  Multi: "🌐",
+  VOST: "💬",
+};
+
+function languageFlags(langs?: string[]): string {
+  if (!langs) return "";
+  return langs
+    .filter((l) => l && l !== "Original")
+    .map((l) => LANG_FLAG[l] ?? l)
+    .join(" ");
 }
 
 // bestSrc is what we hand the player: a magnet plays directly; otherwise
@@ -32,11 +51,32 @@ function bestSrc(s: TorrentSearchResult): string {
   return s.magnet_uri || s.torrent_url;
 }
 
+// groupByQuality buckets the (already sorted) sources by their quality
+// label, preserving order — the Torrentio-style "4K / 1080p / 720p…"
+// sections.
+function groupByQuality(
+  sources: TorrentSearchResult[],
+  otherLabel: string,
+): { label: string; items: TorrentSearchResult[] }[] {
+  const order: string[] = [];
+  const map = new Map<string, TorrentSearchResult[]>();
+  for (const s of sources) {
+    const label = s.quality || s.resolution || otherLabel;
+    if (!map.has(label)) {
+      map.set(label, []);
+      order.push(label);
+    }
+    map.get(label)!.push(s);
+  }
+  return order.map((label) => ({ label, items: map.get(label)! }));
+}
+
 /**
  * SourceList lists the streamable sources for a title (resolved by IMDb id
- * via the Torznab aggregator) and lets the user play one. It owns only the
- * presentation; fetching lives in useMediaSources and playback is either
- * delegated via `onPlay` or handled by a minimal built-in player.
+ * via the Torznab aggregator), grouped by quality with a Torrentio-style
+ * info line (seeders · size · provider · language flags). Playback goes
+ * through HubPlay (the torrent stream endpoint) unless a parent supplies
+ * `onPlay`.
  */
 export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListProps) {
   const { t } = useTranslation();
@@ -47,6 +87,12 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
   );
   const [playing, setPlaying] = useState<{ src: string; title: string } | null>(
     null,
+  );
+
+  const otherLabel = t("sources.other", { defaultValue: "Otros" });
+  const groups = useMemo(
+    () => groupByQuality(sources, otherLabel),
+    [sources, otherLabel],
   );
 
   // Feature off on this server (no indexer configured / route not mounted).
@@ -113,11 +159,27 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
 
   return (
     <>
-      <ul className="flex flex-col gap-1.5">
-        {sources.map((s) => (
-          <SourceRow key={s.infohash || s.identifier} source={s} onPlay={() => handlePlay(s)} />
+      <div className="flex flex-col gap-4">
+        {groups.map((g) => (
+          <div key={g.label} className="flex flex-col gap-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-text-muted">
+              {g.label}
+              <span className="ml-2 font-normal normal-case tracking-normal text-text-muted/70">
+                {g.items.length}
+              </span>
+            </h3>
+            <ul className="flex flex-col gap-1.5">
+              {g.items.map((s) => (
+                <SourceRow
+                  key={s.infohash || s.identifier}
+                  source={s}
+                  onPlay={() => handlePlay(s)}
+                />
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
 
       {playing && (
         <SourcePlayerModal
@@ -139,40 +201,23 @@ function SourceRow({
 }) {
   const { t } = useTranslation();
   const size = formatSize(source.size_bytes);
+  const flags = languageFlags(source.languages);
   return (
     <li className="flex items-center gap-3 rounded-lg border border-border bg-bg-base/40 px-3 py-2">
       <div className="min-w-0 flex-1">
+        {/* Release name (the "title"/filename), Torrentio-style. */}
         <p className="truncate text-[13px] text-text-primary" title={source.title}>
           {source.title || source.identifier}
         </p>
+        {/* Info line: 👤 seeders · 💾 size · ⚙️ provider · codec · flags */}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
-          {source.quality ? (
-            <span className="rounded bg-bg-hover px-1.5 py-0.5 font-medium text-text-secondary">
-              {source.quality}
-            </span>
-          ) : null}
-          {size ? (
-            <span className="inline-flex items-center gap-1">
-              <HardDrive className="size-3" strokeWidth={1.8} />
-              {size}
-            </span>
-          ) : null}
-          <span className="inline-flex items-center gap-1">
-            <Users className="size-3" strokeWidth={1.8} />
-            {t("sources.seeders", {
-              defaultValue: "{{count}} seeders",
-              count: source.seeders ?? 0,
-            })}
+          <span title={t("sources.seedersLabel", { defaultValue: "Seeders" })}>
+            👤 {source.seeders ?? 0}
           </span>
+          {size ? <span>💾 {size}</span> : null}
+          {source.provider ? <span>⚙️ {source.provider}</span> : null}
           {source.codec ? <span>{source.codec}</span> : null}
-          {source.languages
-            ?.filter((l) => l !== "Original")
-            .map((l) => (
-              <span key={l} className="rounded bg-bg-hover px-1.5 py-0.5 text-text-secondary">
-                {l}
-              </span>
-            ))}
-          {source.provider ? <span>{source.provider}</span> : null}
+          {flags ? <span aria-hidden>{flags}</span> : null}
         </div>
       </div>
       <button

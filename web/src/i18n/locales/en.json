@@ -1804,6 +1804,8 @@
     "retry": "Retry",
     "play": "Play",
     "seeders": "{{count}} seeders",
+    "seedersLabel": "Seeders",
+    "other": "Other",
     "disabledTitle": "No indexers",
     "disabledDesc": "No source indexer is configured on this server.",
     "playError": "Could not play. Torrent streaming may be disabled, or the format isn't supported by the browser."

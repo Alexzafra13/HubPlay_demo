@@ -44,9 +44,10 @@ describe("SourceList", () => {
     render(wrap(<SourceList type="movie" imdbId="tt0133093" />));
 
     expect(await screen.findByText("The Matrix 2160p UHD")).toBeInTheDocument();
+    // Quality is now a group header.
     expect(screen.getByText("4K")).toBeInTheDocument();
-    expect(screen.getByText("8.00 GB")).toBeInTheDocument();
-    expect(screen.getByText(/120 seeders/)).toBeInTheDocument();
+    expect(screen.getByText(/8\.00 GB/)).toBeInTheDocument();
+    expect(screen.getByText(/👤 120/)).toBeInTheDocument();
     expect(api.getMediaSources).toHaveBeenCalledWith("movie", "tt0133093");
   });
 
