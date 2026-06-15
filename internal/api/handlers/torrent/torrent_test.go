@@ -17,10 +17,15 @@ import (
 type fakeMeta struct {
 	results []provider.SearchResult
 	err     error
+	meta    *provider.MetadataResult
 }
 
 func (f fakeMeta) SearchMetadata(context.Context, provider.SearchQuery) ([]provider.SearchResult, error) {
 	return f.results, f.err
+}
+
+func (f fakeMeta) FetchMetadata(context.Context, string, provider.ItemType) (*provider.MetadataResult, error) {
+	return f.meta, f.err
 }
 
 // fakeManager stands in for the live engine. The serve path needs a real
@@ -302,6 +307,34 @@ func TestSources_SeriesForwardsType(t *testing.T) {
 	}
 	if fs.gotMT != torrentstream.MediaTypeSeries {
 		t.Errorf("media type: got %q want series", fs.gotMT)
+	}
+}
+
+func TestDiscoverSources_ResolvesImdbAndSearches(t *testing.T) {
+	fm := fakeMeta{meta: &provider.MetadataResult{
+		Title:       "The Matrix",
+		ExternalIDs: map[string]string{"imdb": "tt0133093"},
+	}}
+	fs := &fakeSources{res: []torrentstream.SearchResult{{Identifier: "x", Title: "The Matrix 1080p"}}}
+	h := NewHandler(nil, fs, fm, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/discover/sources?type=movie&tmdb_id=603", nil)
+	h.DiscoverSources(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	if fs.gotID != "tt0133093" {
+		t.Errorf("expected sources resolved by imdbid, got %q", fs.gotID)
+	}
+}
+
+func TestDiscoverSources_MissingTmdbID(t *testing.T) {
+	h := NewHandler(nil, &fakeSources{}, fakeMeta{}, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/discover/sources?type=movie", nil)
+	h.DiscoverSources(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
 	}
 }
 

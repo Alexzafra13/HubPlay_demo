@@ -1965,6 +1965,17 @@ export interface TorrentSearchResult {
 // MediaSourceType selects the IMDb-keyed source aggregation endpoint.
 export type MediaSourceType = "movie" | "series";
 
+// TorrentDiscoverResult is a TMDb-enriched browse candidate
+// (/torrent/discover). Picking one resolves sources by imdbid via
+// /torrent/discover/sources.
+export interface TorrentDiscoverResult {
+  tmdb_id: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_url?: string;
+}
+
 // DownloadJob is a download-to-library job (/torrent/download[s]).
 export interface DownloadJob {
   id: string;

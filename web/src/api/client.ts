@@ -68,6 +68,7 @@ import type {
   UserData,
   ApiErrorBody,
   TorrentSearchResult,
+  TorrentDiscoverResult,
   MediaSourceType,
   DownloadJob,
   IndexerStatus,
@@ -507,6 +508,28 @@ export class ApiClient {
   // listDownloads returns the current download jobs with progress.
   async listDownloads(): Promise<DownloadJob[]> {
     return this.request<DownloadJob[]>("GET", "/torrent/downloads");
+  }
+
+  // discoverTitles runs a TMDb metadata search (posters) for the discovery
+  // grid. Picking one resolves sources via discoverSources.
+  async discoverTitles(
+    query: string,
+    type: MediaSourceType,
+  ): Promise<TorrentDiscoverResult[]> {
+    return this.request<TorrentDiscoverResult[]>("GET", "/torrent/discover", {
+      params: { q: query, type },
+    });
+  }
+
+  // discoverSources resolves the sources for a TMDb pick by its imdbid
+  // (Torrentio-style), falling back to a title search server-side.
+  async discoverSources(
+    type: MediaSourceType,
+    tmdbId: string,
+  ): Promise<TorrentSearchResult[]> {
+    return this.request<TorrentSearchResult[]>("GET", "/torrent/discover/sources", {
+      params: { type, tmdb_id: tmdbId },
+    });
   }
 
   // ── Admin: Torznab/Prowlarr indexer management (plug-and-play, DB-backed) ──

@@ -300,8 +300,13 @@ func buildTorznabURL(endpoint, apiKey string, idx TorznabIndexer, mt MediaType, 
 		return "", fmt.Errorf("invalid endpoint url %q", endpoint)
 	}
 	q := u.Query()
-	switch mt {
-	case MediaTypeSeries:
+	// Free-text (no imdbid) uses the generic "search" type — many indexers
+	// return nothing for t=movie/tvsearch with only a text query. The typed
+	// searches are reserved for the IMDb-id path.
+	switch {
+	case imdbID == "" && term != "":
+		q.Set("t", "search")
+	case mt == MediaTypeSeries:
 		q.Set("t", "tvsearch")
 	default:
 		q.Set("t", "movie")

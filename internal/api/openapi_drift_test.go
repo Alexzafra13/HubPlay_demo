@@ -69,6 +69,7 @@ var outOfScopeExact = map[string]string{
 	// magnets / archive.org torrents. Off by default, web-only; the
 	// Kotlin TV client doesn't consume it, so it stays out of the spec.
 	"GET /torrent/discover":                "TMDb-enriched browse for torrent feature, web-only opt-in",
+	"GET /torrent/discover/sources":        "TMDb pick → sources by imdbid, web-only opt-in",
 	"GET /torrent/search":                  "legal torrent search (Internet Archive), web-only opt-in",
 	"GET /torrent/stream":                  "legal torrent streaming, web-only opt-in",
 	"GET /torrent/sources/search":          "Torznab free-text source search, web-only opt-in",

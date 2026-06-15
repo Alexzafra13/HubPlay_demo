@@ -513,15 +513,22 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 	r.Route("/torrent", func(r chi.Router) {
 		// Streaming surface (Internet Archive search + magnet playback).
 		if deps.Torrent.Manager != nil {
-			r.Get("/discover", h.Discover)
 			r.Get("/search", h.Search)
 			r.Get("/stream", h.Stream)
+		}
+		// Discovery grid (TMDb posters) — needs a metadata provider.
+		if meta != nil {
+			r.Get("/discover", h.Discover)
 		}
 		// Torznab source aggregation: free-text search + by IMDb id.
 		if deps.Torrent.Sources != nil {
 			r.Get("/sources/search", h.SourcesSearch)
 			r.Get("/sources/movie/{imdbId}", h.SourcesMovie)
 			r.Get("/sources/series/{imdbId}", h.SourcesSeries)
+			// Discovery → sources (resolves TMDb pick to imdbid).
+			if meta != nil {
+				r.Get("/discover/sources", h.DiscoverSources)
+			}
 		}
 		// Download to library: needs the engine (download) + a library to
 		// land in + rescan. Admin-only (enforced in the handler).

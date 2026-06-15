@@ -53,6 +53,7 @@ type SourceSearcher interface {
 // metadata provider is configured.
 type MetadataSearcher interface {
 	SearchMetadata(ctx context.Context, query provider.SearchQuery) ([]provider.SearchResult, error)
+	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
 }
 
 type Handler struct {
@@ -242,9 +243,13 @@ func (h *Handler) Discover(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
+	itemType := provider.ItemMovie
+	if r.URL.Query().Get("type") == "series" {
+		itemType = provider.ItemSeries
+	}
 	results, err := h.meta.SearchMetadata(ctx, provider.SearchQuery{
 		Title:    query,
-		ItemType: provider.ItemMovie,
+		ItemType: itemType,
 	})
 	if err != nil {
 		h.logger.Warn("torrent discover failed", "query", query, "error", err)
@@ -263,6 +268,54 @@ func (h *Handler) Discover(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	handlers.RespondData(w, http.StatusOK, out)
+}
+
+// DiscoverSources resolves the streamable sources for a TMDb pick: it looks
+// up the title's IMDb id (the reliable, Torrentio-style key) and queries the
+// indexers by imdbid; if there's no IMDb id it falls back to a title search.
+//
+// GET /torrent/discover/sources?type=<movie|series>&tmdb_id=<id>
+func (h *Handler) DiscoverSources(w http.ResponseWriter, r *http.Request) {
+	tmdbID := strings.TrimSpace(r.URL.Query().Get("tmdb_id"))
+	if tmdbID == "" {
+		handlers.RespondError(w, r, http.StatusBadRequest, "MISSING_TMDB_ID", "tmdb_id required")
+		return
+	}
+	if h.meta == nil || h.sources == nil {
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "INDEXER_DISABLED",
+			"discovery sources are not available on this server")
+		return
+	}
+	mt := torrentstream.MediaTypeMovie
+	itemType := provider.ItemMovie
+	if r.URL.Query().Get("type") == "series" {
+		mt = torrentstream.MediaTypeSeries
+		itemType = provider.ItemSeries
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	meta, err := h.meta.FetchMetadata(ctx, tmdbID, itemType)
+	if err != nil || meta == nil {
+		h.logger.Warn("discover sources: metadata fetch failed", "tmdb", tmdbID, "error", err)
+		handlers.RespondError(w, r, http.StatusBadGateway, "DISCOVER_FAILED", "could not resolve title metadata")
+		return
+	}
+
+	var results []torrentstream.SearchResult
+	if imdb := strings.TrimSpace(meta.ExternalIDs["imdb"]); imdbIDPattern.MatchString(imdb) {
+		results, err = h.sources.Sources(ctx, mt, imdb)
+	} else {
+		// No IMDb id → best-effort title search.
+		results, err = h.sources.SearchText(ctx, mt, meta.Title)
+	}
+	if err != nil {
+		h.logger.Warn("discover sources failed", "tmdb", tmdbID, "error", err)
+		h.respondSourceError(w, r, err)
+		return
+	}
+	handlers.RespondData(w, http.StatusOK, results)
 }
 
 // Stream resolves the source (magnet or archive.org .torrent URL) and

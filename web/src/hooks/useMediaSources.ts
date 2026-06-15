@@ -52,6 +52,36 @@ export function useMediaSources(
 }
 
 /**
+ * useDiscoverSources resolves the sources for a TMDb pick (by imdbid,
+ * server-side) — the reliable, Torrentio-style path. Disabled until a
+ * tmdbId is present.
+ */
+export function useDiscoverSources(
+  type: MediaSourceType,
+  tmdbId: string | null,
+): UseMediaSourcesResult {
+  const enabled = Boolean(tmdbId);
+  const result = useQuery({
+    queryKey: ["discover-sources", type, tmdbId],
+    queryFn: () => api.discoverSources(type, tmdbId as string),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  return {
+    sources: result.data ?? [],
+    isLoading: result.isLoading && enabled,
+    isError: result.isError,
+    error: result.error,
+    refetch: () => {
+      void result.refetch();
+    },
+  };
+}
+
+/**
  * useMediaSearch runs a free-text search against the configured indexers
  * (the general torrent search box) — /torrent/sources/search. Disabled
  * until a non-empty query is present.
