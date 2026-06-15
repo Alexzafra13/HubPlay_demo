@@ -13,16 +13,20 @@ import { Button, Input, Spinner, EmptyState } from "@/components/common";
 // fall back to the current host on Prowlarr's default port (9696). The UI
 // always lives at the root, regardless of the Torznab path.
 function prowlarrWebUrl(ix: IndexerStatus): string {
-  const raw = ix.base_url || ix.url || "";
-  const proto = window.location.protocol;
+  const raw = (ix.base_url || ix.url || "").replace(/\/+$/, "");
   const internalHosts = ["prowlarr", "localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"];
   try {
     const u = new URL(raw);
+    const path = u.pathname.replace(/\/+$/, "");
     const internal = internalHosts.includes(u.hostname) || u.hostname.endsWith(".internal");
-    const host = internal ? window.location.hostname : u.hostname;
-    return `${proto}//${host}:9696`;
+    if (internal) {
+      return path
+        ? `${window.location.origin}${path}/`
+        : `${window.location.protocol}//${window.location.hostname}:9696/`;
+    }
+    return `${raw}/`;
   } catch {
-    return `${proto}//${window.location.hostname}:9696`;
+    return `${window.location.origin}/prowlarr/`;
   }
 }
 

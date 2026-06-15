@@ -326,12 +326,13 @@ func run(configPath string) error {
 			dataDir = filepath.Join(cfg.Streaming.EffectiveCacheDir(), "torrent")
 		}
 		torrentMgr, err = torrentstream.New(torrentstream.Options{
-			Enabled:         true,
-			DataDir:         dataDir,
-			MaxSessions:     cfg.Torrent.MaxSessions,
-			IdleTimeout:     cfg.Torrent.IdleTimeout,
-			Readahead:       cfg.Torrent.ReadaheadBytes,
-			MetadataTimeout: cfg.Torrent.MetadataTimeout,
+			Enabled:               true,
+			DataDir:               dataDir,
+			MaxSessions:           cfg.Torrent.MaxSessions,
+			IdleTimeout:           cfg.Torrent.IdleTimeout,
+			Readahead:             cfg.Torrent.ReadaheadBytes,
+			MetadataTimeout:       cfg.Torrent.MetadataTimeout,
+			AllowPrivateUpstreams: cfg.Torrent.AllowPrivateUpstreams,
 		}, logger)
 		if err != nil {
 			return err

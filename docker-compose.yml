@@ -31,6 +31,9 @@ services:
       # Activa el motor de streaming para poder REPRODUCIR las fuentes vía
       # HubPlay (la búsqueda funciona sin esto; la reproducción no).
       - HUBPLAY_TORRENT_ENABLED=${HUBPLAY_TORRENT_ENABLED:-true}
+      # Permite bajar el .torrent del Prowlarr empaquetado (host interno de
+      # docker, IP privada). Sin esto el guard SSRF bloquea /{id}/download.
+      - HUBPLAY_TORRENT_ALLOW_PRIVATE=${HUBPLAY_TORRENT_ALLOW_PRIVATE:-true}
     # The hubplay process never crashes on a missing/unreachable
     # `db` — SQLite is the default, the bundled DSN is just an
     # *offer*. `depends_on` with `service_healthy` keeps the boot

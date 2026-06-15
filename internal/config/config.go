@@ -170,6 +170,12 @@ type TorrentConfig struct {
 	// (magnet → info) antes de fallar. Default 60s.
 	MetadataTimeout time.Duration `yaml:"metadata_timeout"`
 
+	// AllowPrivateUpstreams: relaja el guard SSRF al BAJAR un .torrent por
+	// http(s) — permite hosts privados/LAN como el Prowlarr empaquetado
+	// (resuelve a IP privada de docker y sirve el .torrent en /{id}/download).
+	// Default false. Ponlo true si tu indexer es interno.
+	AllowPrivateUpstreams bool `yaml:"allow_private_upstreams"`
+
 	// Torznab: indexers Torznab/Newznab para la búsqueda de fuentes por
 	// IMDb id. Vacío ⇒ los endpoints /torrent/sources/* no se montan.
 	Torznab TorznabConfig `yaml:"torznab"`
@@ -576,6 +582,9 @@ func applyEnvOverrides(cfg *Config) {
 	// activar la reproducción de fuentes sin editar el YAML.
 	if v := os.Getenv("HUBPLAY_TORRENT_ENABLED"); v != "" {
 		cfg.Torrent.Enabled = strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("HUBPLAY_TORRENT_ALLOW_PRIVATE"); v != "" {
+		cfg.Torrent.AllowPrivateUpstreams = strings.EqualFold(v, "true")
 	}
 	// Torznab indexer via env (el caso docker-compose de un único Prowlarr/
 	// Jackett). Si ya hay indexers en el YAML, override el primero; si no,

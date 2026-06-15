@@ -17,7 +17,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +60,11 @@ type Options struct {
 	IdleTimeout     time.Duration // close a session after this long without reads (default 5m)
 	Readahead       int64         // sequential read-ahead window in bytes (default 16 MiB)
 	MetadataTimeout time.Duration // wait for magnet→info (default 60s)
+	// AllowPrivateUpstreams relaja el guard SSRF al bajar un .torrent por
+	// http(s): permite hosts privados/LAN (p.ej. el Prowlarr empaquetado en
+	// docker, que resuelve a una IP privada). Opt-in del operador. Default
+	// false (igual que iptv.allow_private_upstreams).
+	AllowPrivateUpstreams bool
 }
 
 func (o Options) withDefaults() Options {
@@ -92,6 +99,8 @@ type Manager struct {
 	sessions map[string]*Session // keyed by infohash hex
 	bySrc    map[string]*Session // keyed by the src (magnet/URL) used to start it
 
+	allowPrivate bool
+
 	reaperStop chan struct{}
 	reaperDone chan struct{}
 	now        func() time.Time // injectable for tests
@@ -123,15 +132,16 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 	}
 
 	m := &Manager{
-		opts:       opts,
-		client:     client,
-		logger:     logger,
-		providers:  defaultProviders(),
-		sessions:   make(map[string]*Session),
-		bySrc:      make(map[string]*Session),
-		reaperStop: make(chan struct{}),
-		reaperDone: make(chan struct{}),
-		now:        time.Now,
+		opts:         opts,
+		client:       client,
+		logger:       logger,
+		providers:    defaultProviders(),
+		allowPrivate: opts.AllowPrivateUpstreams,
+		sessions:     make(map[string]*Session),
+		bySrc:        make(map[string]*Session),
+		reaperStop:   make(chan struct{}),
+		reaperDone:   make(chan struct{}),
+		now:          time.Now,
 	}
 	go m.reapLoop()
 	return m, nil
@@ -212,13 +222,44 @@ func (m *Manager) addTorrent(uri string) (*torrent.Torrent, error) {
 	return t, nil
 }
 
+// fetchTorrentFile downloads a .torrent over http(s) with NO SSRF guard
+// (used only when AllowPrivateUpstreams is set, for trusted operator hosts
+// like the bundled Prowlarr). Bounded by maxBytes + timeout.
+func fetchTorrentFile(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, error) {
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return nil, fmt.Errorf("unsupported url scheme")
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(rawURL) //nolint:noctx // bounded by client.Timeout
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+}
+
 func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
-	// SSRF-guarded fetch: imaging.SafeGet rejects URLs resolving to
-	// loopback / LAN / link-local / cloud-metadata and re-validates every
-	// redirect hop, so an arbitrary .torrent URL can't make the server
-	// reach internal services. This is what lets us accept any *public*
-	// source (not just one catalogue) without opening an SSRF hole.
-	data, _, err := imaging.SafeGet(rawURL, maxTorrentFileBytes, 20*time.Second)
+	// By default a .torrent fetch is SSRF-guarded: imaging.SafeGet rejects
+	// URLs resolving to loopback / LAN / link-local / cloud-metadata and
+	// re-validates every redirect hop, so an arbitrary URL can't make the
+	// server reach internal services.
+	//
+	// When the operator opts in (AllowPrivateUpstreams — e.g. the bundled
+	// Prowlarr lives on the docker network at a private IP and serves the
+	// .torrent via /{id}/download), we fetch with a plain bounded client so
+	// those trusted internal hosts are reachable.
+	var (
+		data []byte
+		err  error
+	)
+	if m.allowPrivate {
+		data, err = fetchTorrentFile(rawURL, maxTorrentFileBytes, 20*time.Second)
+	} else {
+		data, _, err = imaging.SafeGet(rawURL, maxTorrentFileBytes, 20*time.Second)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("torrentstream: fetch .torrent: %w", err)
 	}
