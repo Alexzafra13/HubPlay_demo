@@ -142,6 +142,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # FlareSolverr: resuelve los retos de Cloudflare para indexers que lo
+  # usan (muchos públicos). Prowlarr lo usa como "Indexer Proxy". Pesa
+  # bastante (Chrome headless) pero evita los 429/403 de esos trackers.
+  #
+  # Para activarlo en Prowlarr (una vez): Settings → Indexers → Indexer
+  # Proxies → ➕ FlareSolverr → Host http://flaresolverr:8191, Tag "flare";
+  # luego pon el tag "flare" a los indexers tras Cloudflare.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: hubplay-flaresolverr
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - LOG_LEVEL=warning
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   hubplay_pgdata:
   prowlarr_config:

@@ -2,6 +2,7 @@ package torrentstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,11 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrRateLimited is returned when an indexer answers HTTP 429. Handlers map
+// it to a "try again shortly" response so the UI can show a clear message
+// instead of a generic failure.
+var ErrRateLimited = errors.New("torznab: indexer rate-limited")
 
 // Torznab/Newznab aggregation. A TorznabClient queries one or more
 // operator-configured indexer endpoints (typically a self-hosted Prowlarr
@@ -270,6 +276,9 @@ func (c *TorznabClient) queryEndpoint(ctx context.Context, ep torznabEndpoint, i
 	if resp.StatusCode != http.StatusOK {
 		// Drain a little so the connection can be reused; ignore errors.
 		_, _ = io.CopyN(io.Discard, resp.Body, 4<<10)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return nil, fmt.Errorf("%w (status 429)", ErrRateLimited)
+		}
 		return nil, fmt.Errorf("torznab: status %d", resp.StatusCode)
 	}
 	return parseTorznab(io.LimitReader(resp.Body, maxTorznabResponseBytes))

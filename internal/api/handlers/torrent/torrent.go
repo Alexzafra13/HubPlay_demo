@@ -124,11 +124,24 @@ func (h *Handler) SourcesSearch(w http.ResponseWriter, r *http.Request) {
 	results, err := h.sources.SearchText(ctx, mt, query)
 	if err != nil {
 		h.logger.Warn("torrent text search failed", "query", query, "error", err)
-		handlers.RespondError(w, r, http.StatusBadGateway, "INDEXER_UNAVAILABLE",
-			"source indexer unavailable")
+		h.respondSourceError(w, r, err)
 		return
 	}
 	handlers.RespondData(w, http.StatusOK, results)
+}
+
+// respondSourceError maps an aggregator error to an HTTP response: a clear
+// "rate-limited, retry" for HTTP 429 from an indexer, otherwise a generic
+// bad-gateway.
+func (h *Handler) respondSourceError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, torrentstream.ErrRateLimited) {
+		w.Header().Set("Retry-After", "10")
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "RATE_LIMITED",
+			"the indexer is rate-limiting requests; try again in a few seconds")
+		return
+	}
+	handlers.RespondError(w, r, http.StatusBadGateway, "INDEXER_UNAVAILABLE",
+		"source indexer unavailable")
 }
 
 // sourcesByIMDb validates the IMDb id, queries the aggregator (cache →
@@ -153,8 +166,7 @@ func (h *Handler) sourcesByIMDb(w http.ResponseWriter, r *http.Request, mt torre
 	results, err := h.sources.Sources(ctx, mt, imdbID)
 	if err != nil {
 		h.logger.Warn("torrent sources failed", "type", mt, "imdb", imdbID, "error", err)
-		handlers.RespondError(w, r, http.StatusBadGateway, "INDEXER_UNAVAILABLE",
-			"source indexer unavailable")
+		h.respondSourceError(w, r, err)
 		return
 	}
 	handlers.RespondData(w, http.StatusOK, results)

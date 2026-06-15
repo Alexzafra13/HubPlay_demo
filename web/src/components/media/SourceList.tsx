@@ -46,6 +46,13 @@ function bestSrc(s: TorrentSearchResult): string {
   return s.magnet_uri || s.torrent_url;
 }
 
+// webRiskyCodec flags codecs that browsers usually can't decode in <video>
+// (HEVC/x265, AV1, XviD) so the UI can warn before the user hits a black
+// screen. H.264 in MP4 is the safe case.
+function webRiskyCodec(codec?: string): boolean {
+  return codec === "HEVC" || codec === "AV1" || codec === "XviD";
+}
+
 // groupByQuality buckets the (already sorted) sources by their quality
 // label, preserving order — the Torrentio-style "4K / 1080p / 720p…"
 // sections.
@@ -180,10 +187,16 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
     );
   }
   if (isError) {
+    const rateLimited = error instanceof ApiError && error.code === "RATE_LIMITED";
     return (
       <div className="flex flex-col items-start gap-3 py-4">
         <p className="text-sm text-text-muted">
-          {t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
+          {rateLimited
+            ? t("sources.rateLimited", {
+                defaultValue:
+                  "El indexador está saturando peticiones. Espera unos segundos y reintenta.",
+              })
+            : t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
         </p>
         <Button variant="secondary" size="sm" onClick={refetch}>
           <RefreshCw className="size-3.5" />
@@ -219,6 +232,16 @@ function SourceRow({
           {source.provider ? <span>⚙️ {source.provider}</span> : null}
           {source.codec ? <span>{source.codec}</span> : null}
           {flags ? <span aria-hidden>{flags}</span> : null}
+          {webRiskyCodec(source.codec) ? (
+            <span
+              className="text-warning"
+              title={t("sources.webRisky", {
+                defaultValue: "Este códec puede no reproducirse en el navegador",
+              })}
+            >
+              ⚠
+            </span>
+          ) : null}
         </div>
       </div>
       <button

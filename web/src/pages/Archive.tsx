@@ -106,7 +106,16 @@ export default function Archive() {
       ) : isError ? (
         <EmptyState
           title={t("archive.errorTitle", { defaultValue: "No se pudo buscar" })}
-          description={error instanceof Error ? error.message : String(error)}
+          description={
+            error instanceof ApiError && error.code === "RATE_LIMITED"
+              ? t("archive.rateLimited", {
+                  defaultValue:
+                    "El indexador está saturando peticiones. Espera unos segundos y reintenta.",
+                })
+              : error instanceof Error
+                ? error.message
+                : String(error)
+          }
           icon={<SearchIcon strokeWidth={1.5} />}
         />
       ) : (

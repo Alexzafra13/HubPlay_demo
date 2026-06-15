@@ -217,6 +217,23 @@ func TestSourcesSearch(t *testing.T) {
 	}
 }
 
+func TestSourcesSearch_RateLimited(t *testing.T) {
+	fs := &fakeSources{err: torrentstream.ErrRateLimited}
+	h := NewHandler(nil, fs, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/sources/search?q=matrix", nil)
+	h.SourcesSearch(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d want 503 (%s)", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("expected Retry-After header on rate-limited response")
+	}
+	if !strings.Contains(rr.Body.String(), "RATE_LIMITED") {
+		t.Errorf("body: %s", rr.Body.String())
+	}
+}
+
 func TestSourcesSearch_MissingQuery(t *testing.T) {
 	h := NewHandler(nil, &fakeSources{}, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()

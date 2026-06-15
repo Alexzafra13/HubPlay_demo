@@ -2,6 +2,7 @@ package torrentstream
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,18 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSearchRateLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	c := NewTorznabClient(StaticIndexers{{Name: "x", URL: srv.URL + "/torznab"}}, nil)
+	_, err := c.Search(context.Background(), MediaTypeMovie, "tt0133093", "")
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("want ErrRateLimited, got %v", err)
+	}
+}
 
 const sampleFeed = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">

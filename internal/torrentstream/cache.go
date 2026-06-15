@@ -46,10 +46,27 @@ func (c *ttlCache[T]) get(key string) (T, bool) {
 	return e.val, true
 }
 
-// set stores value under key with a fresh TTL.
+// ttlCacheMaxEntries bounds the cache so a high-cardinality keyspace (e.g.
+// free-text searches) can't grow memory without limit.
+const ttlCacheMaxEntries = 1024
+
+// set stores value under key with a fresh TTL. When the cache is full it
+// first drops expired entries and, if still full, resets — keeping memory
+// bounded without an LRU.
 func (c *ttlCache[T]) set(key string, val T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(c.m) >= ttlCacheMaxEntries {
+		now := c.now()
+		for k, e := range c.m {
+			if now.After(e.exp) {
+				delete(c.m, k)
+			}
+		}
+		if len(c.m) >= ttlCacheMaxEntries {
+			c.m = make(map[string]ttlEntry[T])
+		}
+	}
 	c.m[key] = ttlEntry[T]{val: val, exp: c.now().Add(c.ttl)}
 }
 
