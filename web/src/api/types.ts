@@ -1980,7 +1980,6 @@ export interface TorrentDiscoverResult {
 export interface DownloadJob {
   id: string;
   name: string;
-  dest: string;
   status: "queued" | "downloading" | "copying" | "completed" | "failed";
   bytes_done: number;
   bytes_total: number;

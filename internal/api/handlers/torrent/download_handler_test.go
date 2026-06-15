@@ -7,14 +7,27 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"hubplay/internal/torrentstream"
 )
+
+// withURLParam inyecta un parámetro de ruta chi (p.ej. {id}) en la request,
+// como haría el router en producción.
+func withURLParam(r *http.Request, key, val string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(key, val)
+	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+}
 
 type fakeDownloader struct {
 	started   bool
 	src, dest string
 	onDone    func(error)
 	jobs      []torrentstream.DownloadJob
+	removed   string
+	removeOK  bool
+	removeErr error
 }
 
 func (f *fakeDownloader) StartDownload(src, destDir string, onDone func(error)) torrentstream.DownloadJob {
@@ -26,6 +39,11 @@ func (f *fakeDownloader) StartDownload(src, destDir string, onDone func(error)) 
 }
 
 func (f *fakeDownloader) Downloads() []torrentstream.DownloadJob { return f.jobs }
+
+func (f *fakeDownloader) RemoveDownload(id string) (bool, error) {
+	f.removed = id
+	return f.removeOK, f.removeErr
+}
 
 type fakeLibTarget struct {
 	id, dir string
@@ -107,5 +125,58 @@ func TestDownload_List(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"name":"Movie"`) {
 		t.Errorf("body: %s", rr.Body.String())
+	}
+}
+
+func TestDownload_List_NonAdminForbidden(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloader{}, &fakeLibTarget{}, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	h.List(rr, httptest.NewRequest(http.MethodGet, "/torrent/downloads", nil))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: got %d want 403", rr.Code)
+	}
+}
+
+func TestDownload_Delete_Removes(t *testing.T) {
+	dl := &fakeDownloader{removeOK: true}
+	h := NewDownloadHandler(dl, &fakeLibTarget{}, adminTrue, nil)
+	rr := httptest.NewRecorder()
+	req := withURLParam(httptest.NewRequest(http.MethodDelete, "/torrent/downloads/j1", nil), "id", "j1")
+	h.Delete(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204 (%s)", rr.Code, rr.Body.String())
+	}
+	if dl.removed != "j1" {
+		t.Errorf("RemoveDownload called with %q, want j1", dl.removed)
+	}
+}
+
+func TestDownload_Delete_NotFound(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloader{removeOK: false}, &fakeLibTarget{}, adminTrue, nil)
+	rr := httptest.NewRecorder()
+	req := withURLParam(httptest.NewRequest(http.MethodDelete, "/torrent/downloads/nope", nil), "id", "nope")
+	h.Delete(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", rr.Code)
+	}
+}
+
+func TestDownload_Delete_Active(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloader{removeErr: torrentstream.ErrDownloadActive}, &fakeLibTarget{}, adminTrue, nil)
+	rr := httptest.NewRecorder()
+	req := withURLParam(httptest.NewRequest(http.MethodDelete, "/torrent/downloads/j1", nil), "id", "j1")
+	h.Delete(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status: got %d want 409", rr.Code)
+	}
+}
+
+func TestDownload_Delete_NonAdminForbidden(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloader{}, &fakeLibTarget{}, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := withURLParam(httptest.NewRequest(http.MethodDelete, "/torrent/downloads/j1", nil), "id", "j1")
+	h.Delete(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: got %d want 403", rr.Code)
 	}
 }

@@ -100,6 +100,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		event.SegmentDetectStarted,
 		event.SegmentDetectProgress,
 		event.SegmentDetectCompleted,
+		event.TorrentDownload,
 	}
 
 	// Collect unsubscribe funcs so we can detach every handler when the client

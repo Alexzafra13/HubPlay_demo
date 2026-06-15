@@ -69,27 +69,21 @@ describe("SourceList", () => {
     expect(onPlay).toHaveBeenCalledWith(source);
   });
 
-  it("shows a disabled state when the indexer feature is off", async () => {
+  it("hides entirely when the indexer feature is off", async () => {
     vi.mocked(api.getMediaSources).mockRejectedValue(
       new ApiError(503, { error: { code: "INDEXER_DISABLED", message: "off" } }),
     );
 
-    render(wrap(<SourceList type="movie" imdbId="tt0133093" />));
+    const { container } = render(wrap(<SourceList type="movie" imdbId="tt0133093" />));
 
-    await waitFor(() => {
-      expect(screen.getByText(/no indexers|sin indexadores/i)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
-  it("shows empty state when no sources are returned", async () => {
+  it("hides entirely when no sources are returned", async () => {
     vi.mocked(api.getMediaSources).mockResolvedValue([]);
 
-    render(wrap(<SourceList type="movie" imdbId="tt0133093" />));
+    const { container } = render(wrap(<SourceList type="movie" imdbId="tt0133093" />));
 
-    await waitFor(() => {
-      expect(
-        screen.getByText(/no sources found|no se encontraron fuentes/i),
-      ).toBeInTheDocument();
-    });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 });

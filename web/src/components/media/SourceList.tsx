@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
-import { Play, X, HardDrive, RefreshCw, Download, Check } from "lucide-react";
+import { Play, X, RefreshCw, Download, Check } from "lucide-react";
 import { api } from "@/api/client";
 import { ApiError, type MediaSourceType, type TorrentSearchResult } from "@/api/types";
 import { useMediaSources } from "@/hooks/useMediaSources";
 import { useAuthStore } from "@/store/auth";
-import { Button, Spinner, EmptyState } from "@/components/common";
+import { Button, Spinner } from "@/components/common";
 
 interface SourceListProps {
   type: MediaSourceType;
@@ -15,6 +15,9 @@ interface SourceListProps {
   enabled?: boolean;
   /** Optional play handler (parent owns playback). */
   onPlay?: (source: TorrentSearchResult) => void;
+  /** Cabecera de la sección. La pinta el propio SourceList para poder
+   *  ocultarla entera (no sólo el cuerpo) cuando no hay fuentes. */
+  title?: string;
 }
 
 // formatSize renders bytes as GB (decimal). Returns "" when unknown.
@@ -162,7 +165,7 @@ export function SourceResults({
  * SourceList resolves the sources for a title by IMDb id (via the Torznab
  * aggregator) and renders them with SourceResults.
  */
-export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListProps) {
+export function SourceList({ type, imdbId, enabled = true, onPlay, title }: SourceListProps) {
   const { t } = useTranslation();
   const { sources, isLoading, isError, error, refetch } = useMediaSources(
     type,
@@ -175,46 +178,57 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
     (error.status === 404 ||
       (error.status === 503 && error.code === "INDEXER_DISABLED"));
 
+  // Nada que ofrecer → no pintamos la sección (ni la cabecera "Fuentes"):
+  // ni cuando no hay indexador configurado en el servidor, ni cuando el
+  // título simplemente no tiene fuentes. Un encabezado vacío en cada ficha
+  // es ruido. (En el modal de búsqueda sí se informa "sin resultados", pero
+  // eso lo hace SourceResults, no este wrapper.)
+  if (featureDisabled) return null;
+  if (!isLoading && !isError && sources.length === 0) return null;
+
+  const header = title ? (
+    <h2 className="mb-3 text-lg font-semibold text-text-primary">{title}</h2>
+  ) : null;
+
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 py-6 text-sm text-text-muted">
-        <Spinner size="sm" />
-        {t("sources.loading", { defaultValue: "Buscando fuentes…" })}
-      </div>
-    );
-  }
-  if (featureDisabled) {
-    return (
-      <EmptyState
-        title={t("sources.disabledTitle", { defaultValue: "Sin indexadores" })}
-        description={t("sources.disabledDesc", {
-          defaultValue:
-            "No hay ningún indexador de fuentes configurado en este servidor.",
-        })}
-        icon={<HardDrive strokeWidth={1.5} />}
-      />
+      <section>
+        {header}
+        <div className="flex items-center gap-2 py-6 text-sm text-text-muted">
+          <Spinner size="sm" />
+          {t("sources.loading", { defaultValue: "Buscando fuentes…" })}
+        </div>
+      </section>
     );
   }
   if (isError) {
     const rateLimited = error instanceof ApiError && error.code === "RATE_LIMITED";
     return (
-      <div className="flex flex-col items-start gap-3 py-4">
-        <p className="text-sm text-text-muted">
-          {rateLimited
-            ? t("sources.rateLimited", {
-                defaultValue:
-                  "El indexador está saturando peticiones. Espera unos segundos y reintenta.",
-              })
-            : t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
-        </p>
-        <Button variant="secondary" size="sm" onClick={refetch}>
-          <RefreshCw className="size-3.5" />
-          {t("sources.retry", { defaultValue: "Reintentar" })}
-        </Button>
-      </div>
+      <section>
+        {header}
+        <div className="flex flex-col items-start gap-3 py-4">
+          <p className="text-sm text-text-muted">
+            {rateLimited
+              ? t("sources.rateLimited", {
+                  defaultValue:
+                    "El indexador está saturando peticiones. Espera unos segundos y reintenta.",
+                })
+              : t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
+          </p>
+          <Button variant="secondary" size="sm" onClick={refetch}>
+            <RefreshCw className="size-3.5" />
+            {t("sources.retry", { defaultValue: "Reintentar" })}
+          </Button>
+        </div>
+      </section>
     );
   }
-  return <SourceResults sources={sources} onPlay={onPlay} downloadType={type} />;
+  return (
+    <section>
+      {header}
+      <SourceResults sources={sources} onPlay={onPlay} downloadType={type} />
+    </section>
+  );
 }
 
 function SourceRow({

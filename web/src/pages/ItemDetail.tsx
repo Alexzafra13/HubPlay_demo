@@ -523,19 +523,15 @@ export default function ItemDetail() {
             indexer is configured on the server (503/404). */}
         {(item.type === "movie" || item.type === "series") &&
           item.external_ids?.imdb && (
-            <section>
-              <h2 className="mb-3 text-lg font-semibold text-text-primary">
-                {t("sources.title", { defaultValue: "Fuentes" })}
-              </h2>
-              <SourceList
-                type={item.type === "series" ? "series" : "movie"}
-                imdbId={
-                  item.external_ids.imdb.startsWith("tt")
-                    ? item.external_ids.imdb
-                    : `tt${item.external_ids.imdb}`
-                }
-              />
-            </section>
+            <SourceList
+              type={item.type === "series" ? "series" : "movie"}
+              title={t("sources.title", { defaultValue: "Fuentes" })}
+              imdbId={
+                item.external_ids.imdb.startsWith("tt")
+                  ? item.external_ids.imdb
+                  : `tt${item.external_ids.imdb}`
+              }
+            />
           )}
 
         {/* Media info — technical metadata (codecs, audio tracks,

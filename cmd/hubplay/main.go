@@ -333,6 +333,7 @@ func run(configPath string) error {
 			Readahead:             cfg.Torrent.ReadaheadBytes,
 			MetadataTimeout:       cfg.Torrent.MetadataTimeout,
 			AllowPrivateUpstreams: cfg.Torrent.AllowPrivateUpstreams,
+			Sink:                  torrentDownloadSink{bus: eventBus},
 		}, logger)
 		if err != nil {
 			return err
@@ -701,4 +702,24 @@ func torznabSeedFromConfig(in []config.TorznabIndexerConfig) []torrentstream.Ind
 		})
 	}
 	return out
+}
+
+// torrentDownloadSink adapta el motor de torrent al bus de eventos: publica
+// cada cambio de estado de una descarga como event.TorrentDownload para que
+// el stream SSE global lo empuje al panel admin (sin polling). Implementa
+// torrentstream.DownloadEventSink.
+type torrentDownloadSink struct{ bus *event.Bus }
+
+func (s torrentDownloadSink) PublishDownload(j torrentstream.DownloadJob) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(event.Event{Type: event.TorrentDownload, Data: map[string]any{
+		"id":          j.ID,
+		"name":        j.Name,
+		"status":      string(j.Status),
+		"bytes_done":  j.BytesDone,
+		"bytes_total": j.BytesTotal,
+		"error":       j.Error,
+	}})
 }

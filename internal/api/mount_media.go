@@ -540,6 +540,7 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 			)
 			r.Post("/download", dh.Create)
 			r.Get("/downloads", dh.List)
+			r.Delete("/downloads/{id}", dh.Delete)
 		}
 	})
 

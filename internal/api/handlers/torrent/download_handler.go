@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/torrentstream"
 )
@@ -16,6 +18,9 @@ import (
 type Downloader interface {
 	StartDownload(src, destDir string, onDone func(error)) torrentstream.DownloadJob
 	Downloads() []torrentstream.DownloadJob
+	// RemoveDownload descarta un job terminal; (false,nil) si no existe,
+	// ErrDownloadActive si sigue en vuelo.
+	RemoveDownload(id string) (bool, error)
 }
 
 // LibraryTarget resolves where a downloaded title should land (a "Descargas"
@@ -97,11 +102,43 @@ func (h *DownloadHandler) Create(w http.ResponseWriter, r *http.Request) {
 	handlers.RespondData(w, http.StatusAccepted, job)
 }
 
-// List returns the current download jobs.
+// List returns the current download jobs. Admin-only — la lista revela qué
+// se está bajando al servidor, así que se gatea igual que el POST.
 //
 // GET /torrent/downloads
 func (h *DownloadHandler) List(w http.ResponseWriter, r *http.Request) {
+	if !h.adminCheck(r) {
+		handlers.RespondError(w, r, http.StatusForbidden, "FORBIDDEN",
+			"only an administrator can view downloads")
+		return
+	}
 	handlers.RespondData(w, http.StatusOK, h.dl.Downloads())
+}
+
+// Delete descarta un job terminal del listado (el "×" del panel). Admin-only.
+//
+// DELETE /torrent/downloads/{id}
+func (h *DownloadHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !h.adminCheck(r) {
+		handlers.RespondError(w, r, http.StatusForbidden, "FORBIDDEN",
+			"only an administrator can dismiss downloads")
+		return
+	}
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		handlers.RespondError(w, r, http.StatusBadRequest, "MISSING_ID", "download id required")
+		return
+	}
+	ok, err := h.dl.RemoveDownload(id)
+	switch {
+	case errors.Is(err, torrentstream.ErrDownloadActive):
+		handlers.RespondError(w, r, http.StatusConflict, "DOWNLOAD_ACTIVE",
+			"the download is still in progress")
+	case !ok:
+		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "download not found")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // ErrNoLibrary is returned by a LibraryTarget when no matching library

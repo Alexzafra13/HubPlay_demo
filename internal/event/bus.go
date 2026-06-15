@@ -94,6 +94,13 @@ const (
 	UploadPhase Type = "upload.phase"
 	UploadDone  Type = "upload.done"
 	UploadError Type = "upload.error"
+
+	// TorrentDownload se emite en cada cambio de estado de una descarga-a-
+	// biblioteca (queued → downloading → copying → completed/failed). Data
+	// lleva el job entero (id, name, status, bytes_done, bytes_total, error)
+	// para que el panel admin pinte el progreso sin polling. Evento global,
+	// no por-usuario: sólo lo inician admins y el panel es admin-only.
+	TorrentDownload Type = "torrent.download"
 )
 
 type Event struct {

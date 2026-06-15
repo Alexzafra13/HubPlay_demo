@@ -510,6 +510,12 @@ export class ApiClient {
     return this.request<DownloadJob[]>("GET", "/torrent/downloads");
   }
 
+  // dismissDownload removes a finished (completed/failed) job from the list
+  // (admin-only). 409 if the job is still in progress.
+  async dismissDownload(id: string): Promise<void> {
+    await this.request<void>("DELETE", `/torrent/downloads/${encodeURIComponent(id)}`);
+  }
+
   // discoverTitles runs a TMDb metadata search (posters) for the discovery
   // grid. Picking one resolves sources via discoverSources.
   async discoverTitles(

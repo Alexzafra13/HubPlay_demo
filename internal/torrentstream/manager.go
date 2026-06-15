@@ -49,6 +49,9 @@ var (
 	ErrMetadataTimeout = errors.New("torrentstream: timed out resolving metadata")
 	// ErrNoFiles is returned when a resolved torrent has no files.
 	ErrNoFiles = errors.New("torrentstream: torrent has no files")
+	// ErrDownloadActive se devuelve al intentar descartar un job que sigue
+	// en vuelo (hay que dejarlo terminar o, en el futuro, cancelarlo).
+	ErrDownloadActive = errors.New("torrentstream: download still in progress")
 )
 
 // Options configures the manager. Zero values are filled with sane
@@ -65,6 +68,9 @@ type Options struct {
 	// docker, que resuelve a una IP privada). Opt-in del operador. Default
 	// false (igual que iptv.allow_private_upstreams).
 	AllowPrivateUpstreams bool
+	// Sink recibe los cambios de estado de las descargas para empujarlos por
+	// SSE. Opcional (nil ⇒ el front cae al fetch puntual).
+	Sink DownloadEventSink
 }
 
 func (o Options) withDefaults() Options {
@@ -98,11 +104,18 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session // keyed by infohash hex
 	bySrc    map[string]*Session // keyed by the src (magnet/URL) used to start it
+	// holders cuenta los "dueños" lógicos de cada torrent por infohash: una
+	// sesión de streaming y una descarga del mismo contenido comparten el
+	// *torrent.Torrent (el cliente deduplica por infohash). Sólo se hace
+	// Drop + limpieza de scratch cuando el contador llega a cero, así una
+	// descarga que termina no tira el stream activo y viceversa.
+	holders map[string]int
 
 	downloads map[string]*downloadJob // keyed by job id
 	dlCtx     context.Context         // background ctx for download goroutines
 	dlCancel  context.CancelFunc
 
+	sink         DownloadEventSink
 	allowPrivate bool
 
 	reaperStop chan struct{}
@@ -141,9 +154,11 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 		client:       client,
 		logger:       logger,
 		providers:    defaultProviders(),
+		sink:         opts.Sink,
 		allowPrivate: opts.AllowPrivateUpstreams,
 		sessions:     make(map[string]*Session),
 		bySrc:        make(map[string]*Session),
+		holders:      make(map[string]int),
 		downloads:    make(map[string]*downloadJob),
 		dlCtx:        dlCtx,
 		dlCancel:     dlCancel,
@@ -170,35 +185,43 @@ func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) 
 	if err != nil {
 		return nil, err
 	}
+	// Registramos un holder de inmediato (el infohash ya se conoce tras
+	// addTorrent). Lo soltamos en toda salida que NO acabe creando sesión;
+	// en la salida exitosa la sesión hereda este holder y lo libera al ser
+	// reapeada.
+	ih := t.InfoHash().HexString()
+	m.acquire(ih)
 
 	// Wait for metadata (magnet handshake) before we can pick a file.
 	select {
 	case <-t.GotInfo():
 	case <-ctx.Done():
+		m.release(t)
 		return nil, ctx.Err()
 	case <-time.After(m.opts.MetadataTimeout):
-		t.Drop()
+		m.release(t)
 		return nil, ErrMetadataTimeout
 	}
 
-	ih := t.InfoHash().HexString()
-
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if s, ok := m.sessions[ih]; ok {
 		s.touch(m.now())
+		m.mu.Unlock()
+		m.release(t) // la sesión existente ya tiene su propio holder
 		return s, nil
 	}
 	// Enforce the cap only for *new* content — re-joining an existing
 	// session never trips it (retries/reconnects shouldn't be blocked).
 	if len(m.sessions) >= m.opts.MaxSessions {
-		t.Drop()
+		m.mu.Unlock()
+		m.release(t)
 		return nil, ErrTooManySessions
 	}
 
 	file := largestFile(t)
 	if file == nil {
-		t.Drop()
+		m.mu.Unlock()
+		m.release(t)
 		return nil, ErrNoFiles
 	}
 	s := &Session{
@@ -210,9 +233,63 @@ func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) 
 	s.touch(m.now())
 	m.sessions[ih] = s
 	m.bySrc[uri] = s
+	m.mu.Unlock()
 	m.logger.Info("torrentstream: session started",
 		"infohash", ih, "name", t.Name(), "file", file.DisplayPath(), "bytes", file.Length())
 	return s, nil
+}
+
+// acquire registra un holder del torrent (por infohash). Ver Manager.holders.
+func (m *Manager) acquire(ih string) {
+	m.mu.Lock()
+	m.holders[ih]++
+	m.mu.Unlock()
+}
+
+// release suelta un holder; si era el último hace Drop del torrent y borra su
+// copia de scratch del disco. Seguro de llamar sin tener m.mu cogido.
+func (m *Manager) release(t *torrent.Torrent) {
+	if t == nil {
+		return
+	}
+	ih := t.InfoHash().HexString()
+	name := t.Name()
+	m.mu.Lock()
+	if m.holders[ih] > 0 {
+		m.holders[ih]--
+	}
+	last := m.holders[ih] <= 0
+	if last {
+		delete(m.holders, ih)
+	}
+	m.mu.Unlock()
+	if !last {
+		return
+	}
+	t.Drop()
+	if p := m.scratchPath(name); p != "" {
+		if err := os.RemoveAll(p); err != nil {
+			m.logger.Warn("torrentstream: scratch cleanup failed", "path", p, "error", err)
+		}
+	}
+}
+
+// scratchPath devuelve la ruta en disco de los datos de un torrent bajo el
+// DataDir de scratch, o "" si no puede determinarla con seguridad. anacrolix
+// escribe en DataDir/<name> tanto para torrents de un fichero como de varios,
+// así que ese es el nodo a borrar. El guard impide jamás devolver el propio
+// DataDir o escapar de él (evita un RemoveAll catastrófico).
+func (m *Manager) scratchPath(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	root := filepath.Clean(m.opts.DataDir)
+	p := filepath.Clean(filepath.Join(root, name))
+	if p == root || !strings.HasPrefix(p, root+string(os.PathSeparator)) {
+		return ""
+	}
+	return p
 }
 
 func (m *Manager) addTorrent(uri string) (*torrent.Torrent, error) {
@@ -313,19 +390,21 @@ func (m *Manager) reapLoop() {
 		case <-m.reaperStop:
 			return
 		case <-tick.C:
-			m.reapIdle(m.now())
+			now := m.now()
+			m.reapIdle(now)
+			m.pruneDownloads(now)
 		}
 	}
 }
 
 func (m *Manager) reapIdle(now time.Time) {
+	// Recogemos las sesiones ociosas con el lock cogido, pero hacemos el
+	// Drop + borrado de scratch (I/O de disco) ya fuera del lock para no
+	// bloquear al resto del manager.
+	var reaped []*Session
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for ih, s := range m.sessions {
 		if s.idle(now, m.opts.IdleTimeout) {
-			if s.torrent != nil {
-				s.torrent.Drop()
-			}
 			delete(m.sessions, ih)
 			// Drop every src alias pointing at this reaped session.
 			for src, bs := range m.bySrc {
@@ -333,9 +412,50 @@ func (m *Manager) reapIdle(now time.Time) {
 					delete(m.bySrc, src)
 				}
 			}
-			m.logger.Info("torrentstream: session reaped (idle)", "infohash", ih)
+			reaped = append(reaped, s)
 		}
 	}
+	m.mu.Unlock()
+	for _, s := range reaped {
+		m.release(s.torrent) // Drop + limpieza de scratch si es el último holder
+		m.logger.Info("torrentstream: session reaped (idle)", "infohash", s.infoHash)
+	}
+}
+
+// downloadRetention es cuánto se conserva un job terminal (completed/failed)
+// antes de que el reaper lo purgue. Suficiente para que el panel admin lo vea
+// un rato; sin esto el mapa de descargas crecería indefinidamente.
+const downloadRetention = 10 * time.Minute
+
+// pruneDownloads elimina los jobs terminales que llevan más de
+// downloadRetention en ese estado.
+func (m *Manager) pruneDownloads(now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, j := range m.downloads {
+		if st, fin := j.terminalSince(); !isActiveDownload(st) && !fin.IsZero() &&
+			now.Sub(fin) > downloadRetention {
+			delete(m.downloads, id)
+		}
+	}
+}
+
+// RemoveDownload descarta un job terminal del listado (el "×" del panel). No
+// permite descartar uno en vuelo — para eso habría que cancelarlo, que es
+// otra feature. Devuelve ErrDownloadActive si sigue activo, o (false, nil) si
+// el id no existe.
+func (m *Manager) RemoveDownload(id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.downloads[id]
+	if !ok {
+		return false, nil
+	}
+	if s := j.get(); isActiveDownload(s.Status) {
+		return false, ErrDownloadActive
+	}
+	delete(m.downloads, id)
+	return true, nil
 }
 
 // GetActive returns the session previously started for src, if it is
