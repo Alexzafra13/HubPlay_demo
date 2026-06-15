@@ -88,6 +88,9 @@ type TorznabClient struct {
 	httpClient   *http.Client
 	perIndexerTO time.Duration
 	logger       *slog.Logger
+	// idxCache memoises each Prowlarr root's indexer list so we don't hit
+	// /api/v1/indexer on every search (the list rarely changes).
+	idxCache *ttlCache[[]prowlarrIndexer]
 }
 
 // NewTorznabClient builds a client over the given indexer source.
@@ -100,7 +103,22 @@ func NewTorznabClient(source IndexerProvider, logger *slog.Logger) *TorznabClien
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 		perIndexerTO: perIndexerTimeout,
 		logger:       logger,
+		idxCache:     newTTLCache[[]prowlarrIndexer](5 * time.Minute),
 	}
+}
+
+// prowlarrIndexers returns the (cached) native indexer list for a Prowlarr
+// root.
+func (c *TorznabClient) prowlarrIndexers(ctx context.Context, base, apiKey string) ([]prowlarrIndexer, error) {
+	if v, ok := c.idxCache.get(base); ok {
+		return v, nil
+	}
+	list, err := fetchProwlarrIndexers(ctx, c.httpClient, base, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	c.idxCache.set(base, list)
+	return list, nil
 }
 
 // torznabEndpoint is a concrete Torznab feed to query (already resolved
@@ -139,7 +157,7 @@ func (c *TorznabClient) resolveEndpoints(ctx context.Context, idx TorznabIndexer
 	if looksLikeTorznab(raw) {
 		return []torznabEndpoint{{url: raw, apiKey: idx.APIKey, name: idx.Name}}
 	}
-	list, err := fetchProwlarrIndexers(ctx, c.httpClient, raw, idx.APIKey)
+	list, err := c.prowlarrIndexers(ctx, raw, idx.APIKey)
 	if err != nil {
 		c.logger.Warn("torznab: prowlarr indexer list failed", "indexer", idx.Name, "error", err)
 		return nil

@@ -35,6 +35,9 @@ export function useMediaSources(
     enabled,
     retry: false,
     staleTime: 5 * 60_000,
+    // Indexers can be rate-limited; don't re-hit them on tab focus/reconnect.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   return {
@@ -66,6 +69,9 @@ export function useMediaSearch(
     enabled,
     retry: false,
     staleTime: 5 * 60_000,
+    // Indexers can be rate-limited; don't re-hit them on tab focus/reconnect.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   return {
