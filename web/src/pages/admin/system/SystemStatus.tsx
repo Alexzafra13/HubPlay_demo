@@ -41,7 +41,6 @@ import { UpdateBanner } from "@/components/admin/UpdateBanner";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { BackupPanel } from "@/components/admin/BackupPanel";
 import { CorsOriginsPanel } from "@/components/admin/CorsOriginsPanel";
-import { IndexersPanel } from "@/components/admin/IndexersPanel";
 import { DatabasePanel } from "@/components/admin/DatabasePanel";
 import { LogsPanel } from "@/components/admin/LogsPanel";
 import { SectionHeader } from "@/components/admin/SectionHeader";
@@ -1144,7 +1143,6 @@ function AdvancedSection() {
       <DatabasePanel />
       <AuthKeysPanel />
       <CorsOriginsPanel />
-      <IndexersPanel />
     </section>
   );
 }

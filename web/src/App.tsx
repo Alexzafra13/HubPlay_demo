@@ -41,6 +41,7 @@ const LibraryDetailPage = lazyWithRetry(() => import("@/pages/admin/librariesAdm
 const UsersAdmin = lazyWithRetry(() => import("@/pages/admin/UsersAdmin"));
 const ProvidersAdmin = lazyWithRetry(() => import("@/pages/admin/ProvidersAdmin"));
 const FederationAdmin = lazyWithRetry(() => import("@/pages/admin/FederationAdmin"));
+const IndexersAdmin = lazyWithRetry(() => import("@/pages/admin/IndexersAdmin"));
 const PeersPage = lazyWithRetry(() => import("@/pages/PeersPage"));
 const PeerLibrariesPage = lazyWithRetry(() => import("@/pages/PeerLibrariesPage"));
 const PeerLibraryItemsPage = lazyWithRetry(() => import("@/pages/PeerLibraryItemsPage"));
@@ -221,6 +222,9 @@ export function App() {
                     so bookmarks survive; landing on it shows the
                     federation surface inline. */}
                 <Route path="federation" element={<FederationAdmin />} />
+                {/* Indexers (Torznab/Prowlarr) — dedicated admin home for
+                    the torrent/source stack. */}
+                <Route path="indexers" element={<IndexersAdmin />} />
                 {/* System lost its three sub-tabs (status / activity /
                     advanced) — rendered as a single Settings-style
                     page now. Activity in particular was empty
