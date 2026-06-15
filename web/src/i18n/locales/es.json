@@ -1817,6 +1817,8 @@
     "disabledDesc": "La gestión de indexadores no está habilitada en este servidor.",
     "empty": "Aún no has añadido ningún indexador.",
     "enabled": "Activo",
+    "open": "Abrir",
+    "openHint": "Abrir Prowlarr para añadir/activar trackers",
     "trackerCount": "{{count}} trackers",
     "addTitle": "Añadir Prowlarr / Jackett",
     "name": "Nombre",

@@ -1,11 +1,30 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, XCircle, Trash2, Plus, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Trash2, Plus, Loader2, ExternalLink } from "lucide-react";
 
 import { api } from "@/api/client";
 import { ApiError, type IndexerInput, type IndexerStatus } from "@/api/types";
 import { Button, Input, Spinner, EmptyState } from "@/components/common";
+
+// prowlarrWebUrl derives a browser-reachable Prowlarr UI URL from the
+// indexer's configured address. The bundled turnkey indexer points at the
+// internal docker host ("prowlarr"), which the browser can't open, so we
+// fall back to the current host on Prowlarr's default port (9696). The UI
+// always lives at the root, regardless of the Torznab path.
+function prowlarrWebUrl(ix: IndexerStatus): string {
+  const raw = ix.base_url || ix.url || "";
+  const proto = window.location.protocol;
+  const internalHosts = ["prowlarr", "localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"];
+  try {
+    const u = new URL(raw);
+    const internal = internalHosts.includes(u.hostname) || u.hostname.endsWith(".internal");
+    const host = internal ? window.location.hostname : u.hostname;
+    return `${proto}//${host}:9696`;
+  } catch {
+    return `${proto}//${window.location.hostname}:9696`;
+  }
+}
 
 // IndexersPanel — plug-and-play management of Torznab/Prowlarr indexers.
 // Everything is persisted server-side (DB), so the operator never edits
@@ -114,6 +133,18 @@ export function IndexersPanel() {
                         : ""}
                     </p>
                   </div>
+                  <a
+                    href={prowlarrWebUrl(ix)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[11px] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+                    title={t("indexersAdmin.openHint", {
+                      defaultValue: "Abrir Prowlarr para añadir/activar trackers",
+                    })}
+                  >
+                    <ExternalLink className="size-3" />
+                    {t("indexersAdmin.open", { defaultValue: "Abrir" })}
+                  </a>
                   <label className="flex items-center gap-1.5 text-[11px] text-text-muted">
                     <input
                       type="checkbox"
