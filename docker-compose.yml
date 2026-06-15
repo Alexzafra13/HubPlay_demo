@@ -20,12 +20,13 @@ services:
       # operator type a connection string. SQLite remains the default
       # until the operator explicitly flips the switch in the UI.
       - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
-      # Agregación de fuentes Torznab/Prowlarr — TURNKEY. Por defecto apunta
-      # al Prowlarr empaquetado abajo, con la MISMA api key, así que HubPlay
-      # se autoconecta en el primer arranque (se siembra el indexer en BD).
-      # No tienes que buscar ninguna api key ni tocar el panel: solo abre
-      # Prowlarr (http://TU_IP:9696) UNA vez para elegir qué trackers activar.
-      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696}
+      # Agregación de fuentes Torznab/Prowlarr — TURNKEY. Apunta al Prowlarr
+      # empaquetado (servido bajo /prowlarr) con la MISMA api key que
+      # pre-siembra el init de abajo, así que HubPlay se autoconecta en el
+      # primer arranque (siembra el indexer en BD). No tienes que buscar
+      # ninguna api key ni tocar el panel: solo abre Prowlarr UNA vez para
+      # elegir qué trackers activar (ver nginx en deploy/nginx/).
+      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696/prowlarr}
       - HUBPLAY_TORZNAB_API_KEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
     # The hubplay process never crashes on a missing/unreachable
     # `db` — SQLite is the default, the bundled DSN is just an
@@ -89,29 +90,42 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # prowlarr-init: pre-siembra el config.xml de Prowlarr (api key conocida +
+  # ruta /prowlarr + auth de LAN) ANTES de que arranque, SOLO si no existe.
+  # Esto hace la autoconexión 100% fiable sin depender de que la imagen
+  # respete las variables de entorno de la api key. Corre una vez y termina.
+  prowlarr-init:
+    image: busybox:1.36
+    container_name: hubplay-prowlarr-init
+    user: "${PUID:-1000}:${PGID:-1000}"
+    command: sh -c "[ -f /config/config.xml ] || printf '%s' '<Config><BindAddress>*</BindAddress><Port>9696</Port><UrlBase>/prowlarr</UrlBase><ApiKey>${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}</ApiKey><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired><LogLevel>info</LogLevel><LaunchBrowser>False</LaunchBrowser><AnalyticsEnabled>False</AnalyticsEnabled><InstanceName>Prowlarr</InstanceName></Config>' > /config/config.xml"
+    volumes:
+      - prowlarr_config:/config
+    restart: "no"
+
   # Prowlarr empaquetado: el AGREGADOR de indexers. HubPlay solo consume su
-  # API Torznab. Viene con la api key preconfigurada (PROWLARR_API_KEY) para
-  # que HubPlay se conecte solo — sin que tengas que copiar claves.
+  # API Torznab. Llega ya autoconectado (config.xml pre-sembrado).
   #
-  # Único paso manual (una vez): abre http://TU_IP:9696 y, en "Indexers",
+  # Único paso manual (una vez): abre la UI de Prowlarr y, en "Indexers",
   # añade los trackers que quieras usar. Eso NO se preconfigura a propósito:
-  # qué fuentes activas es tu decisión y tu responsabilidad.
+  # qué fuentes activas es tu decisión y tu responsabilidad. Acceso local +
+  # remoto vía tu proxy bajo /prowlarr (ver deploy/nginx/).
   #
   # Seguridad: la auth de la UI está abierta para direcciones de LAN
-  # (DisabledForLocalAddresses). Si expones este puerto a Internet, cambia
-  # PROWLARR_API_KEY en .env y pon una auth real en Prowlarr.
+  # (DisabledForLocalAddresses). Si lo expones a Internet, cambia
+  # PROWLARR_API_KEY en .env y/o pon una auth real en Prowlarr.
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: hubplay-prowlarr
+    depends_on:
+      prowlarr-init:
+        condition: service_completed_successfully
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Madrid}
-      - PROWLARR__APIKEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
-      - PROWLARR__AUTHENTICATIONMETHOD=External
-      - PROWLARR__AUTHENTICATIONREQUIRED=DisabledForLocalAddresses
     ports:
-      # Para abrir la UI de Prowlarr y elegir trackers.
+      # Acceso directo opcional (LAN): http://TU_IP:9696/prowlarr
       - "${PROWLARR_HOST_PORT:-9696}:9696"
     volumes:
       - prowlarr_config:/config
