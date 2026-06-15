@@ -242,6 +242,16 @@ func fetchTorrentFile(rawURL string, maxBytes int64, timeout time.Duration) ([]b
 }
 
 func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
+	// Defensive: a magnet must never reach the .torrent HTTP fetch path
+	// (addTorrent already routes magnets to AddMagnet, but guard here too
+	// so a future caller can't accidentally http-fetch a magnet).
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawURL)), "magnet:") {
+		t, err := m.client.AddMagnet(rawURL)
+		if err != nil {
+			return nil, fmt.Errorf("torrentstream: add magnet: %w", err)
+		}
+		return t, nil
+	}
 	// By default a .torrent fetch is SSRF-guarded: imaging.SafeGet rejects
 	// URLs resolving to loopback / LAN / link-local / cloud-metadata and
 	// re-validates every redirect hop, so an arbitrary URL can't make the
