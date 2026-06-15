@@ -47,3 +47,34 @@ export function useMediaSources(
     },
   };
 }
+
+/**
+ * useMediaSearch runs a free-text search against the configured indexers
+ * (the general torrent search box) — /torrent/sources/search. Disabled
+ * until a non-empty query is present.
+ */
+export function useMediaSearch(
+  type: MediaSourceType,
+  query: string,
+): UseMediaSourcesResult {
+  const q = query.trim();
+  const enabled = q.length > 0;
+
+  const result = useQuery({
+    queryKey: ["media-search", type, q],
+    queryFn: () => api.searchMediaSources(type, q),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+
+  return {
+    sources: result.data ?? [],
+    isLoading: result.isLoading && enabled,
+    isError: result.isError,
+    error: result.error,
+    refetch: () => {
+      void result.refetch();
+    },
+  };
+}

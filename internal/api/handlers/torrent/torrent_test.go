@@ -196,6 +196,37 @@ func (f *fakeSources) Sources(_ context.Context, mt torrentstream.MediaType, imd
 	return f.res, f.err
 }
 
+func (f *fakeSources) SearchText(_ context.Context, mt torrentstream.MediaType, query string) ([]torrentstream.SearchResult, error) {
+	f.called = true
+	f.gotMT = mt
+	f.gotID = query
+	return f.res, f.err
+}
+
+func TestSourcesSearch(t *testing.T) {
+	fs := &fakeSources{res: []torrentstream.SearchResult{{Identifier: "x", Title: "Movie 1080p", Seeders: 5}}}
+	h := NewHandler(nil, fs, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/sources/search?q=matrix&type=series", nil)
+	h.SourcesSearch(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	if fs.gotMT != torrentstream.MediaTypeSeries || fs.gotID != "matrix" {
+		t.Errorf("forwarded args: mt=%q q=%q", fs.gotMT, fs.gotID)
+	}
+}
+
+func TestSourcesSearch_MissingQuery(t *testing.T) {
+	h := NewHandler(nil, &fakeSources{}, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/torrent/sources/search", nil)
+	h.SourcesSearch(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
 // withIMDb attaches a chi route param so the handler can read {imdbId}.
 func withIMDb(req *http.Request, id string) *http.Request {
 	rctx := chi.NewRouteContext()

@@ -43,6 +43,7 @@ type Manager interface {
 // when no Torznab indexer is configured.
 type SourceSearcher interface {
 	Sources(ctx context.Context, mt torrentstream.MediaType, imdbID string) ([]torrentstream.SearchResult, error)
+	SearchText(ctx context.Context, mt torrentstream.MediaType, query string) ([]torrentstream.SearchResult, error)
 }
 
 // MetadataSearcher is the slice of *provider.Manager used to ENRICH the
@@ -95,6 +96,39 @@ func (h *Handler) SourcesMovie(w http.ResponseWriter, r *http.Request) {
 // GET /torrent/sources/series/{imdbId}
 func (h *Handler) SourcesSeries(w http.ResponseWriter, r *http.Request) {
 	h.sourcesByIMDb(w, r, torrentstream.MediaTypeSeries)
+}
+
+// SourcesSearch runs a free-text search against the configured indexers
+// (the general torrent search box).
+//
+// GET /torrent/sources/search?q=<text>&type=<movie|series>
+func (h *Handler) SourcesSearch(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		handlers.RespondError(w, r, http.StatusBadRequest, "MISSING_QUERY", "q parameter required")
+		return
+	}
+	if h.sources == nil {
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "INDEXER_DISABLED",
+			"no source indexer is configured on this server")
+		return
+	}
+	mt := torrentstream.MediaTypeMovie
+	if r.URL.Query().Get("type") == "series" {
+		mt = torrentstream.MediaTypeSeries
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	results, err := h.sources.SearchText(ctx, mt, query)
+	if err != nil {
+		h.logger.Warn("torrent text search failed", "query", query, "error", err)
+		handlers.RespondError(w, r, http.StatusBadGateway, "INDEXER_UNAVAILABLE",
+			"source indexer unavailable")
+		return
+	}
+	handlers.RespondData(w, http.StatusOK, results)
 }
 
 // sourcesByIMDb validates the IMDb id, queries the aggregator (cache →

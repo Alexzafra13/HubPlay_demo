@@ -68,7 +68,6 @@ import type {
   UserData,
   ApiErrorBody,
   TorrentSearchResult,
-  TorrentDiscoverResult,
   MediaSourceType,
   IndexerStatus,
   IndexerInput,
@@ -463,25 +462,9 @@ export class ApiClient {
     return this.request<User>("GET", "/me");
   }
 
-  // ── Torrent streaming (legal sources: Internet Archive) ─────────────
-  // searchTorrents runs a free-text query against the server's legal
-  // catalogue providers. torrentStreamURL builds the same-origin URL a
-  // <video> element plays (cookie auth travels automatically).
-  async searchTorrents(query: string, limit = 30): Promise<TorrentSearchResult[]> {
-    return this.request<TorrentSearchResult[]>("GET", "/torrent/search", {
-      params: { q: query, limit },
-    });
-  }
-
-  // discoverTorrents enriches the browse with TMDb metadata (poster /
-  // overview / year / id). Picking a result then resolves playable
-  // sources via searchTorrents — sourcing stays on the legal catalogue.
-  async discoverTorrents(query: string): Promise<TorrentDiscoverResult[]> {
-    return this.request<TorrentDiscoverResult[]>("GET", "/torrent/discover", {
-      params: { q: query },
-    });
-  }
-
+  // ── Torrent sources (Torznab/Prowlarr) ──────────────────────────────
+  // torrentStreamURL builds the same-origin URL a <video> element plays
+  // (cookie auth travels automatically).
   torrentStreamURL(src: string): string {
     return `${this.baseUrl}/torrent/stream?src=${encodeURIComponent(src)}`;
   }
@@ -489,8 +472,8 @@ export class ApiClient {
   // getMediaSources resolves streamable sources for a title by IMDb id via
   // the Torznab aggregator (/torrent/sources/{type}/{imdbId}). Results are
   // already normalised + sorted (seeders → quality → size) and cached
-  // server-side per (type, imdbId). Play one by passing its magnet_uri (or
-  // torrent_url) to torrentStreamURL.
+  // server-side. Play one by passing its magnet_uri (or torrent_url) to
+  // torrentStreamURL.
   async getMediaSources(
     type: MediaSourceType,
     imdbId: string,
@@ -499,6 +482,17 @@ export class ApiClient {
       "GET",
       `/torrent/sources/${type}/${encodeURIComponent(imdbId)}`,
     );
+  }
+
+  // searchMediaSources runs a free-text torrent search against the
+  // configured indexers (/torrent/sources/search).
+  async searchMediaSources(
+    type: MediaSourceType,
+    query: string,
+  ): Promise<TorrentSearchResult[]> {
+    return this.request<TorrentSearchResult[]>("GET", "/torrent/sources/search", {
+      params: { q: query, type },
+    });
   }
 
   // ── Admin: Torznab/Prowlarr indexer management (plug-and-play, DB-backed) ──

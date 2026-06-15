@@ -488,8 +488,9 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 			r.Get("/search", h.Search)
 			r.Get("/stream", h.Stream)
 		}
-		// Torznab source aggregation by IMDb id.
+		// Torznab source aggregation: free-text search + by IMDb id.
 		if deps.Torrent.Sources != nil {
+			r.Get("/sources/search", h.SourcesSearch)
 			r.Get("/sources/movie/{imdbId}", h.SourcesMovie)
 			r.Get("/sources/series/{imdbId}", h.SourcesSeries)
 		}

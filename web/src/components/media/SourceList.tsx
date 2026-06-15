@@ -11,11 +11,7 @@ interface SourceListProps {
   imdbId: string;
   /** Gate the query (e.g. only fetch when a panel is open). */
   enabled?: boolean;
-  /**
-   * Optional play handler. When provided, the component delegates playback
-   * to the parent (passing the chosen source) instead of opening its own
-   * built-in player — keeping the source list decoupled from any player.
-   */
+  /** Optional play handler (parent owns playback). */
   onPlay?: (source: TorrentSearchResult) => void;
 }
 
@@ -26,7 +22,6 @@ function formatSize(bytes?: number): string {
 }
 
 // langFlag maps a detected language tag to a flag/emoji (Torrentio-style).
-// "Original" is treated as no tag.
 const LANG_FLAG: Record<string, string> = {
   Spanish: "🇪🇸",
   Latino: "🌎",
@@ -45,8 +40,8 @@ function languageFlags(langs?: string[]): string {
     .join(" ");
 }
 
-// bestSrc is what we hand the player: a magnet plays directly; otherwise
-// the torrent_url (which may itself be a magnet the backend built).
+// bestSrc is what we hand the player: prefer a magnet; fall back to the
+// torrent_url (which may itself be a magnet the backend built).
 function bestSrc(s: TorrentSearchResult): string {
   return s.magnet_uri || s.torrent_url;
 }
@@ -72,34 +67,27 @@ function groupByQuality(
 }
 
 /**
- * SourceList lists the streamable sources for a title (resolved by IMDb id
- * via the Torznab aggregator), grouped by quality with a Torrentio-style
- * info line (seeders · size · provider · language flags). Playback goes
- * through HubPlay (the torrent stream endpoint) unless a parent supplies
- * `onPlay`.
+ * SourceResults renders a grouped, Torrentio-style list of sources and
+ * handles playback (delegated via `onPlay`, or a built-in player). It is
+ * presentation-only — fetching lives in the caller — so both the per-item
+ * SourceList and the general search page reuse it.
  */
-export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListProps) {
+export function SourceResults({
+  sources,
+  onPlay,
+}: {
+  sources: TorrentSearchResult[];
+  onPlay?: (source: TorrentSearchResult) => void;
+}) {
   const { t } = useTranslation();
-  const { sources, isLoading, isError, error, refetch } = useMediaSources(
-    type,
-    imdbId,
-    { enabled },
-  );
   const [playing, setPlaying] = useState<{ src: string; title: string } | null>(
     null,
   );
-
   const otherLabel = t("sources.other", { defaultValue: "Otros" });
   const groups = useMemo(
     () => groupByQuality(sources, otherLabel),
     [sources, otherLabel],
   );
-
-  // Feature off on this server (no indexer configured / route not mounted).
-  const featureDisabled =
-    error instanceof ApiError &&
-    (error.status === 404 ||
-      (error.status === 503 && error.code === "INDEXER_DISABLED"));
 
   function handlePlay(s: TorrentSearchResult) {
     if (onPlay) {
@@ -107,44 +95,6 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
       return;
     }
     setPlaying({ src: api.torrentStreamURL(bestSrc(s)), title: s.title });
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 py-6 text-sm text-text-muted">
-        <Spinner size="sm" />
-        {t("sources.loading", { defaultValue: "Buscando fuentes…" })}
-      </div>
-    );
-  }
-
-  if (featureDisabled) {
-    return (
-      <EmptyState
-        title={t("sources.disabledTitle", { defaultValue: "Sin indexadores" })}
-        description={t("sources.disabledDesc", {
-          defaultValue:
-            "No hay ningún indexador de fuentes configurado en este servidor.",
-        })}
-        icon={<HardDrive strokeWidth={1.5} />}
-      />
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="flex flex-col items-start gap-3 py-4">
-        <p className="text-sm text-text-muted">
-          {t("sources.error", {
-            defaultValue: "No se pudieron obtener las fuentes.",
-          })}
-        </p>
-        <Button variant="secondary" size="sm" onClick={refetch}>
-          <RefreshCw className="size-3.5" />
-          {t("sources.retry", { defaultValue: "Reintentar" })}
-        </Button>
-      </div>
-    );
   }
 
   if (sources.length === 0) {
@@ -192,6 +142,59 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
   );
 }
 
+/**
+ * SourceList resolves the sources for a title by IMDb id (via the Torznab
+ * aggregator) and renders them with SourceResults.
+ */
+export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListProps) {
+  const { t } = useTranslation();
+  const { sources, isLoading, isError, error, refetch } = useMediaSources(
+    type,
+    imdbId,
+    { enabled },
+  );
+
+  const featureDisabled =
+    error instanceof ApiError &&
+    (error.status === 404 ||
+      (error.status === 503 && error.code === "INDEXER_DISABLED"));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-6 text-sm text-text-muted">
+        <Spinner size="sm" />
+        {t("sources.loading", { defaultValue: "Buscando fuentes…" })}
+      </div>
+    );
+  }
+  if (featureDisabled) {
+    return (
+      <EmptyState
+        title={t("sources.disabledTitle", { defaultValue: "Sin indexadores" })}
+        description={t("sources.disabledDesc", {
+          defaultValue:
+            "No hay ningún indexador de fuentes configurado en este servidor.",
+        })}
+        icon={<HardDrive strokeWidth={1.5} />}
+      />
+    );
+  }
+  if (isError) {
+    return (
+      <div className="flex flex-col items-start gap-3 py-4">
+        <p className="text-sm text-text-muted">
+          {t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
+        </p>
+        <Button variant="secondary" size="sm" onClick={refetch}>
+          <RefreshCw className="size-3.5" />
+          {t("sources.retry", { defaultValue: "Reintentar" })}
+        </Button>
+      </div>
+    );
+  }
+  return <SourceResults sources={sources} onPlay={onPlay} />;
+}
+
 function SourceRow({
   source,
   onPlay,
@@ -205,11 +208,9 @@ function SourceRow({
   return (
     <li className="flex items-center gap-3 rounded-lg border border-border bg-bg-base/40 px-3 py-2">
       <div className="min-w-0 flex-1">
-        {/* Release name (the "title"/filename), Torrentio-style. */}
         <p className="truncate text-[13px] text-text-primary" title={source.title}>
           {source.title || source.identifier}
         </p>
-        {/* Info line: 👤 seeders · 💾 size · ⚙️ provider · codec · flags */}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
           <span title={t("sources.seedersLabel", { defaultValue: "Seeders" })}>
             👤 {source.seeders ?? 0}
@@ -256,9 +257,7 @@ function SourcePlayerModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <span className="truncate text-sm font-semibold text-text-primary">
-            {title}
-          </span>
+          <span className="truncate text-sm font-semibold text-text-primary">{title}</span>
           <button
             type="button"
             onClick={onClose}

@@ -71,6 +71,7 @@ var outOfScopeExact = map[string]string{
 	"GET /torrent/discover":                "TMDb-enriched browse for torrent feature, web-only opt-in",
 	"GET /torrent/search":                  "legal torrent search (Internet Archive), web-only opt-in",
 	"GET /torrent/stream":                  "legal torrent streaming, web-only opt-in",
+	"GET /torrent/sources/search":          "Torznab free-text source search, web-only opt-in",
 	"GET /torrent/sources/movie/{imdbId}":  "Torznab source aggregation by IMDb id, web-only opt-in",
 	"GET /torrent/sources/series/{imdbId}": "Torznab source aggregation by IMDb id, web-only opt-in",
 	"GET /admin/indexers":                  "admin Torznab/Prowlarr indexer list + status, web-only opt-in",
