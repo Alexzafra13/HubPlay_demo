@@ -70,6 +70,9 @@ type SearchResult struct {
 	// (Spanish, Latino, Dual, Multi, VOST, English, French). Defaults to
 	// ["Original"] when none are present.
 	Languages []string `json:"languages,omitempty"`
+	// IMDbID is the title's IMDb id when the indexer reports it (Torznab
+	// `imdbid` attr), normalised to "ttNNN…". Useful for verification.
+	IMDbID string `json:"imdb_id,omitempty"`
 	// IsCam flags low-quality source releases (CAM / TS / Screener / R5…)
 	// so the filter engine can drop them.
 	IsCam bool `json:"is_cam,omitempty"`

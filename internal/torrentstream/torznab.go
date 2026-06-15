@@ -37,18 +37,35 @@ const (
 
 // TorznabIndexer is one configured indexer endpoint. Categories/Trackers
 // fall back to sane defaults when empty.
+//
+// Prowlarr is the canonical source: it aggregates many trackers behind one
+// Torznab endpoint, so a single instance usually suffices. HubPlay only
+// ever speaks the standard Torznab API — it doesn't manage Prowlarr's own
+// indexer config.
 type TorznabIndexer struct {
 	// Name labels the source in results and logs.
 	Name string
-	// URL is the Torznab API base (e.g. http://localhost:9696/api/v1/indexers/all/results/torznab).
+	// URL is the resolved Torznab API endpoint (e.g.
+	// http://localhost:9696/api/v1/indexers/all/results/torznab).
 	URL string
+	// BaseURL is the Prowlarr root (kept for the admin surface / native
+	// API); empty when the operator supplied a full Torznab URL directly.
+	BaseURL string
 	// APIKey is appended as ?apikey=. Empty is allowed (some indexers
 	// embed the key in the URL path).
 	APIKey string
-	// Categories sent as cat= (default: 2000 for movies, 5000 for tv).
-	Categories []string
+	// MovieCategories / SeriesCategories are sent as cat= per search type
+	// (default: 2000 for movies, 5000 for tv).
+	MovieCategories  []string
+	SeriesCategories []string
 	// Trackers appended to magnets built from a bare infohash.
 	Trackers []string
+}
+
+// ProwlarrTorznabURL composes the standard Torznab results endpoint from a
+// Prowlarr root URL.
+func ProwlarrTorznabURL(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/api/v1/indexers/all/results/torznab"
 }
 
 // perIndexerTimeout bounds a single indexer round-trip so one hung/slow
@@ -193,11 +210,15 @@ func buildTorznabURL(idx TorznabIndexer, mt MediaType, imdbID, term string) (str
 	if term != "" {
 		q.Set("q", term)
 	}
-	cats := idx.Categories
-	if len(cats) == 0 {
-		if mt == MediaTypeSeries {
+	var cats []string
+	if mt == MediaTypeSeries {
+		cats = idx.SeriesCategories
+		if len(cats) == 0 {
 			cats = []string{"5000"}
-		} else {
+		}
+	} else {
+		cats = idx.MovieCategories
+		if len(cats) == 0 {
 			cats = []string{"2000"}
 		}
 	}

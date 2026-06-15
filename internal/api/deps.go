@@ -149,6 +149,9 @@ type IPTVDeps struct {
 type TorrentDeps struct {
 	Manager *torrentstream.Manager
 	Sources *torrentstream.SourceService
+	// Indexers expone los indexers Torznab configurados para la superficie
+	// admin (/admin/indexers). nil cuando no hay ninguno configurado.
+	Indexers *torrentstream.TorznabClient
 }
 
 // FederationDeps es el manager de peer-to-peer sharing. nil = todo el

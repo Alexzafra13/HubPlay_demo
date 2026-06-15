@@ -13,24 +13,24 @@ import (
 // app actually pulls in:
 //
 //   - img-src       TMDb posters / Fanart artwork (admin image picker
-//                   renders provider URLs directly), plus data: and blob:
-//                   for inline thumbnails and HLS subtitle conversions.
+//     renders provider URLs directly), plus data: and blob:
+//     for inline thumbnails and HLS subtitle conversions.
 //   - frame-src     YouTube nocookie + Vimeo for the hero trailer embed.
 //   - style-src     Google Fonts CSS (loaded from index.html), plus
-//                   'unsafe-inline' for React's `style={…}` prop and
-//                   Tailwind v4's runtime style injection.
+//     'unsafe-inline' for React's `style={…}` prop and
+//     Tailwind v4's runtime style injection.
 //   - font-src      Google Fonts woff2.
 //   - media-src     blob: for HLS MediaSource buffers; 'self' for direct
-//                   playback over the API.
+//     playback over the API.
 //   - connect-src   API + SSE on the same origin, plus the YouTube and
-//                   Vimeo oEmbed endpoints (www.youtube.com, vimeo.com).
-//                   HeroTrailer hits oEmbed *before* mounting the iframe
-//                   to detect "embedding disabled by uploader" responses
-//                   without flashing an empty player; without these
-//                   origins the fetch is blocked in prod and every
-//                   trailer silently fails-closed. The iframe itself
-//                   loads from youtube-nocookie.com / player.vimeo.com,
-//                   which are covered by frame-src.
+//     Vimeo oEmbed endpoints (www.youtube.com, vimeo.com).
+//     HeroTrailer hits oEmbed *before* mounting the iframe
+//     to detect "embedding disabled by uploader" responses
+//     without flashing an empty player; without these
+//     origins the fetch is blocked in prod and every
+//     trailer silently fails-closed. The iframe itself
+//     loads from youtube-nocookie.com / player.vimeo.com,
+//     which are covered by frame-src.
 //
 // Adding a new third-party host (a different image CDN, a new embed
 // platform) means adding it here; otherwise the browser will block it

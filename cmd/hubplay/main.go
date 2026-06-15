@@ -346,18 +346,30 @@ func run(configPath string) error {
 	// indexers, aunque el motor de streaming esté apagado (la reproducción
 	// sí necesita torrent.enabled). nil ⇒ /torrent/sources/* no se monta.
 	var sourceSvc *torrentstream.SourceService
+	var torznabClient *torrentstream.TorznabClient
 	if len(cfg.Torrent.Torznab.Indexers) > 0 {
 		indexers := make([]torrentstream.TorznabIndexer, 0, len(cfg.Torrent.Torznab.Indexers))
 		for _, ix := range cfg.Torrent.Torznab.Indexers {
-			if ix.URL == "" {
+			if !ix.Enabled {
+				continue // solo se consultan las instancias habilitadas
+			}
+			// URL completa (Jackett/custom) tiene prioridad; si no, se
+			// compone desde la raíz de Prowlarr (base_url).
+			resolved := ix.URL
+			if resolved == "" && ix.BaseURL != "" {
+				resolved = torrentstream.ProwlarrTorznabURL(ix.BaseURL)
+			}
+			if resolved == "" {
 				continue
 			}
 			indexers = append(indexers, torrentstream.TorznabIndexer{
-				Name:       ix.Name,
-				URL:        ix.URL,
-				APIKey:     ix.APIKey,
-				Categories: ix.Categories,
-				Trackers:   ix.Trackers,
+				Name:             ix.Name,
+				URL:              resolved,
+				BaseURL:          ix.BaseURL,
+				APIKey:           ix.APIKey,
+				MovieCategories:  ix.Categories.Movie,
+				SeriesCategories: ix.Categories.Series,
+				Trackers:         ix.Trackers,
 			})
 		}
 		if len(indexers) > 0 {
@@ -373,8 +385,8 @@ func run(configPath string) error {
 				MaxPerResolution:   maxPerRes,
 				ExcludeCam:         !cur.AllowCam,
 			}
-			client := torrentstream.NewTorznabClient(indexers, logger)
-			sourceSvc = torrentstream.NewSourceService(client, cfg.Torrent.Torznab.CacheTTL, opts, logger)
+			torznabClient = torrentstream.NewTorznabClient(indexers, logger)
+			sourceSvc = torrentstream.NewSourceService(torznabClient, cfg.Torrent.Torznab.CacheTTL, opts, logger)
 		}
 	}
 
@@ -559,8 +571,9 @@ func run(configPath string) error {
 			Schedules: repos.IPTVSchedules,
 		},
 		Torrent: api.TorrentDeps{
-			Manager: torrentMgr,
-			Sources: sourceSvc,
+			Manager:  torrentMgr,
+			Sources:  sourceSvc,
+			Indexers: torznabClient,
 		},
 		Federation: api.FederationDeps{
 			Manager: federationManager,

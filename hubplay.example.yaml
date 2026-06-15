@@ -123,18 +123,31 @@ torrent:
   # Agregación de fuentes Torznab/Newznab (búsqueda por IMDb id). Es
   # INDEPENDIENTE de enabled: la búsqueda funciona aunque el streaming esté
   # apagado, pero la reproducción de un resultado SÍ requiere enabled:true.
-  # Sin indexers, las rutas /torrent/sources/* no se montan.
+  # Sin indexers habilitados, las rutas /torrent/sources/* no se montan.
+  #
+  # Prowlarr actúa como AGREGADOR CENTRAL de indexers: configuras tus
+  # trackers en Prowlarr y HubPlay solo consume su API Torznab estándar.
+  # Para Prowlarr basta con `base_url` (la raíz); HubPlay compone la ruta.
+  # Para Jackett u otros, usa `url` con el endpoint Torznab completo.
+  #
   # Alternativa por env (caso docker, un único indexer):
   #   HUBPLAY_TORZNAB_URL=... HUBPLAY_TORZNAB_API_KEY=...
   torznab:
     cache_ttl: "20m"         # TTL de resultados cacheados por (tipo, imdbid).
     indexers: []
-    #  - name: "prowlarr"
-    #    url: "http://localhost:9696/api/v1/indexers/all/results/torznab"
+    #  - name: "prowlarr-local"
+    #    enabled: true                   # solo se consultan las instancias enabled.
+    #    base_url: "http://localhost:9696"
     #    api_key: "TU_API_KEY"
-    #    categories: ["2000", "5000"]   # opcional; default 2000 (peli) / 5000 (serie).
+    #    categories:                     # opcional; default 2000 (peli) / 5000 (serie).
+    #      movie: ["2000"]
+    #      series: ["5000"]
     #    trackers:                       # opcional; añadidos a magnets de infohash suelto.
     #      - "udp://tracker.opentrackr.org:1337/announce"
+    #  - name: "jackett"
+    #    enabled: false
+    #    url: "http://localhost:9117/api/v2.0/indexers/all/results/torznab"
+    #    api_key: "TU_API_KEY_JACKETT"
     # Curación: filtra y prioriza los resultados antes de la UI.
     curation:
       exclude_resolutions: []     # p.ej. ["2160p"] para ocultar 4K.

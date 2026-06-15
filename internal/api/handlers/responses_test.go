@@ -216,7 +216,7 @@ func TestSetErrorRecorder_InvokedOnEveryAppError(t *testing.T) {
 	r := newRequestWithID("req-metric")
 
 	HandleServiceError(rr, r, domain.NewTranscodeBusy(1, 1))
-	HandleServiceError(rr, r, domain.ErrNotFound)        // via sentinel fallback
+	HandleServiceError(rr, r, domain.ErrNotFound)       // via sentinel fallback
 	HandleServiceError(rr, r, errors.New("unexpected")) // 500 → INTERNAL_ERROR
 
 	want := []string{"STREAM_TRANSCODE_BUSY", "NOT_FOUND", "INTERNAL_ERROR"}

@@ -118,6 +118,7 @@ func normalizeItem(it torznabItem, idx TorznabIndexer) (SearchResult, bool) {
 		Quality:      meta.qualityBucket(),
 		InfoHash:     infoHash,
 		MagnetURI:    magnet,
+		IMDbID:       normalizeIMDbAttr(it.attr("imdbid"), it.attr("imdb")),
 		Resolution:   meta.Resolution,
 		Codec:        meta.Codec,
 		Languages:    meta.Languages,
@@ -199,6 +200,24 @@ func qualityRank(q string) int {
 	default:
 		return 0
 	}
+}
+
+// normalizeIMDbAttr canonicalises an indexer-reported IMDb id to "ttNNN…".
+// Torznab reports it under the "imdbid" attr (bare digits or with the tt
+// prefix); some feeds use "imdb". Returns "" when absent/invalid.
+func normalizeIMDbAttr(candidates ...string) string {
+	for _, c := range candidates {
+		s := strings.TrimSpace(c)
+		if s == "" {
+			continue
+		}
+		s = strings.TrimPrefix(strings.ToLower(s), "tt")
+		if s == "" || strings.Trim(s, "0123456789") != "" {
+			continue // not all digits
+		}
+		return "tt" + s
+	}
+	return ""
 }
 
 func parseInt(s string) int {

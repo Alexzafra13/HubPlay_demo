@@ -23,18 +23,18 @@ package handlers
 //     blob viejo durante una semana mientras background refresh —
 //     baja el latency P99 de servir thumbnails que están en re-fetch.
 const (
-	CacheControlNoCache       = "no-cache"
-	CacheControlNoStore       = "no-store"
-	CacheControlNoStoreFull   = "no-cache, no-store, must-revalidate"
-	CacheControlShortLived    = "public, max-age=10"
-	CacheControlListingShort  = "private, max-age=15"
-	CacheControlListing       = "private, max-age=30"
-	CacheControlMediumPublic  = "public, max-age=300"
-	CacheControlHourly        = "max-age=3600"
-	CacheControlHourlyPublic  = "public, max-age=3600"
-	CacheControlDailyPublic   = "public, max-age=86400"
-	CacheControlDailyOpaque   = "max-age=86400"
-	CacheControlImage         = "public, max-age=86400, stale-while-revalidate=604800"
+	CacheControlNoCache      = "no-cache"
+	CacheControlNoStore      = "no-store"
+	CacheControlNoStoreFull  = "no-cache, no-store, must-revalidate"
+	CacheControlShortLived   = "public, max-age=10"
+	CacheControlListingShort = "private, max-age=15"
+	CacheControlListing      = "private, max-age=30"
+	CacheControlMediumPublic = "public, max-age=300"
+	CacheControlHourly       = "max-age=3600"
+	CacheControlHourlyPublic = "public, max-age=3600"
+	CacheControlDailyPublic  = "public, max-age=86400"
+	CacheControlDailyOpaque  = "max-age=86400"
+	CacheControlImage        = "public, max-age=86400, stale-while-revalidate=604800"
 	// CacheControlNegative permite cachear una respuesta de "no hay nada
 	// que servir" (típicamente un 404) durante una hora. Pensado para el
 	// proxy de logos de canal: muchos `tvg-logo` del M3U apuntan a hosts

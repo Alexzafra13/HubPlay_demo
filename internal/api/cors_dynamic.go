@@ -189,5 +189,5 @@ var (
 // que el handler lo devuelva tal cual sin perder localización futura.
 type corsErr struct{ msg string }
 
-func newCorsErr(s string) error      { return &corsErr{msg: s} }
-func (e *corsErr) Error() string     { return e.msg }
+func newCorsErr(s string) error  { return &corsErr{msg: s} }
+func (e *corsErr) Error() string { return e.msg }

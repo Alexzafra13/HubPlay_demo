@@ -23,11 +23,15 @@ func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, ids []string) (map[str
 	}
 	return out, nil
 }
-func (r *fakeImageRepo) ListByItem(context.Context, string) ([]*librarymodel.Image, error) { return nil, nil }
-func (r *fakeImageRepo) Create(context.Context, *librarymodel.Image) error { return nil }
+func (r *fakeImageRepo) ListByItem(context.Context, string) ([]*librarymodel.Image, error) {
+	return nil, nil
+}
+func (r *fakeImageRepo) Create(context.Context, *librarymodel.Image) error        { return nil }
 func (r *fakeImageRepo) SetPrimary(context.Context, string, string, string) error { return nil }
-func (r *fakeImageRepo) SetLocked(context.Context, string, bool) error { return nil }
-func (r *fakeImageRepo) GetByID(context.Context, string) (*librarymodel.Image, error) { return nil, nil }
+func (r *fakeImageRepo) SetLocked(context.Context, string, bool) error            { return nil }
+func (r *fakeImageRepo) GetByID(context.Context, string) (*librarymodel.Image, error) {
+	return nil, nil
+}
 func (r *fakeImageRepo) DeleteByID(context.Context, string) error { return nil }
 
 type progressFakeUserData struct {
@@ -55,12 +59,22 @@ func (f *progressFakeUserData) GetBatch(_ context.Context, userID string, itemID
 	}
 	return out, nil
 }
-func (f *progressFakeUserData) UpdateProgress(context.Context, string, string, int64, bool) error { return nil }
-func (f *progressFakeUserData) MarkPlayed(context.Context, string, string) error { return nil }
+func (f *progressFakeUserData) UpdateProgress(context.Context, string, string, int64, bool) error {
+	return nil
+}
+func (f *progressFakeUserData) MarkPlayed(context.Context, string, string) error        { return nil }
 func (f *progressFakeUserData) SetFavorite(context.Context, string, string, bool) error { return nil }
-func (f *progressFakeUserData) ContinueWatching(context.Context, string, int) ([]*librarymodel.ContinueWatchingItem, error) { return nil, nil }
-func (f *progressFakeUserData) Favorites(context.Context, string, int, int) ([]*librarymodel.FavoriteItem, error) { return nil, nil }
-func (f *progressFakeUserData) NextUp(context.Context, string, int) ([]*librarymodel.NextUpItem, error) { return nil, nil }
-func (f *progressFakeUserData) SeriesEpisodeProgress(context.Context, string, string) (int, int, error) { return 0, 0, nil }
-func (f *progressFakeUserData) Delete(context.Context, string, string) error { return nil }
+func (f *progressFakeUserData) ContinueWatching(context.Context, string, int) ([]*librarymodel.ContinueWatchingItem, error) {
+	return nil, nil
+}
+func (f *progressFakeUserData) Favorites(context.Context, string, int, int) ([]*librarymodel.FavoriteItem, error) {
+	return nil, nil
+}
+func (f *progressFakeUserData) NextUp(context.Context, string, int) ([]*librarymodel.NextUpItem, error) {
+	return nil, nil
+}
+func (f *progressFakeUserData) SeriesEpisodeProgress(context.Context, string, string) (int, int, error) {
+	return 0, 0, nil
+}
+func (f *progressFakeUserData) Delete(context.Context, string, string) error        { return nil }
 func (f *progressFakeUserData) ClearProgress(context.Context, string, string) error { return nil }

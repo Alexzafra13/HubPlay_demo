@@ -8,19 +8,19 @@ import (
 
 func TestIsPrivateOrLoopback(t *testing.T) {
 	cases := map[string]bool{
-		"127.0.0.1":        true,
-		"127.0.0.1:5555":   true,
-		"10.0.0.5":         true,
-		"192.168.1.20":     true,
-		"172.16.5.5":       true,
-		"169.254.1.1":      true, // link-local
-		"::1":              true,
-		"[::1]:8096":       true,
-		"fd00::1":          true, // ULA
-		"203.0.113.9":      false,
-		"8.8.8.8":          false,
-		"1.1.1.1:443":      false,
-		"no-es-una-ip":     false,
+		"127.0.0.1":      true,
+		"127.0.0.1:5555": true,
+		"10.0.0.5":       true,
+		"192.168.1.20":   true,
+		"172.16.5.5":     true,
+		"169.254.1.1":    true, // link-local
+		"::1":            true,
+		"[::1]:8096":     true,
+		"fd00::1":        true, // ULA
+		"203.0.113.9":    false,
+		"8.8.8.8":        false,
+		"1.1.1.1:443":    false,
+		"no-es-una-ip":   false,
 	}
 	for in, want := range cases {
 		if got := isPrivateOrLoopback(in); got != want {

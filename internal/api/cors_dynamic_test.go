@@ -39,17 +39,17 @@ func TestValidateCorsOrigin_RejectsObvious(t *testing.T) {
 		"",
 		"   ",
 		"*",
-		"https://*.example.com",      // wildcard en subdomain
+		"https://*.example.com", // wildcard en subdomain
 		"null",
 		"file:///etc/passwd",
 		"javascript:alert(1)",
 		"data:text/html,<script>",
 		"ftp://example.com",
-		"https://",                    // sin host
-		"https://example.com/path",    // con path
-		"https://example.com?q=1",     // con query
-		"https://example.com#frag",    // con fragment
-		"://example.com",              // sin scheme
+		"https://",                 // sin host
+		"https://example.com/path", // con path
+		"https://example.com?q=1",  // con query
+		"https://example.com#frag", // con fragment
+		"://example.com",           // sin scheme
 		"not a url at all",
 	}
 	for _, in := range cases {

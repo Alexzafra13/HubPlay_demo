@@ -494,4 +494,15 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 			r.Get("/sources/series/{imdbId}", h.SourcesSeries)
 		}
 	})
+
+	// Admin indexer management (Prowlarr/Torznab): list configured
+	// instances with live status + a connection tester. Admin-only.
+	if deps.Torrent.Indexers != nil {
+		ah := torrenthandler.NewIndexerAdminHandler(deps.Torrent.Indexers, deps.Infra.Logger)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAdmin)
+			r.Get("/admin/indexers", ah.List)
+			r.Post("/admin/indexers/test", ah.Test)
+		})
+	}
 }

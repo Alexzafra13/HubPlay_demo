@@ -214,18 +214,37 @@ type CurationConfig struct {
 	AllowCam bool `yaml:"allow_cam"`
 }
 
-// TorznabIndexerConfig describe un endpoint Torznab/Newznab.
+// TorznabIndexerConfig describe un endpoint Torznab/Newznab. Prowlarr es
+// el caso típico: actúa como agregador central de indexers y expone una
+// API Torznab estándar; HubPlay solo consume esa API. Para Prowlarr basta
+// con `base_url` (la raíz, p.ej. http://localhost:9696) y HubPlay compone
+// la ruta Torznab; para Jackett u otros, fija `url` con el endpoint
+// completo.
 type TorznabIndexerConfig struct {
 	// Name etiqueta la fuente en resultados y logs.
 	Name string `yaml:"name"`
-	// URL base de la API Torznab del indexer.
+	// BaseURL es la raíz de la instancia Prowlarr (sin la ruta Torznab).
+	// Si está, HubPlay compone /api/v1/indexers/all/results/torznab.
+	BaseURL string `yaml:"base_url"`
+	// URL: endpoint Torznab completo (alternativa a base_url, p.ej.
+	// Jackett). Tiene prioridad sobre base_url si ambos están.
 	URL string `yaml:"url"`
 	// APIKey se añade como ?apikey=.
 	APIKey string `yaml:"api_key"`
-	// Categories enviadas como cat= (default 2000 películas / 5000 series).
-	Categories []string `yaml:"categories"`
+	// Enabled: solo se consultan las instancias con enabled:true.
+	Enabled bool `yaml:"enabled"`
+	// Categories: IDs Torznab por tipo (default 2000 películas / 5000
+	// series si se omite).
+	Categories TorznabCategoriesConfig `yaml:"categories"`
 	// Trackers añadidos a los magnets construidos desde un infohash suelto.
 	Trackers []string `yaml:"trackers"`
+}
+
+// TorznabCategoriesConfig mapea los IDs de categoría Torznab por tipo de
+// contenido.
+type TorznabCategoriesConfig struct {
+	Movie  []string `yaml:"movie"`
+	Series []string `yaml:"series"`
 }
 
 // ObservabilityConfig: endpoint Prometheus /metrics. Default activado en
@@ -560,10 +579,11 @@ func applyEnvOverrides(cfg *Config) {
 		key := os.Getenv("HUBPLAY_TORZNAB_API_KEY")
 		if len(cfg.Torrent.Torznab.Indexers) == 0 {
 			cfg.Torrent.Torznab.Indexers = []TorznabIndexerConfig{
-				{Name: "default", URL: v, APIKey: key},
+				{Name: "default", URL: v, APIKey: key, Enabled: true},
 			}
 		} else {
 			cfg.Torrent.Torznab.Indexers[0].URL = v
+			cfg.Torrent.Torznab.Indexers[0].Enabled = true
 			if key != "" {
 				cfg.Torrent.Torznab.Indexers[0].APIKey = key
 			}

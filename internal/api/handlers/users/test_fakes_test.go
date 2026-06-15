@@ -8,13 +8,19 @@ import (
 )
 
 type libFakeService struct {
-	getByIDFn              func(ctx context.Context, id string) (*librarymodel.Library, error)
-	createIPTVFn           func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
-	createPersonalIPTVFn   func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
-	listAccessFn           func(ctx context.Context, userID string) ([]string, error)
-	replaceAccessFn        func(ctx context.Context, userID string, libraryIDs []string) error
-	replaceAccessCalls     []struct{ UserID string; LibraryIDs []string }
-	createPersonalIPTVCalls []struct{ OwnerUserID string; Req library.CreateRequest }
+	getByIDFn            func(ctx context.Context, id string) (*librarymodel.Library, error)
+	createIPTVFn         func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
+	createPersonalIPTVFn func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
+	listAccessFn         func(ctx context.Context, userID string) ([]string, error)
+	replaceAccessFn      func(ctx context.Context, userID string, libraryIDs []string) error
+	replaceAccessCalls   []struct {
+		UserID     string
+		LibraryIDs []string
+	}
+	createPersonalIPTVCalls []struct {
+		OwnerUserID string
+		Req         library.CreateRequest
+	}
 }
 
 func (f *libFakeService) GetByID(ctx context.Context, id string) (*librarymodel.Library, error) {
@@ -25,7 +31,10 @@ func (f *libFakeService) GetByID(ctx context.Context, id string) (*librarymodel.
 }
 
 func (f *libFakeService) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error) {
-	f.createPersonalIPTVCalls = append(f.createPersonalIPTVCalls, struct{ OwnerUserID string; Req library.CreateRequest }{ownerUserID, req})
+	f.createPersonalIPTVCalls = append(f.createPersonalIPTVCalls, struct {
+		OwnerUserID string
+		Req         library.CreateRequest
+	}{ownerUserID, req})
 	if f.createPersonalIPTVFn != nil {
 		return f.createPersonalIPTVFn(ctx, ownerUserID, req)
 	}
@@ -43,7 +52,10 @@ func (f *libFakeService) ListAccessByUser(ctx context.Context, userID string) ([
 }
 
 func (f *libFakeService) ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error {
-	f.replaceAccessCalls = append(f.replaceAccessCalls, struct{ UserID string; LibraryIDs []string }{userID, libraryIDs})
+	f.replaceAccessCalls = append(f.replaceAccessCalls, struct {
+		UserID     string
+		LibraryIDs []string
+	}{userID, libraryIDs})
 	if f.replaceAccessFn != nil {
 		return f.replaceAccessFn(ctx, userID, libraryIDs)
 	}
