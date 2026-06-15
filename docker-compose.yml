@@ -28,6 +28,9 @@ services:
       # elegir qué trackers activar (ver nginx en deploy/nginx/).
       - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696/prowlarr}
       - HUBPLAY_TORZNAB_API_KEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
+      # Activa el motor de streaming para poder REPRODUCIR las fuentes vía
+      # HubPlay (la búsqueda funciona sin esto; la reproducción no).
+      - HUBPLAY_TORRENT_ENABLED=${HUBPLAY_TORRENT_ENABLED:-true}
     # The hubplay process never crashes on a missing/unreachable
     # `db` — SQLite is the default, the bundled DSN is just an
     # *offer*. `depends_on` with `service_healthy` keeps the boot

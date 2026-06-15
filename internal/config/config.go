@@ -572,6 +572,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("HUBPLAY_STREAMING_CACHE_DIR"); v != "" {
 		cfg.Streaming.CacheDir = v
 	}
+	// Motor de streaming torrent on/off por env (turnkey docker): permite
+	// activar la reproducción de fuentes sin editar el YAML.
+	if v := os.Getenv("HUBPLAY_TORRENT_ENABLED"); v != "" {
+		cfg.Torrent.Enabled = strings.EqualFold(v, "true")
+	}
 	// Torznab indexer via env (el caso docker-compose de un único Prowlarr/
 	// Jackett). Si ya hay indexers en el YAML, override el primero; si no,
 	// crea uno. La API key es opcional (algunos indexers la llevan en la URL).
