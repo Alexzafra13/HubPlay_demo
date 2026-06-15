@@ -28,6 +28,7 @@ const CollectionDetail = lazyWithRetry(() => import("@/pages/CollectionDetail"))
 const Collections = lazyWithRetry(() => import("@/pages/Collections"));
 const Search = lazyWithRetry(() => import("@/pages/Search"));
 const LiveTV = lazyWithRetry(() => import("@/pages/LiveTV"));
+const Archive = lazyWithRetry(() => import("@/pages/Archive"));
 const LiveTvCustomize = lazyWithRetry(() => import("@/pages/LiveTvCustomize"));
 const Settings = lazyWithRetry(() => import("@/pages/Settings"));
 const NotFound = lazyWithRetry(() => import("@/pages/NotFound"));
@@ -181,6 +182,7 @@ export function App() {
             <Route path="search" element={<Search />} />
             <Route path="live-tv" element={<LiveTV />} />
             <Route path="live-tv/customize" element={<LiveTvCustomize />} />
+            <Route path="archive" element={<Archive />} />
             <Route path="peers" element={<PeersPage />} />
             <Route path="uploads" element={<Uploads />} />
             <Route path="peers/:peerId" element={<PeerLibrariesPage />} />

@@ -55,9 +55,15 @@ async function submitLogin(username = "alice", password = "hunter22") {
   fireEvent.change(screen.getByLabelText(/usuario|username/i), {
     target: { value: username },
   });
-  fireEvent.change(screen.getByLabelText(/contraseña|password/i), {
-    target: { value: password },
-  });
+  // Scope to the <input>: the show/hide-password toggle carries an
+  // aria-label that also matches /contraseña|password/, so an unscoped
+  // getByLabelText would resolve ambiguously.
+  fireEvent.change(
+    screen.getByLabelText(/contraseña|password/i, { selector: "input" }),
+    {
+      target: { value: password },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: /iniciar|sign in/i }));
 }
 

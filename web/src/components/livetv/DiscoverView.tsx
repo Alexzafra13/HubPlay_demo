@@ -39,6 +39,9 @@ interface DiscoverViewProps {
    * would have been so the user is never confused about its absence. */
   heroMode?: HeroMode;
   onHeroModeChange?: (mode: HeroMode) => void;
+  /** Forwarded to HeroSpotlight: false when the hero's channel is already
+   * streaming in the mini-player/overlay, to avoid a double decode. */
+  heroLivePreview?: boolean;
 }
 
 /**
@@ -69,6 +72,7 @@ export function DiscoverView({
   heroHeaderOverlay,
   heroMode,
   onHeroModeChange,
+  heroLivePreview,
 }: DiscoverViewProps) {
   const { t } = useTranslation();
 
@@ -173,6 +177,7 @@ export function DiscoverView({
           label={heroLabel}
           onOpen={onOpen}
           headerOverlay={heroHeaderOverlay}
+          livePreview={heroLivePreview}
         />
       )}
 

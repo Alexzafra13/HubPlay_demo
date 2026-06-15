@@ -26,6 +26,7 @@ type Config struct {
 	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
 	Streaming      StreamingConfig     `yaml:"streaming"`
 	IPTV           IPTVConfig          `yaml:"iptv"`
+	Torrent        TorrentConfig       `yaml:"torrent"`
 	Observability  ObservabilityConfig `yaml:"observability"`
 	Retention      RetentionConfig     `yaml:"retention"`
 	Upload         UploadConfig        `yaml:"upload"`
@@ -131,6 +132,40 @@ type IPTVTransmuxConfig struct {
 	// típica (3-5s) en upstreams sanos; acotado para que providers muertos
 	// no cuelguen el player UI.
 	ReadyTimeout time.Duration `yaml:"ready_timeout"`
+}
+
+// TorrentConfig: motor de streaming BitTorrent para fuentes LEGALES
+// (Internet Archive, dominio público, Creative Commons, o magnets que el
+// operador añade y tiene derecho a usar). El feature está OFF por defecto:
+// el binario no arranca el cliente torrent ni monta los handlers salvo
+// que `enabled: true`. No incluye —por diseño— ningún scraper de indexers
+// de terceros; el buscador integrado consulta catálogos legales (ver
+// internal/torrentstream).
+type TorrentConfig struct {
+	// Enabled: false → el módulo torrent no se cablea (sin cliente, sin
+	// rutas HTTP). Default false.
+	Enabled bool `yaml:"enabled"`
+
+	// DataDir: scratch donde el cliente escribe las piezas mientras se
+	// reproduce. Vacío ⇒ <streaming cache>/torrent. Efímero por sesión.
+	DataDir string `yaml:"data_dir"`
+
+	// MaxSessions: torrents activos simultáneos. Cada sesión la comparten
+	// los viewers del mismo contenido. Default 4.
+	MaxSessions int `yaml:"max_sessions"`
+
+	// IdleTimeout: vida de una sesión sin lecturas antes de que el reaper
+	// la cierre y borre su scratch. Default 5m.
+	IdleTimeout time.Duration `yaml:"idle_timeout"`
+
+	// ReadaheadBytes: ventana de lectura secuencial por delante del cursor
+	// de reproducción (lo que convierte "descargar y ver" en "ver mientras
+	// descarga"). Default 16 MiB.
+	ReadaheadBytes int64 `yaml:"readahead_bytes"`
+
+	// MetadataTimeout: espera máxima a resolver los metadatos del torrent
+	// (magnet → info) antes de fallar. Default 60s.
+	MetadataTimeout time.Duration `yaml:"metadata_timeout"`
 }
 
 // ObservabilityConfig: endpoint Prometheus /metrics. Default activado en
@@ -362,6 +397,13 @@ func defaults() *Config {
 				IdleTimeout:         30 * time.Second,
 				ReadyTimeout:        15 * time.Second,
 			},
+		},
+		Torrent: TorrentConfig{
+			Enabled:         false, // opt-in: trae cliente torrent + rutas
+			MaxSessions:     4,
+			IdleTimeout:     5 * time.Minute,
+			ReadaheadBytes:  16 << 20,
+			MetadataTimeout: 60 * time.Second,
 		},
 		Observability: ObservabilityConfig{
 			MetricsEnabled: true,

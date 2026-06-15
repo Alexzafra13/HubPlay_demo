@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { hasLogoFailed, markLogoFailed } from "./logoFailureCache";
 
 /**
  * ChannelLogo renders a channel's upstream logo with a deterministic
@@ -32,7 +33,10 @@ export function ChannelLogo({
   className = "size-10 rounded-lg",
   textClassName = "text-xs font-bold",
 }: ChannelLogoProps) {
-  const [failed, setFailed] = useState(false);
+  // Seed from the shared failure cache so a logo that already 404'd in
+  // another instance never re-mounts an <img> here — straight to the
+  // initials fallback, no speculative request.
+  const [failed, setFailed] = useState(() => hasLogoFailed(logoUrl));
   const showImage = !!logoUrl && !failed;
 
   // The background + initials always render — the <img> layers on top when
@@ -53,7 +57,10 @@ export function ChannelLogo({
           alt=""
           className="absolute inset-0 size-full object-contain p-1"
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => {
+            markLogoFailed(logoUrl);
+            setFailed(true);
+          }}
         />
       )}
     </div>

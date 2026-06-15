@@ -32,6 +32,7 @@
     "movies": "Movies",
     "series": "Series",
     "liveTV": "Live TV",
+    "archive": "Archive",
     "search": "Search",
     "account": "Account",
     "settings": "Settings",
@@ -324,7 +325,11 @@
     "errorInvalidCredentials": "Usuario o contraseña incorrectos.",
     "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
     "pairPrompt": "On a TV or console? ",
-    "pairCta": "Link this device"
+    "pairCta": "Link this device",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "capsLockOn": "Caps Lock is on",
+    "language": "Language"
   },
   "movies": {
     "title": "Movies",

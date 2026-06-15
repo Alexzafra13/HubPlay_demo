@@ -1,8 +1,8 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { m } from "framer-motion";
+import { m, useReducedMotion } from "framer-motion";
 import { useLogin } from "@/api/hooks";
 import { ApiError } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
@@ -66,14 +66,25 @@ function loginErrorMessage(
 //     room and the redundant inline logo dropped (the big one
 //     above is the brand mark now).
 export default function Login() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const login = useLogin();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const reduceMotion = useReducedMotion();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [capsLockOn, setCapsLockOn] = useState(false);
+
+  // Caps Lock is the classic silent login failure on a "log in to my
+  // house" screen. We read the modifier state off any key event in the
+  // password field — getModifierState reflects the *current* lock state
+  // regardless of which key fired, so a stray Shift or letter both work.
+  function trackCapsLock(e: KeyboardEvent<HTMLInputElement>) {
+    setCapsLockOn(e.getModifierState("CapsLock"));
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -122,7 +133,7 @@ export default function Login() {
           session. Keep them outside the card by virtue of fixed
           positioning + low z, and at small max-w on narrow viewports
           so they don't crowd the form. */}
-      <GhostPosters />
+      <GhostPosters reduceMotion={!!reduceMotion} />
 
       {/* Layer 3 — vignette so the card edges read against the
           glow. */}
@@ -137,7 +148,7 @@ export default function Login() {
           alone carries the page identity, and the GhostPosters
           drifting behind do the cinematic lifting. */}
       <m.div
-        initial={{ opacity: 0, y: 8 }}
+        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{
           duration: 0.5,
@@ -157,18 +168,44 @@ export default function Login() {
             onChange={(e) => setUsername(e.target.value)}
             placeholder={t("login.usernamePlaceholder")}
             autoComplete="username"
+            autoFocus
             required
           />
 
-          <Input
-            label={t("login.password")}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={t("login.passwordPlaceholder")}
-            autoComplete="current-password"
-            required
-          />
+          <div>
+            <Input
+              label={t("login.password")}
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={trackCapsLock}
+              onKeyUp={trackCapsLock}
+              placeholder={t("login.passwordPlaceholder")}
+              autoComplete="current-password"
+              required
+              trailing={
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-pressed={showPassword}
+                  aria-label={
+                    showPassword
+                      ? t("login.hidePassword", { defaultValue: "Hide password" })
+                      : t("login.showPassword", { defaultValue: "Show password" })
+                  }
+                  className="flex size-7 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                  tabIndex={-1}
+                >
+                  <EyeIcon open={showPassword} />
+                </button>
+              }
+            />
+            {capsLockOn && (
+              <p className="mt-1.5 text-xs text-amber-400" role="status">
+                {t("login.capsLockOn", { defaultValue: "Caps Lock is on" })}
+              </p>
+            )}
+          </div>
 
           {error && (
             <p
@@ -204,8 +241,69 @@ export default function Login() {
             {t("login.pairCta", { defaultValue: "Vincula este dispositivo" })}
           </a>
         </p>
+
+        {/* Language switcher. Surfaced pre-auth because the detected
+            locale isn't always right (shared device, kiosk, a guest
+            whose browser is in another language) and there's no other
+            place to change it before logging in. Writes through to the
+            same localStorage key i18next reads on next load. */}
+        <div className="mt-4 flex items-center justify-center gap-1 text-xs">
+          <span className="sr-only">
+            {t("login.language", { defaultValue: "Language" })}
+          </span>
+          {(["es", "en"] as const).map((lng) => {
+            const active = i18n.resolvedLanguage === lng;
+            return (
+              <button
+                key={lng}
+                type="button"
+                onClick={() => void i18n.changeLanguage(lng)}
+                aria-pressed={active}
+                className={[
+                  "rounded-md px-2 py-1 font-medium uppercase tracking-wider transition-colors",
+                  active
+                    ? "bg-accent/15 text-accent"
+                    : "text-text-muted hover:text-text-primary",
+                ].join(" ")}
+              >
+                {lng}
+              </button>
+            );
+          })}
+        </div>
       </m.div>
     </div>
+  );
+}
+
+// EyeIcon — open/closed eye for the password reveal toggle. Inline so
+// the login page carries no icon-library dependency.
+function EyeIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {open ? (
+        <>
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      ) : (
+        <>
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+          <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+          <line x1="2" y1="2" x2="22" y2="22" />
+        </>
+      )}
+    </svg>
   );
 }
 
@@ -222,7 +320,7 @@ export default function Login() {
 // a few far, one offset) rather than evenly spaced. Colour comes
 // from a subset of the avatar palette so the same chromatic
 // vocabulary covers every authenticated surface too.
-function GhostPosters() {
+function GhostPosters({ reduceMotion }: { reduceMotion: boolean }) {
   // Hand-picked frames. Position is in % of viewport so it
   // scales; size is in fractional viewport units so it adapts
   // without overwhelming on small screens. Each entry's `delay`
@@ -259,16 +357,27 @@ function GhostPosters() {
             opacity: 0.18,
             transform: `rotate(${g.rotate}deg)`,
           }}
-          animate={{
-            y: [0, -12, 0],
-            opacity: [0.14, 0.22, 0.14],
-          }}
-          transition={{
-            duration: 8 + i,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: g.delay,
-          }}
+          // Respect prefers-reduced-motion: hold the posters still
+          // (vestibular safety) but keep them on-screen as static
+          // scaffolding so the composition doesn't change.
+          animate={
+            reduceMotion
+              ? { opacity: 0.18 }
+              : {
+                  y: [0, -12, 0],
+                  opacity: [0.14, 0.22, 0.14],
+                }
+          }
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : {
+                  duration: 8 + i,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: g.delay,
+                }
+          }
         />
       ))}
       {/* Soft inner-glow overlay so the ghosts blend into the

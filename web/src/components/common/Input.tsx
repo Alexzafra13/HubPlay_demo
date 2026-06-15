@@ -5,6 +5,10 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   hint?: string;
   icon?: ReactNode;
+  // Optional interactive adornment pinned to the right of the field
+  // (e.g. a show/hide-password toggle). Unlike `icon` it stays clickable,
+  // so the input reserves right padding to keep text clear of it.
+  trailing?: ReactNode;
   // React 19: `ref` viaja como prop normal. Declarado explícito para
   // los call sites que necesitan acceder al input (focus programático,
   // selección de texto al editar).
@@ -16,6 +20,7 @@ function Input({
   error,
   hint,
   icon,
+  trailing,
   className = "",
   id,
   ref,
@@ -54,12 +59,19 @@ function Input({
               ? "border-error focus:border-error focus:ring-error/30"
               : "border-border",
             icon ? "pl-10" : "",
+            trailing ? "pr-10" : "",
             className,
           ]
             .filter(Boolean)
             .join(" ")}
           {...props}
         />
+
+        {trailing && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+            {trailing}
+          </span>
+        )}
       </div>
 
       {error && <p className="text-xs text-error">{error}</p>}

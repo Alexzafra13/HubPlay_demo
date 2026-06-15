@@ -465,6 +465,11 @@ export default function LiveTV() {
               }
               onToggleFavorite={toggleFavorite}
               headerOverlay={heroHeaderOverlay}
+              // When a channel is selected it's already streaming in the
+              // corner mini-player; don't also decode it as a muted hero
+              // preview. Auto-curated mode (no active channel) keeps the
+              // live preview.
+              livePreview={!playingChannel}
             />
           ) : null}
           <div className="flex items-center justify-between gap-3">
@@ -518,6 +523,9 @@ export default function LiveTV() {
           heroHeaderOverlay={favoritesOnly ? undefined : heroHeaderOverlay}
           heroMode={favoritesOnly ? "off" : heroMode}
           onHeroModeChange={setHeroMode}
+          // Same double-decode guard as Inicio: suppress the hero's muted
+          // preview when the channel is already live in the mini-player.
+          heroLivePreview={!playingChannel}
         />
       )}
 

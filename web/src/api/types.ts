@@ -1933,3 +1933,25 @@ export class ApiError extends Error {
     this.details = body.error.details;
   }
 }
+
+// TorrentSearchResult is one item from the legal catalogue search
+// (/torrent/search). `torrent_url` (or magnet) is passed to /torrent/stream
+// to play it; `provider` labels the source.
+export interface TorrentSearchResult {
+  identifier: string;
+  title: string;
+  mediatype: string;
+  year?: string;
+  torrent_url: string;
+  provider?: string;
+}
+
+// TorrentDiscoverResult is a TMDb-enriched browse candidate (/torrent/discover).
+// Picking one resolves playable sources via /torrent/search by title+year.
+export interface TorrentDiscoverResult {
+  tmdb_id: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_url?: string;
+}

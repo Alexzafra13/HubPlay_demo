@@ -34,6 +34,7 @@ import (
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
+	"hubplay/internal/torrentstream"
 	"hubplay/internal/updates"
 	"hubplay/internal/user"
 )
@@ -312,6 +313,34 @@ func run(configPath string) error {
 	}
 	iptvMod.RegisterWith(lc)
 
+	// ═══ Phase 4d: Torrent streaming (legal sources, opt-in) ═══
+	//
+	// Motor de streaming BitTorrent para fuentes legales (Internet
+	// Archive, dominio público/CC, magnets que el operador añade). OFF
+	// por defecto; sólo se cablea con `torrent.enabled: true`. nil ⇒ el
+	// surface /torrent/* no se monta.
+	var torrentMgr *torrentstream.Manager
+	if cfg.Torrent.Enabled {
+		dataDir := cfg.Torrent.DataDir
+		if dataDir == "" {
+			dataDir = filepath.Join(cfg.Streaming.EffectiveCacheDir(), "torrent")
+		}
+		torrentMgr, err = torrentstream.New(torrentstream.Options{
+			Enabled:         true,
+			DataDir:         dataDir,
+			MaxSessions:     cfg.Torrent.MaxSessions,
+			IdleTimeout:     cfg.Torrent.IdleTimeout,
+			Readahead:       cfg.Torrent.ReadaheadBytes,
+			MetadataTimeout: cfg.Torrent.MetadataTimeout,
+		}, logger)
+		if err != nil {
+			return err
+		}
+		lc.AddService("torrent manager", func(context.Context) error {
+			return torrentMgr.Close()
+		})
+	}
+
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
 
@@ -491,6 +520,9 @@ func run(configPath string) error {
 			LogoCache: iptvMod.LogoCache,
 			Scheduler: iptvMod.Scheduler,
 			Schedules: repos.IPTVSchedules,
+		},
+		Torrent: api.TorrentDeps{
+			Manager: torrentMgr,
 		},
 		Federation: api.FederationDeps{
 			Manager: federationManager,

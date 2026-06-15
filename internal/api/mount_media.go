@@ -8,6 +8,7 @@ import (
 	iptvhandler "hubplay/internal/api/handlers/iptv"
 	libhandler "hubplay/internal/api/handlers/library"
 	"hubplay/internal/api/handlers/media"
+	torrenthandler "hubplay/internal/api/handlers/torrent"
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
 )
@@ -454,5 +455,29 @@ func mountProviders(r chi.Router, deps Dependencies) {
 		}
 		r.Get("/providers", providerHandler.List)
 		r.Put("/providers/{name}", providerHandler.Update)
+	})
+}
+
+// mountTorrent registra el surface del motor de torrent-streaming legal.
+// Gateado por deps.Torrent.Manager (nil cuando torrent.enabled=false en
+// config) — sin manager no se monta ninguna ruta. Vive dentro del grupo
+// autenticado, así que ambos endpoints exigen sesión.
+func mountTorrent(r chi.Router, deps Dependencies) {
+	if deps.Torrent.Manager == nil {
+		return
+	}
+	// adminCheck nil → default claims-role gate: only admins may START a
+	// torrent (spend bandwidth); any authenticated user can play one
+	// that's already active. The metadata searcher (TMDb) enriches
+	// /discover; nil when no provider is configured.
+	var meta torrenthandler.MetadataSearcher
+	if deps.Providers.Manager != nil {
+		meta = deps.Providers.Manager
+	}
+	h := torrenthandler.NewHandler(deps.Torrent.Manager, meta, nil, deps.Infra.Logger)
+	r.Route("/torrent", func(r chi.Router) {
+		r.Get("/discover", h.Discover)
+		r.Get("/search", h.Search)
+		r.Get("/stream", h.Stream)
 	})
 }
