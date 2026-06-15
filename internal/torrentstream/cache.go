@@ -52,3 +52,11 @@ func (c *ttlCache[T]) set(key string, val T) {
 	defer c.mu.Unlock()
 	c.m[key] = ttlEntry[T]{val: val, exp: c.now().Add(c.ttl)}
 }
+
+// clear drops every entry (used after an admin indexer change so the next
+// search re-queries with the new configuration).
+func (c *ttlCache[T]) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m = make(map[string]ttlEntry[T])
+}

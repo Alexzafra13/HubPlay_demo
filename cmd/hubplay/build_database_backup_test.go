@@ -9,12 +9,12 @@ import (
 
 func TestMaxMigrationVersion(t *testing.T) {
 	fsys := fstest.MapFS{
-		"migrations/sqlite/001_initial.sql":     {Data: []byte("x")},
-		"migrations/sqlite/002_fts.sql":         {Data: []byte("x")},
-		"migrations/sqlite/057_audit_log.sql":   {Data: []byte("x")},
-		"migrations/sqlite/README.md":           {Data: []byte("x")}, // sin prefijo → ignorado
-		"migrations/sqlite/notanumber_foo.sql":  {Data: []byte("x")}, // ignorado
-		"migrations/postgres/099_pg_only.sql":   {Data: []byte("x")}, // otro dir → ignorado
+		"migrations/sqlite/001_initial.sql":    {Data: []byte("x")},
+		"migrations/sqlite/002_fts.sql":        {Data: []byte("x")},
+		"migrations/sqlite/057_audit_log.sql":  {Data: []byte("x")},
+		"migrations/sqlite/README.md":          {Data: []byte("x")}, // sin prefijo → ignorado
+		"migrations/sqlite/notanumber_foo.sql": {Data: []byte("x")}, // ignorado
+		"migrations/postgres/099_pg_only.sql":  {Data: []byte("x")}, // otro dir → ignorado
 	}
 	if got := maxMigrationVersion(fsys, "migrations/sqlite"); got != 57 {
 		t.Errorf("maxMigrationVersion = %d, want 57", got)

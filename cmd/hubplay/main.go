@@ -341,54 +341,31 @@ func run(configPath string) error {
 		})
 	}
 
-	// Agregador de fuentes Torznab/Newznab (búsqueda por IMDb id). Es
-	// independiente del cliente torrent: se cablea si el operador configuró
-	// indexers, aunque el motor de streaming esté apagado (la reproducción
-	// sí necesita torrent.enabled). nil ⇒ /torrent/sources/* no se monta.
-	var sourceSvc *torrentstream.SourceService
-	var torznabClient *torrentstream.TorznabClient
-	if len(cfg.Torrent.Torznab.Indexers) > 0 {
-		indexers := make([]torrentstream.TorznabIndexer, 0, len(cfg.Torrent.Torznab.Indexers))
-		for _, ix := range cfg.Torrent.Torznab.Indexers {
-			if !ix.Enabled {
-				continue // solo se consultan las instancias habilitadas
-			}
-			// URL completa (Jackett/custom) tiene prioridad; si no, se
-			// compone desde la raíz de Prowlarr (base_url).
-			resolved := ix.URL
-			if resolved == "" && ix.BaseURL != "" {
-				resolved = torrentstream.ProwlarrTorznabURL(ix.BaseURL)
-			}
-			if resolved == "" {
-				continue
-			}
-			indexers = append(indexers, torrentstream.TorznabIndexer{
-				Name:             ix.Name,
-				URL:              resolved,
-				BaseURL:          ix.BaseURL,
-				APIKey:           ix.APIKey,
-				MovieCategories:  ix.Categories.Movie,
-				SeriesCategories: ix.Categories.Series,
-				Trackers:         ix.Trackers,
-			})
-		}
-		if len(indexers) > 0 {
-			cur := cfg.Torrent.Torznab.Curation
-			maxPerRes := cur.MaxPerResolution
-			if maxPerRes == 0 {
-				maxPerRes = 5
-			}
-			opts := torrentstream.FilterOptions{
-				ExcludeResolutions: cur.ExcludeResolutions,
-				MaxSizeGB:          cur.MaxSizeGB,
-				PreferredLanguage:  cur.PreferredLanguage,
-				MaxPerResolution:   maxPerRes,
-				ExcludeCam:         !cur.AllowCam,
-			}
-			torznabClient = torrentstream.NewTorznabClient(indexers, logger)
-			sourceSvc = torrentstream.NewSourceService(torznabClient, cfg.Torrent.Torznab.CacheTTL, opts, logger)
+	// Agregación de fuentes Torznab/Prowlarr. Plug-and-play: los indexers
+	// se gestionan en runtime desde el panel admin y se persisten en DB
+	// (app_settings) — sin tocar YAML/env ni reiniciar. Cualquier indexer
+	// definido en el YAML se importa UNA VEZ como semilla. La búsqueda es
+	// independiente del motor de streaming (la reproducción sí lo necesita).
+	indexerStore := torrentstream.NewIndexerStore(repos.Settings)
+	if seed := torznabSeedFromConfig(cfg.Torrent.Torznab.Indexers); len(seed) > 0 {
+		if err := indexerStore.Seed(context.Background(), seed); err != nil {
+			logger.Warn("torznab: seed indexers failed", "error", err)
 		}
 	}
+	curation := cfg.Torrent.Torznab.Curation
+	maxPerRes := curation.MaxPerResolution
+	if maxPerRes == 0 {
+		maxPerRes = 5
+	}
+	curationOpts := torrentstream.FilterOptions{
+		ExcludeResolutions: curation.ExcludeResolutions,
+		MaxSizeGB:          curation.MaxSizeGB,
+		PreferredLanguage:  curation.PreferredLanguage,
+		MaxPerResolution:   maxPerRes,
+		ExcludeCam:         !curation.AllowCam,
+	}
+	torznabClient := torrentstream.NewTorznabClient(indexerStore, logger)
+	sourceSvc := torrentstream.NewSourceService(torznabClient, cfg.Torrent.Torznab.CacheTTL, curationOpts, logger)
 
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
@@ -571,9 +548,9 @@ func run(configPath string) error {
 			Schedules: repos.IPTVSchedules,
 		},
 		Torrent: api.TorrentDeps{
-			Manager:  torrentMgr,
-			Sources:  sourceSvc,
-			Indexers: torznabClient,
+			Manager:      torrentMgr,
+			Sources:      sourceSvc,
+			IndexerStore: indexerStore,
 		},
 		Federation: api.FederationDeps{
 			Manager: federationManager,
@@ -697,4 +674,30 @@ func waitForShutdown(
 
 	logger.Info("shutdown complete")
 	return nil
+}
+
+// torznabSeedFromConfig converts any YAML/env-configured indexers into seed
+// records for the DB-backed store. They are imported only once (when the
+// store is empty); after that the operator manages indexers from the admin
+// panel — no YAML/env edits required.
+func torznabSeedFromConfig(in []config.TorznabIndexerConfig) []torrentstream.IndexerRecord {
+	out := make([]torrentstream.IndexerRecord, 0, len(in))
+	for _, ix := range in {
+		if ix.URL == "" && ix.BaseURL == "" {
+			continue
+		}
+		out = append(out, torrentstream.IndexerRecord{
+			IndexerInput: torrentstream.IndexerInput{
+				Name:             ix.Name,
+				BaseURL:          ix.BaseURL,
+				URL:              ix.URL,
+				APIKey:           ix.APIKey,
+				Enabled:          ix.Enabled,
+				MovieCategories:  ix.Categories.Movie,
+				SeriesCategories: ix.Categories.Series,
+				Trackers:         ix.Trackers,
+			},
+		})
+	}
+	return out
 }

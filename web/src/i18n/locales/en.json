@@ -1807,5 +1807,22 @@
     "disabledTitle": "No indexers",
     "disabledDesc": "No source indexer is configured on this server.",
     "playError": "Could not play. Torrent streaming may be disabled, or the format isn't supported by the browser."
+  },
+  "indexersAdmin": {
+    "title": "Indexers (Torznab / Prowlarr)",
+    "subtitle": "Connect your Prowlarr/Jackett. Stored on the server — no files to edit, no restart.",
+    "disabledTitle": "Unavailable",
+    "disabledDesc": "Indexer management is not enabled on this server.",
+    "empty": "No indexers added yet.",
+    "enabled": "Enabled",
+    "trackerCount": "{{count}} trackers",
+    "addTitle": "Add Prowlarr / Jackett",
+    "name": "Name",
+    "baseUrl": "Base URL",
+    "apiKey": "API key",
+    "test": "Test connection",
+    "testOk": "Connection OK",
+    "testFail": "Connection failed",
+    "add": "Add"
   }
 }

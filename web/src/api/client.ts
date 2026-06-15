@@ -70,6 +70,8 @@ import type {
   TorrentSearchResult,
   TorrentDiscoverResult,
   MediaSourceType,
+  IndexerStatus,
+  IndexerInput,
 } from "./types";
 import { ApiError } from "./types";
 import { getClientCapabilitiesHeader } from "./clientCapabilities";
@@ -497,6 +499,41 @@ export class ApiClient {
       "GET",
       `/torrent/sources/${type}/${encodeURIComponent(imdbId)}`,
     );
+  }
+
+  // ── Admin: Torznab/Prowlarr indexer management (plug-and-play, DB-backed) ──
+
+  /** List configured indexers with live reachability status. */
+  async listIndexers(): Promise<IndexerStatus[]> {
+    return this.request<IndexerStatus[]>("GET", "/admin/indexers");
+  }
+
+  /** Add an indexer. Returns the created record (secret-free). */
+  async createIndexer(input: IndexerInput): Promise<IndexerStatus> {
+    return this.request<IndexerStatus>("POST", "/admin/indexers", { body: input });
+  }
+
+  /** Replace an indexer by id. */
+  async updateIndexer(id: string, input: IndexerInput): Promise<void> {
+    await this.request<void>("PUT", `/admin/indexers/${encodeURIComponent(id)}`, {
+      body: input,
+    });
+  }
+
+  /** Remove an indexer by id. */
+  async deleteIndexer(id: string): Promise<void> {
+    await this.request<void>("DELETE", `/admin/indexers/${encodeURIComponent(id)}`);
+  }
+
+  /** Validate a connection + API key before saving. */
+  async testIndexer(input: {
+    base_url?: string;
+    url?: string;
+    api_key?: string;
+  }): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>("POST", "/admin/indexers/test", {
+      body: input,
+    });
   }
 
   async getUsers(): Promise<User[]> {

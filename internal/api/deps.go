@@ -149,9 +149,10 @@ type IPTVDeps struct {
 type TorrentDeps struct {
 	Manager *torrentstream.Manager
 	Sources *torrentstream.SourceService
-	// Indexers expone los indexers Torznab configurados para la superficie
-	// admin (/admin/indexers). nil cuando no hay ninguno configurado.
-	Indexers *torrentstream.TorznabClient
+	// IndexerStore persiste los indexers Torznab/Prowlarr gestionados
+	// desde el panel admin (/admin/indexers), en DB (app_settings) — sin
+	// tocar YAML/env ni reiniciar. nil ⇒ la superficie admin no se monta.
+	IndexerStore *torrentstream.IndexerStore
 }
 
 // FederationDeps es el manager de peer-to-peer sharing. nil = todo el

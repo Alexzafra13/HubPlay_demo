@@ -127,14 +127,18 @@ torrent:
   #
   # Prowlarr actúa como AGREGADOR CENTRAL de indexers: configuras tus
   # trackers en Prowlarr y HubPlay solo consume su API Torznab estándar.
+  #
+  # PLUG-AND-PLAY: lo normal es gestionar los indexers desde el panel admin
+  # (Admin → Sistema → Indexadores). Se guardan en la BD y se aplican al
+  # instante, SIN tocar este YAML ni reiniciar. La sección de abajo es
+  # OPCIONAL: solo se usa como SEMILLA la primera vez (si la BD está vacía).
   # Para Prowlarr basta con `base_url` (la raíz); HubPlay compone la ruta.
   # Para Jackett u otros, usa `url` con el endpoint Torznab completo.
-  #
-  # Alternativa por env (caso docker, un único indexer):
+  # Atajo por env (docker, un único indexer):
   #   HUBPLAY_TORZNAB_URL=... HUBPLAY_TORZNAB_API_KEY=...
   torznab:
     cache_ttl: "20m"         # TTL de resultados cacheados por (tipo, imdbid).
-    indexers: []
+    indexers: []             # opcional; semilla inicial (gestión real en el panel admin).
     #  - name: "prowlarr-local"
     #    enabled: true                   # solo se consultan las instancias enabled.
     #    base_url: "http://localhost:9696"

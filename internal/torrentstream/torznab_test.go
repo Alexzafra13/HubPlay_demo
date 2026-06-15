@@ -210,7 +210,7 @@ func TestSearchPerIndexerTimeout(t *testing.T) {
 	}))
 	defer slow.Close()
 
-	c := NewTorznabClient([]TorznabIndexer{
+	c := NewTorznabClient(StaticIndexers{
 		{Name: "slow", URL: slow.URL},
 		{Name: "fast", URL: fast.URL},
 	}, nil)

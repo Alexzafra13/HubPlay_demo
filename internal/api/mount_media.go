@@ -495,13 +495,20 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 		}
 	})
 
-	// Admin indexer management (Prowlarr/Torznab): list configured
-	// instances with live status + a connection tester. Admin-only.
-	if deps.Torrent.Indexers != nil {
-		ah := torrenthandler.NewIndexerAdminHandler(deps.Torrent.Indexers, deps.Infra.Logger)
+	// Admin indexer management (Prowlarr/Torznab): plug-and-play CRUD +
+	// live status + connection tester, persisted in DB. Admin-only.
+	if deps.Torrent.IndexerStore != nil {
+		var inv torrenthandler.Invalidator
+		if deps.Torrent.Sources != nil {
+			inv = deps.Torrent.Sources
+		}
+		ah := torrenthandler.NewIndexerAdminHandler(deps.Torrent.IndexerStore, inv, deps.Infra.Logger)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Get("/admin/indexers", ah.List)
+			r.Post("/admin/indexers", ah.Create)
+			r.Put("/admin/indexers/{id}", ah.Update)
+			r.Delete("/admin/indexers/{id}", ah.Delete)
 			r.Post("/admin/indexers/test", ah.Test)
 		})
 	}

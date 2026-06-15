@@ -1807,5 +1807,22 @@
     "disabledTitle": "Sin indexadores",
     "disabledDesc": "No hay ningún indexador de fuentes configurado en este servidor.",
     "playError": "No se pudo reproducir. Puede que el streaming de torrent esté desactivado o que el formato no sea compatible con el navegador."
+  },
+  "indexersAdmin": {
+    "title": "Indexadores (Torznab / Prowlarr)",
+    "subtitle": "Conecta tu Prowlarr/Jackett. Se guarda en el servidor — no hace falta tocar ficheros ni reiniciar.",
+    "disabledTitle": "No disponible",
+    "disabledDesc": "La gestión de indexadores no está habilitada en este servidor.",
+    "empty": "Aún no has añadido ningún indexador.",
+    "enabled": "Activo",
+    "trackerCount": "{{count}} trackers",
+    "addTitle": "Añadir Prowlarr / Jackett",
+    "name": "Nombre",
+    "baseUrl": "URL base",
+    "apiKey": "API key",
+    "test": "Probar conexión",
+    "testOk": "Conexión correcta",
+    "testFail": "Falló la conexión",
+    "add": "Añadir"
   }
 }

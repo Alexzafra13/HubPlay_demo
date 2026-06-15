@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -22,9 +21,11 @@ import (
 // IndexerInfo is a config-derived, secret-free view of one configured
 // indexer for the admin surface.
 type IndexerInfo struct {
+	ID               string   `json:"id,omitempty"`
 	Name             string   `json:"name"`
 	BaseURL          string   `json:"base_url,omitempty"`
-	URL              string   `json:"url"`
+	URL              string   `json:"url,omitempty"`
+	Enabled          bool     `json:"enabled"`
 	HasAPIKey        bool     `json:"has_api_key"`
 	MovieCategories  []string `json:"movie_categories,omitempty"`
 	SeriesCategories []string `json:"series_categories,omitempty"`
@@ -38,59 +39,6 @@ type IndexerStatus struct {
 	Reachable bool     `json:"reachable"`
 	Error     string   `json:"error,omitempty"`
 	Trackers  []string `json:"trackers,omitempty"`
-}
-
-// Instances returns the secret-free view of every configured indexer.
-func (c *TorznabClient) Instances() []IndexerInfo {
-	out := make([]IndexerInfo, 0, len(c.indexers))
-	for _, idx := range c.indexers {
-		out = append(out, IndexerInfo{
-			Name:             idx.Name,
-			BaseURL:          idx.BaseURL,
-			URL:              idx.URL,
-			HasAPIKey:        idx.APIKey != "",
-			MovieCategories:  idx.MovieCategories,
-			SeriesCategories: idx.SeriesCategories,
-		})
-	}
-	return out
-}
-
-// Status probes every configured indexer concurrently (caps query) and
-// returns each one's reachability. When an indexer exposes a Prowlarr root
-// it also tries to enumerate the trackers it aggregates (best-effort).
-func (c *TorznabClient) Status(ctx context.Context) []IndexerStatus {
-	out := make([]IndexerStatus, len(c.indexers))
-	var wg sync.WaitGroup
-	for i, idx := range c.indexers {
-		wg.Add(1)
-		go func(i int, idx TorznabIndexer) {
-			defer wg.Done()
-			st := IndexerStatus{IndexerInfo: IndexerInfo{
-				Name:             idx.Name,
-				BaseURL:          idx.BaseURL,
-				URL:              idx.URL,
-				HasAPIKey:        idx.APIKey != "",
-				MovieCategories:  idx.MovieCategories,
-				SeriesCategories: idx.SeriesCategories,
-			}}
-			pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-			if err := pingTorznab(pctx, c.httpClient, idx.URL, idx.APIKey); err != nil {
-				st.Error = err.Error()
-			} else {
-				st.Reachable = true
-				if idx.BaseURL != "" {
-					if names, err := fetchProwlarrIndexers(pctx, c.httpClient, idx.BaseURL, idx.APIKey); err == nil {
-						st.Trackers = names
-					}
-				}
-			}
-			out[i] = st
-		}(i, idx)
-	}
-	wg.Wait()
-	return out
 }
 
 // TestTorznabConnection validates a Torznab endpoint + API key by issuing a

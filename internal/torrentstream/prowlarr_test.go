@@ -108,44 +108,47 @@ func TestTestTorznabConnection(t *testing.T) {
 	}
 }
 
-func TestClientStatus(t *testing.T) {
+func TestStoreStatuses(t *testing.T) {
 	good := capsServer(t, "", 0)
 	bad := capsServer(t, "", http.StatusInternalServerError)
 
-	c := NewTorznabClient([]TorznabIndexer{
-		{Name: "prowlarr", URL: good.URL + "/torznab", BaseURL: good.URL, APIKey: "k"},
-		{Name: "broken", URL: bad.URL + "/torznab"},
-	}, nil)
+	store := NewIndexerStore(newFakeKV())
+	// Names chosen so the stable sort puts "aaa-prowlarr" first.
+	if _, err := store.Add(context.Background(), IndexerInput{
+		Name: "aaa-prowlarr", URL: good.URL + "/torznab", BaseURL: good.URL, APIKey: "k", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Add(context.Background(), IndexerInput{
+		Name: "zzz-broken", URL: bad.URL + "/torznab", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	st := c.Status(context.Background())
+	st, err := store.Statuses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(st) != 2 {
 		t.Fatalf("status len: got %d want 2", len(st))
 	}
-	if !st[0].Reachable {
-		t.Errorf("first indexer should be reachable: %+v", st[0])
+	if !st[0].Reachable || !st[0].HasAPIKey {
+		t.Errorf("first indexer should be reachable + have api key: %+v", st[0])
 	}
-	// Reachable + BaseURL set → trackers enumerated from native API.
+	// Reachable + BaseURL set → trackers enumerated from the native API.
 	if len(st[0].Trackers) != 1 || st[0].Trackers[0] != "1337x" {
 		t.Errorf("expected enabled tracker list, got %v", st[0].Trackers)
 	}
-	if st[0].HasAPIKey != true {
-		t.Error("HasAPIKey should be true")
-	}
-	if st[1].Reachable {
-		t.Errorf("second indexer should be unreachable: %+v", st[1])
-	}
-	if st[1].Error == "" {
-		t.Error("unreachable indexer should carry an error message")
+	if st[1].Reachable || st[1].Error == "" {
+		t.Errorf("second indexer should be unreachable with an error: %+v", st[1])
 	}
 }
 
-func TestInstancesNoSecrets(t *testing.T) {
-	c := NewTorznabClient([]TorznabIndexer{
-		{Name: "p", URL: "http://x/torznab", APIKey: "secret"},
-	}, nil)
-	infos := c.Instances()
-	if len(infos) != 1 || !infos[0].HasAPIKey {
-		t.Fatalf("instances: %+v", infos)
+func TestRecordInfoNoSecrets(t *testing.T) {
+	rec := IndexerRecord{ID: "x", IndexerInput: IndexerInput{Name: "p", URL: "http://x/torznab", APIKey: "secret"}}
+	info := rec.Info()
+	if !info.HasAPIKey || info.ID != "x" {
+		t.Fatalf("info: %+v", info)
 	}
-	// The struct has no api key field at all — nothing to leak.
+	// IndexerInfo has no api key field — nothing to leak.
 }

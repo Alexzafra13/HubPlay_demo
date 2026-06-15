@@ -70,3 +70,10 @@ func (s *SourceService) Sources(ctx context.Context, mt MediaType, imdbID string
 	opts := filterOptionsFrom(ctx, s.filterOpts)
 	return Curate(raw, opts), nil
 }
+
+// Invalidate drops the cached raw results. Called after an admin changes
+// the indexer set so the next search reflects the new configuration
+// immediately instead of waiting out the TTL.
+func (s *SourceService) Invalidate() {
+	s.cache.clear()
+}

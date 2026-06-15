@@ -1965,6 +1965,34 @@ export interface TorrentSearchResult {
 // MediaSourceType selects the IMDb-keyed source aggregation endpoint.
 export type MediaSourceType = "movie" | "series";
 
+// IndexerInput is the create/update payload for a Torznab/Prowlarr indexer
+// managed from the admin panel (persisted in the DB — no yaml/env edits).
+export interface IndexerInput {
+  name: string;
+  base_url?: string;
+  url?: string;
+  api_key?: string;
+  enabled: boolean;
+  movie_categories?: string[];
+  series_categories?: string[];
+  trackers?: string[];
+}
+
+// IndexerStatus is the admin-list view: secret-free config + live status.
+export interface IndexerStatus {
+  id: string;
+  name: string;
+  base_url?: string;
+  url?: string;
+  enabled: boolean;
+  has_api_key: boolean;
+  movie_categories?: string[];
+  series_categories?: string[];
+  reachable: boolean;
+  error?: string;
+  trackers?: string[];
+}
+
 // TorrentDiscoverResult is a TMDb-enriched browse candidate (/torrent/discover).
 // Picking one resolves playable sources via /torrent/search by title+year.
 export interface TorrentDiscoverResult {

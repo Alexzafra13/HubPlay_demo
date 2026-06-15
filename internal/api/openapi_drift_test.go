@@ -74,6 +74,9 @@ var outOfScopeExact = map[string]string{
 	"GET /torrent/sources/movie/{imdbId}":  "Torznab source aggregation by IMDb id, web-only opt-in",
 	"GET /torrent/sources/series/{imdbId}": "Torznab source aggregation by IMDb id, web-only opt-in",
 	"GET /admin/indexers":                  "admin Torznab/Prowlarr indexer list + status, web-only opt-in",
+	"POST /admin/indexers":                 "admin Torznab/Prowlarr indexer create, web-only opt-in",
+	"PUT /admin/indexers/{id}":             "admin Torznab/Prowlarr indexer update, web-only opt-in",
+	"DELETE /admin/indexers/{id}":          "admin Torznab/Prowlarr indexer delete, web-only opt-in",
 	"POST /admin/indexers/test":            "admin Torznab/Prowlarr connection test, web-only opt-in",
 
 	// ── Liveness / readiness probes (infra, not user-facing) ──────────

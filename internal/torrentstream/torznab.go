@@ -72,22 +72,37 @@ func ProwlarrTorznabURL(baseURL string) string {
 // endpoint can't hold up the whole fan-out (which runs concurrently).
 const perIndexerTimeout = 8 * time.Second
 
-// TorznabClient queries a fixed set of indexers. Safe for concurrent use
-// (the http.Client is, and the indexer slice is read-only after New).
+// IndexerProvider supplies the current set of indexers to query. It is
+// read on every search, so a DB-backed provider lets admin edits take
+// effect immediately (no restart).
+type IndexerProvider interface {
+	Indexers(ctx context.Context) []TorznabIndexer
+}
+
+// StaticIndexers is an IndexerProvider backed by a fixed slice — used for
+// config-only setups and tests.
+type StaticIndexers []TorznabIndexer
+
+// Indexers implements IndexerProvider.
+func (s StaticIndexers) Indexers(context.Context) []TorznabIndexer { return s }
+
+// TorznabClient queries the indexers supplied by its IndexerProvider. Safe
+// for concurrent use (the http.Client is, and the provider is read-only per
+// call).
 type TorznabClient struct {
-	indexers     []TorznabIndexer
+	source       IndexerProvider
 	httpClient   *http.Client
 	perIndexerTO time.Duration
 	logger       *slog.Logger
 }
 
-// NewTorznabClient builds a client over the given indexers.
-func NewTorznabClient(indexers []TorznabIndexer, logger *slog.Logger) *TorznabClient {
+// NewTorznabClient builds a client over the given indexer source.
+func NewTorznabClient(source IndexerProvider, logger *slog.Logger) *TorznabClient {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &TorznabClient{
-		indexers:     indexers,
+		source:       source,
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 		perIndexerTO: perIndexerTimeout,
 		logger:       logger,
@@ -106,14 +121,15 @@ func NewTorznabClient(indexers []TorznabIndexer, logger *slog.Logger) *TorznabCl
 // is an optional free-text fallback for indexers that don't resolve by
 // IMDb id.
 func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term string) ([]SearchResult, error) {
+	indexers := c.source.Indexers(ctx)
 	// Per-indexer result slots, written by index so the merged order is
 	// deterministic (indexer order) regardless of which goroutine finishes
 	// first.
-	results := make([][]SearchResult, len(c.indexers))
-	errs := make([]error, len(c.indexers))
+	results := make([][]SearchResult, len(indexers))
+	errs := make([]error, len(indexers))
 
 	var wg sync.WaitGroup
-	for i, idx := range c.indexers {
+	for i, idx := range indexers {
 		wg.Add(1)
 		go func(i int, idx TorznabIndexer) {
 			defer wg.Done()
@@ -143,7 +159,7 @@ func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term s
 		out      []SearchResult
 		firstErr error
 	)
-	for i := range c.indexers {
+	for i := range indexers {
 		out = append(out, results[i]...)
 		if firstErr == nil && errs[i] != nil {
 			firstErr = errs[i]
