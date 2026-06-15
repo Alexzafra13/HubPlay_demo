@@ -107,9 +107,9 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Madrid}
-      - PROWLARR__AUTH__APIKEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
-      - PROWLARR__AUTH__METHOD=External
-      - PROWLARR__AUTH__REQUIRED=DisabledForLocalAddresses
+      - PROWLARR__APIKEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
+      - PROWLARR__AUTHENTICATIONMETHOD=External
+      - PROWLARR__AUTHENTICATIONREQUIRED=DisabledForLocalAddresses
     ports:
       # Para abrir la UI de Prowlarr y elegir trackers.
       - "${PROWLARR_HOST_PORT:-9696}:9696"
