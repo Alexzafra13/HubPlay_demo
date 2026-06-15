@@ -164,6 +164,14 @@ function SourceRow({
               count: source.seeders ?? 0,
             })}
           </span>
+          {source.codec ? <span>{source.codec}</span> : null}
+          {source.languages
+            ?.filter((l) => l !== "Original")
+            .map((l) => (
+              <span key={l} className="rounded bg-bg-hover px-1.5 py-0.5 text-text-secondary">
+                {l}
+              </span>
+            ))}
           {source.provider ? <span>{source.provider}</span> : null}
         </div>
       </div>

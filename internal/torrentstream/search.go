@@ -50,7 +50,8 @@ type SearchResult struct {
 	SizeBytes int64 `json:"size_bytes,omitempty"`
 	// Seeders is the availability ranking signal from the indexer.
 	Seeders int `json:"seeders,omitempty"`
-	// Quality is parsed from the title (4K / 1080p / 720p / 480p / HDTV).
+	// Quality is the coarse bucket parsed from the title (4K / 1080p /
+	// 720p / 480p / HDTV) — kept for the existing UI chip.
 	Quality string `json:"quality,omitempty"`
 	// InfoHash is the BitTorrent infohash, used both as a stable id and to
 	// build a magnet when the indexer only returned the hash.
@@ -58,6 +59,23 @@ type SearchResult struct {
 	// MagnetURI is the full magnet link (supplied by the indexer or built
 	// from InfoHash + trackers).
 	MagnetURI string `json:"magnet_uri,omitempty"`
+
+	// ── Curation metadata (parsed from the title; see metadata_parser.go) ──
+
+	// Resolution is the raw resolution token (2160p / 1080p / 720p / 480p).
+	Resolution string `json:"resolution,omitempty"`
+	// Codec is the normalised video codec (HEVC / H.264 / AV1 / XviD).
+	Codec string `json:"codec,omitempty"`
+	// Languages are the audio/sub language tags detected in the title
+	// (Spanish, Latino, Dual, Multi, VOST, English, French). Defaults to
+	// ["Original"] when none are present.
+	Languages []string `json:"languages,omitempty"`
+	// IsCam flags low-quality source releases (CAM / TS / Screener / R5…)
+	// so the filter engine can drop them.
+	IsCam bool `json:"is_cam,omitempty"`
+	// QualityScore is a computed ranking score (resolution + source + codec
+	// + HDR/DV, minus a heavy penalty for cams) used for sorting.
+	QualityScore int `json:"quality_score,omitempty"`
 }
 
 // archiveResponse mirrors the slice of the Archive.org JSON we consume.

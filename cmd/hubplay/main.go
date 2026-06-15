@@ -361,8 +361,20 @@ func run(configPath string) error {
 			})
 		}
 		if len(indexers) > 0 {
+			cur := cfg.Torrent.Torznab.Curation
+			maxPerRes := cur.MaxPerResolution
+			if maxPerRes == 0 {
+				maxPerRes = 5
+			}
+			opts := torrentstream.FilterOptions{
+				ExcludeResolutions: cur.ExcludeResolutions,
+				MaxSizeGB:          cur.MaxSizeGB,
+				PreferredLanguage:  cur.PreferredLanguage,
+				MaxPerResolution:   maxPerRes,
+				ExcludeCam:         !cur.AllowCam,
+			}
 			client := torrentstream.NewTorznabClient(indexers, logger)
-			sourceSvc = torrentstream.NewSourceService(client, cfg.Torrent.Torznab.CacheTTL, logger)
+			sourceSvc = torrentstream.NewSourceService(client, cfg.Torrent.Torznab.CacheTTL, opts, logger)
 		}
 	}
 

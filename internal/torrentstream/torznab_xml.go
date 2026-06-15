@@ -105,16 +105,24 @@ func normalizeItem(it torznabItem, idx TorznabIndexer) (SearchResult, bool) {
 		return SearchResult{}, false
 	}
 
+	// Parse the title once to derive the curation metadata.
+	meta := parseTitle(title)
+
 	return SearchResult{
-		Identifier: id,
-		Title:      title,
-		Provider:   idx.Name,
-		TorrentURL: streamSrc,
-		SizeBytes:  size,
-		Seeders:    parseInt(it.attr("seeders")),
-		Quality:    extractQuality(title),
-		InfoHash:   infoHash,
-		MagnetURI:  magnet,
+		Identifier:   id,
+		Title:        title,
+		Provider:     idx.Name,
+		TorrentURL:   streamSrc,
+		SizeBytes:    size,
+		Seeders:      parseInt(it.attr("seeders")),
+		Quality:      meta.qualityBucket(),
+		InfoHash:     infoHash,
+		MagnetURI:    magnet,
+		Resolution:   meta.Resolution,
+		Codec:        meta.Codec,
+		Languages:    meta.Languages,
+		IsCam:        meta.IsCam,
+		QualityScore: meta.QualityScore,
 	}, true
 }
 
@@ -170,23 +178,11 @@ func buildMagnet(infoHash, title string, trackers []string) string {
 	return b.String()
 }
 
-// extractQuality maps a release title to a coarse quality bucket.
+// extractQuality maps a release title to a coarse quality bucket. Thin
+// wrapper over the metadata parser so there's a single source of truth for
+// resolution detection.
 func extractQuality(title string) string {
-	t := strings.ToLower(title)
-	switch {
-	case strings.Contains(t, "2160p"), strings.Contains(t, "4k"), strings.Contains(t, "uhd"):
-		return "4K"
-	case strings.Contains(t, "1080p"):
-		return "1080p"
-	case strings.Contains(t, "720p"):
-		return "720p"
-	case strings.Contains(t, "480p"):
-		return "480p"
-	case strings.Contains(t, "hdtv"):
-		return "HDTV"
-	default:
-		return ""
-	}
+	return parseTitle(title).qualityBucket()
 }
 
 // qualityRank orders quality buckets for sorting (higher is better).

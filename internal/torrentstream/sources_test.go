@@ -22,7 +22,7 @@ func (f *fakeSearcher) Search(_ context.Context, _ MediaType, _, _ string) ([]Se
 
 func TestSourceServiceCaches(t *testing.T) {
 	fake := &fakeSearcher{res: []SearchResult{{Identifier: "x", Title: "X"}}}
-	svc := NewSourceService(fake, time.Minute, nil)
+	svc := NewSourceService(fake, time.Minute, DefaultFilterOptions(), nil)
 
 	r1, err := svc.Sources(context.Background(), MediaTypeMovie, "tt1")
 	if err != nil {
@@ -48,9 +48,27 @@ func TestSourceServiceCaches(t *testing.T) {
 	}
 }
 
+func TestSourceServiceCurates(t *testing.T) {
+	// Raw set has a cam that curation must drop, and the context can
+	// override the default filter options.
+	fake := &fakeSearcher{res: []SearchResult{
+		src("Movie 1080p WEB-DL", 10, 2e9),
+		src("Movie 1080p HDCAM", 999, 1e9),
+	}}
+	svc := NewSourceService(fake, time.Minute, DefaultFilterOptions(), nil)
+
+	res, err := svc.Sources(context.Background(), MediaTypeMovie, "tt1")
+	if err != nil {
+		t.Fatalf("sources: %v", err)
+	}
+	if len(res) != 1 || res[0].IsCam {
+		t.Fatalf("curation should drop the cam: %+v", res)
+	}
+}
+
 func TestSourceServiceErrorNotCached(t *testing.T) {
 	fake := &fakeSearcher{err: errors.New("indexer down")}
-	svc := NewSourceService(fake, time.Minute, nil)
+	svc := NewSourceService(fake, time.Minute, DefaultFilterOptions(), nil)
 
 	if _, err := svc.Sources(context.Background(), MediaTypeMovie, "tt1"); err == nil {
 		t.Fatal("expected error")

@@ -187,6 +187,31 @@ type TorznabConfig struct {
 	// CacheTTL: tiempo de vida de los resultados cacheados por (tipo,
 	// imdbid). Default 20m.
 	CacheTTL time.Duration `yaml:"cache_ttl"`
+
+	// Curation: política de filtrado/ordenamiento aplicada a los
+	// resultados antes de devolverlos al frontend.
+	Curation CurationConfig `yaml:"curation"`
+}
+
+// CurationConfig controla la capa de "curación y priorización": qué
+// resultados se descartan y cómo se ordenan/agrupan antes de llegar a la
+// UI. Los ceros-valor aplican defaults sanos (drop de cams, top 5 por
+// resolución, sin otros límites).
+type CurationConfig struct {
+	// ExcludeResolutions descarta resultados con estas resoluciones
+	// (p.ej. ["2160p"] para ocultar 4K en setups con poco ancho de banda).
+	ExcludeResolutions []string `yaml:"exclude_resolutions"`
+	// MaxSizeGB descarta resultados mayores a este tamaño. 0 = sin límite.
+	MaxSizeGB float64 `yaml:"max_size_gb"`
+	// PreferredLanguage prioriza (en el orden) los resultados con este
+	// idioma. Vacío = sin preferencia.
+	PreferredLanguage string `yaml:"preferred_language"`
+	// MaxPerResolution limita cuántos resultados sobreviven por grupo de
+	// resolución. 0 ⇒ default 5.
+	MaxPerResolution int `yaml:"max_per_resolution"`
+	// AllowCam, si es true, NO filtra releases CAM/TS/Screener. Default
+	// false (se filtran).
+	AllowCam bool `yaml:"allow_cam"`
 }
 
 // TorznabIndexerConfig describe un endpoint Torznab/Newznab.

@@ -1954,6 +1954,12 @@ export interface TorrentSearchResult {
   quality?: string;
   infohash?: string;
   magnet_uri?: string;
+  // Curation metadata (Torznab path): parsed from the release title.
+  resolution?: string;
+  codec?: string;
+  languages?: string[];
+  is_cam?: boolean;
+  quality_score?: number;
 }
 
 // MediaSourceType selects the IMDb-keyed source aggregation endpoint.

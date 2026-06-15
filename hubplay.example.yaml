@@ -135,6 +135,13 @@ torrent:
     #    categories: ["2000", "5000"]   # opcional; default 2000 (peli) / 5000 (serie).
     #    trackers:                       # opcional; añadidos a magnets de infohash suelto.
     #      - "udp://tracker.opentrackr.org:1337/announce"
+    # Curación: filtra y prioriza los resultados antes de la UI.
+    curation:
+      exclude_resolutions: []     # p.ej. ["2160p"] para ocultar 4K.
+      max_size_gb: 0              # 0 = sin límite; descarta mayores a N GB.
+      preferred_language: ""      # "Spanish"/"Latino"/… prioriza ese idioma.
+      max_per_resolution: 5       # top N por resolución (0 = default 5).
+      allow_cam: false            # true = NO filtra CAM/TS/Screener.
 
 mdns:
   # Anuncia el servidor en la LAN como "<hostname>.local". Permite
