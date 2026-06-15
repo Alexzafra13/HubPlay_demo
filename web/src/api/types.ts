@@ -1934,17 +1934,30 @@ export class ApiError extends Error {
   }
 }
 
-// TorrentSearchResult is one item from the legal catalogue search
-// (/torrent/search). `torrent_url` (or magnet) is passed to /torrent/stream
-// to play it; `provider` labels the source.
+// TorrentSearchResult is one streamable item from /torrent/search (Internet
+// Archive) or /torrent/sources/* (Torznab aggregation). `torrent_url` (a
+// magnet or http(s) .torrent) is passed to /torrent/stream to play it;
+// `provider` labels the source.
+//
+// The richer fields (size_bytes, seeders, quality, infohash, magnet_uri)
+// are populated by the Torznab path and absent for Internet Archive
+// results — this is the wire shape of the backend's StreamSource.
 export interface TorrentSearchResult {
   identifier: string;
   title: string;
-  mediatype: string;
+  mediatype?: string;
   year?: string;
   torrent_url: string;
   provider?: string;
+  size_bytes?: number;
+  seeders?: number;
+  quality?: string;
+  infohash?: string;
+  magnet_uri?: string;
 }
+
+// MediaSourceType selects the IMDb-keyed source aggregation endpoint.
+export type MediaSourceType = "movie" | "series";
 
 // TorrentDiscoverResult is a TMDb-enriched browse candidate (/torrent/discover).
 // Picking one resolves playable sources via /torrent/search by title+year.

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"hubplay/internal/provider"
 	"hubplay/internal/torrentstream"
 )
@@ -67,7 +69,7 @@ func TestIsAllowedSource(t *testing.T) {
 }
 
 func TestSearch_MissingQuery(t *testing.T) {
-	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/search", nil)
 	h.Search(rr, req)
@@ -77,7 +79,7 @@ func TestSearch_MissingQuery(t *testing.T) {
 }
 
 func TestStream_MissingSource(t *testing.T) {
-	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream", nil)
 	h.Stream(rr, req)
@@ -89,7 +91,7 @@ func TestStream_MissingSource(t *testing.T) {
 func TestStream_InvalidSource(t *testing.T) {
 	// A non-magnet, non-http(s) scheme is rejected at the handler (400);
 	// SSRF for http(s) is handled later by the engine, not here.
-	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=ftp://example.com/x.torrent", nil)
 	h.Stream(rr, req)
@@ -99,7 +101,7 @@ func TestStream_InvalidSource(t *testing.T) {
 }
 
 func TestStream_DisabledWhenNoManager(t *testing.T) {
-	h := NewHandler(nil, nil, adminFalse, nil)
+	h := NewHandler(nil, nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=magnet:?xt=urn:btih:abc", nil)
 	h.Stream(rr, req)
@@ -112,7 +114,7 @@ func TestStream_DisabledWhenNoManager(t *testing.T) {
 // and must NOT trigger a download.
 func TestStream_NonAdmin_NotActive_Forbidden(t *testing.T) {
 	fm := &fakeManager{active: false}
-	h := NewHandler(fm, nil, adminFalse, nil)
+	h := NewHandler(fm, nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=magnet:?xt=urn:btih:abc", nil)
 	h.Stream(rr, req)
@@ -128,7 +130,7 @@ func TestStream_NonAdmin_NotActive_Forbidden(t *testing.T) {
 // busy mapping without needing a live torrent reader.
 func TestStream_Admin_StartsAndMapsBusy(t *testing.T) {
 	fm := &fakeManager{startErr: torrentstream.ErrTooManySessions}
-	h := NewHandler(fm, nil, adminTrue, nil)
+	h := NewHandler(fm, nil, nil, adminTrue, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/stream?src=magnet:?xt=urn:btih:abc", nil)
 	h.Stream(rr, req)
@@ -141,7 +143,7 @@ func TestStream_Admin_StartsAndMapsBusy(t *testing.T) {
 }
 
 func TestDiscover_MissingQuery(t *testing.T) {
-	h := NewHandler(&fakeManager{}, fakeMeta{}, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, fakeMeta{}, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/discover", nil)
 	h.Discover(rr, req)
@@ -152,7 +154,7 @@ func TestDiscover_MissingQuery(t *testing.T) {
 
 func TestDiscover_NoProvider(t *testing.T) {
 	// meta nil → TMDb not configured → 503.
-	h := NewHandler(&fakeManager{}, nil, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, nil, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/discover?q=nosferatu", nil)
 	h.Discover(rr, req)
@@ -165,7 +167,7 @@ func TestDiscover_ReturnsMappedResults(t *testing.T) {
 	meta := fakeMeta{results: []provider.SearchResult{
 		{ExternalID: "653", Title: "Nosferatu", Year: 1922, Overview: "vamp", PosterURL: "https://image.tmdb.org/p.jpg"},
 	}}
-	h := NewHandler(&fakeManager{}, meta, adminFalse, nil)
+	h := NewHandler(&fakeManager{}, nil, meta, adminFalse, nil)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/torrent/discover?q=nosferatu", nil)
 	h.Discover(rr, req)
@@ -175,5 +177,93 @@ func TestDiscover_ReturnsMappedResults(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), `"tmdb_id":"653"`) ||
 		!strings.Contains(rr.Body.String(), `"poster_url":"https://image.tmdb.org/p.jpg"`) {
 		t.Errorf("body missing mapped fields: %s", rr.Body.String())
+	}
+}
+
+// fakeSources stands in for the Torznab aggregator.
+type fakeSources struct {
+	res    []torrentstream.SearchResult
+	err    error
+	gotMT  torrentstream.MediaType
+	gotID  string
+	called bool
+}
+
+func (f *fakeSources) Sources(_ context.Context, mt torrentstream.MediaType, imdbID string) ([]torrentstream.SearchResult, error) {
+	f.called = true
+	f.gotMT = mt
+	f.gotID = imdbID
+	return f.res, f.err
+}
+
+// withIMDb attaches a chi route param so the handler can read {imdbId}.
+func withIMDb(req *http.Request, id string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("imdbId", id)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestSources_InvalidIMDb(t *testing.T) {
+	h := NewHandler(nil, &fakeSources{}, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := withIMDb(httptest.NewRequest(http.MethodGet, "/torrent/sources/movie/bad", nil), "bad")
+	h.SourcesMovie(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+func TestSources_DisabledWhenNoIndexer(t *testing.T) {
+	h := NewHandler(nil, nil, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := withIMDb(httptest.NewRequest(http.MethodGet, "/torrent/sources/movie/tt0133093", nil), "tt0133093")
+	h.SourcesMovie(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d want 503", rr.Code)
+	}
+}
+
+func TestSources_MovieReturnsData(t *testing.T) {
+	fs := &fakeSources{res: []torrentstream.SearchResult{
+		{Identifier: "abc", Title: "The Matrix 1080p", Seeders: 42, Quality: "1080p", MagnetURI: "magnet:?xt=urn:btih:abc"},
+	}}
+	h := NewHandler(nil, fs, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := withIMDb(httptest.NewRequest(http.MethodGet, "/torrent/sources/movie/tt0133093", nil), "tt0133093")
+	h.SourcesMovie(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	if fs.gotMT != torrentstream.MediaTypeMovie || fs.gotID != "tt0133093" {
+		t.Errorf("forwarded wrong args: mt=%q id=%q", fs.gotMT, fs.gotID)
+	}
+	if !strings.Contains(rr.Body.String(), `"quality":"1080p"`) ||
+		!strings.Contains(rr.Body.String(), `"seeders":42`) {
+		t.Errorf("body missing fields: %s", rr.Body.String())
+	}
+}
+
+func TestSources_SeriesForwardsType(t *testing.T) {
+	fs := &fakeSources{}
+	h := NewHandler(nil, fs, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := withIMDb(httptest.NewRequest(http.MethodGet, "/torrent/sources/series/tt0903747", nil), "tt0903747")
+	h.SourcesSeries(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", rr.Code)
+	}
+	if fs.gotMT != torrentstream.MediaTypeSeries {
+		t.Errorf("media type: got %q want series", fs.gotMT)
+	}
+}
+
+func TestSources_IndexerError(t *testing.T) {
+	fs := &fakeSources{err: context.DeadlineExceeded}
+	h := NewHandler(nil, fs, nil, adminFalse, nil)
+	rr := httptest.NewRecorder()
+	req := withIMDb(httptest.NewRequest(http.MethodGet, "/torrent/sources/movie/tt0133093", nil), "tt0133093")
+	h.SourcesMovie(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status: got %d want 502", rr.Code)
 	}
 }

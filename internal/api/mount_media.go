@@ -463,7 +463,9 @@ func mountProviders(r chi.Router, deps Dependencies) {
 // config) — sin manager no se monta ninguna ruta. Vive dentro del grupo
 // autenticado, así que ambos endpoints exigen sesión.
 func mountTorrent(r chi.Router, deps Dependencies) {
-	if deps.Torrent.Manager == nil {
+	// El motor de streaming y el agregador de fuentes son independientes:
+	// si no hay ninguno de los dos, no hay nada que montar.
+	if deps.Torrent.Manager == nil && deps.Torrent.Sources == nil {
 		return
 	}
 	// adminCheck nil → default claims-role gate: only admins may START a
@@ -474,10 +476,22 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 	if deps.Providers.Manager != nil {
 		meta = deps.Providers.Manager
 	}
-	h := torrenthandler.NewHandler(deps.Torrent.Manager, meta, nil, deps.Infra.Logger)
+	var sources torrenthandler.SourceSearcher
+	if deps.Torrent.Sources != nil {
+		sources = deps.Torrent.Sources
+	}
+	h := torrenthandler.NewHandler(deps.Torrent.Manager, sources, meta, nil, deps.Infra.Logger)
 	r.Route("/torrent", func(r chi.Router) {
-		r.Get("/discover", h.Discover)
-		r.Get("/search", h.Search)
-		r.Get("/stream", h.Stream)
+		// Streaming surface (Internet Archive search + magnet playback).
+		if deps.Torrent.Manager != nil {
+			r.Get("/discover", h.Discover)
+			r.Get("/search", h.Search)
+			r.Get("/stream", h.Stream)
+		}
+		// Torznab source aggregation by IMDb id.
+		if deps.Torrent.Sources != nil {
+			r.Get("/sources/movie/{imdbId}", h.SourcesMovie)
+			r.Get("/sources/series/{imdbId}", h.SourcesSeries)
+		}
 	})
 }

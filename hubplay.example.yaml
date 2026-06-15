@@ -106,18 +106,35 @@ iptv:
     ready_timeout: "15s"      # espera al primer segmento antes de fallar.
 
 torrent:
-  # Motor de streaming BitTorrent para fuentes LEGALES: Internet Archive,
-  # dominio público / Creative Commons, o magnets que TÚ añades y tienes
-  # derecho a usar. El buscador integrado consulta SOLO catálogos legales
-  # (Internet Archive); no hay scraping de indexers de terceros.
+  # Motor de streaming BitTorrent + agregación de fuentes.
+  # El buscador por texto consulta Internet Archive (catálogo legal). Si
+  # configuras indexers Torznab/Newznab abajo (tu propio Prowlarr/Jackett),
+  # se habilita además la búsqueda de fuentes por IMDb id. Lo que apuntes
+  # ahí, y si tienes derecho a esos resultados, es responsabilidad tuya.
   # OFF por defecto: con enabled:false no se arranca el cliente torrent
-  # ni se montan las rutas /torrent/*.
+  # ni se montan las rutas de streaming /torrent/{search,discover,stream}.
   enabled: false
   data_dir: ""               # vacío ⇒ <streaming.cache_dir>/torrent (scratch efímero).
   max_sessions: 4            # torrents activos simultáneos (compartidos por viewers).
   idle_timeout: "5m"         # cierra la sesión tras este tiempo sin lecturas.
   readahead_bytes: 16777216  # ventana de lectura secuencial (16 MiB) para "ver mientras descarga".
   metadata_timeout: "60s"    # espera máxima a resolver metadatos del magnet.
+
+  # Agregación de fuentes Torznab/Newznab (búsqueda por IMDb id). Es
+  # INDEPENDIENTE de enabled: la búsqueda funciona aunque el streaming esté
+  # apagado, pero la reproducción de un resultado SÍ requiere enabled:true.
+  # Sin indexers, las rutas /torrent/sources/* no se montan.
+  # Alternativa por env (caso docker, un único indexer):
+  #   HUBPLAY_TORZNAB_URL=... HUBPLAY_TORZNAB_API_KEY=...
+  torznab:
+    cache_ttl: "20m"         # TTL de resultados cacheados por (tipo, imdbid).
+    indexers: []
+    #  - name: "prowlarr"
+    #    url: "http://localhost:9696/api/v1/indexers/all/results/torznab"
+    #    api_key: "TU_API_KEY"
+    #    categories: ["2000", "5000"]   # opcional; default 2000 (peli) / 5000 (serie).
+    #    trackers:                       # opcional; añadidos a magnets de infohash suelto.
+    #      - "udp://tracker.opentrackr.org:1337/announce"
 
 mdns:
   # Anuncia el servidor en la LAN como "<hostname>.local". Permite

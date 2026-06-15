@@ -26,17 +26,38 @@ const (
 
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
-// SearchResult is one item from the legal catalogue, with the URL of its
-// official .torrent so the engine can stream it.
+// SearchResult is one streamable item produced by a SearchProvider (the
+// Internet Archive catalogue) or by the Torznab aggregator. TorrentURL
+// (magnet or http(s) .torrent) is what the streaming engine plays.
+//
+// The richer fields (SizeBytes, Seeders, Quality, InfoHash, MagnetURI)
+// are populated by the Torznab path — they map onto the frontend's
+// StreamSource view. The Archive provider leaves them zero, so they are
+// all `omitempty`: a result is identified by Identifier/Title/TorrentURL
+// at minimum, and the extra metadata rides along when a source has it.
 type SearchResult struct {
 	Identifier string `json:"identifier"`
 	Title      string `json:"title"`
-	Mediatype  string `json:"mediatype"`
+	Mediatype  string `json:"mediatype,omitempty"`
 	Year       string `json:"year,omitempty"`
 	TorrentURL string `json:"torrent_url"`
-	// Provider is the name of the SearchProvider that produced this
-	// result, so a multi-source UI can group / label results.
+	// Provider is the name of the source that produced this result, so a
+	// multi-source UI can group / label results.
 	Provider string `json:"provider,omitempty"`
+
+	// SizeBytes is the file size in bytes (the UI formats it to GB). 0 when
+	// the source didn't report a size.
+	SizeBytes int64 `json:"size_bytes,omitempty"`
+	// Seeders is the availability ranking signal from the indexer.
+	Seeders int `json:"seeders,omitempty"`
+	// Quality is parsed from the title (4K / 1080p / 720p / 480p / HDTV).
+	Quality string `json:"quality,omitempty"`
+	// InfoHash is the BitTorrent infohash, used both as a stable id and to
+	// build a magnet when the indexer only returned the hash.
+	InfoHash string `json:"infohash,omitempty"`
+	// MagnetURI is the full magnet link (supplied by the indexer or built
+	// from InfoHash + trackers).
+	MagnetURI string `json:"magnet_uri,omitempty"`
 }
 
 // archiveResponse mirrors the slice of the Archive.org JSON we consume.

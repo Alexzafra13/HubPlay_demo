@@ -1795,5 +1795,17 @@
       "confirm": "Apply",
       "summary": "{{count}} total · {{overwrite}} overwrite · {{skip}} skip"
     }
+  },
+  "sources": {
+    "title": "Sources",
+    "loading": "Searching for sources…",
+    "empty": "No sources found for this title.",
+    "error": "Could not fetch sources.",
+    "retry": "Retry",
+    "play": "Play",
+    "seeders": "{{count}} seeders",
+    "disabledTitle": "No indexers",
+    "disabledDesc": "No source indexer is configured on this server.",
+    "playError": "Could not play. Torrent streaming may be disabled, or the format isn't supported by the browser."
   }
 }

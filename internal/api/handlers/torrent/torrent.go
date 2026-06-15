@@ -12,9 +12,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
@@ -35,6 +38,13 @@ type Manager interface {
 	GetOrStart(ctx context.Context, uri string) (*torrentstream.Session, error)
 }
 
+// SourceSearcher is the slice of *torrentstream.SourceService the handler
+// needs for the IMDb-keyed source aggregation (/torrent/sources/*). nil
+// when no Torznab indexer is configured.
+type SourceSearcher interface {
+	Sources(ctx context.Context, mt torrentstream.MediaType, imdbID string) ([]torrentstream.SearchResult, error)
+}
+
 // MetadataSearcher is the slice of *provider.Manager used to ENRICH the
 // catalogue browse with TMDb metadata (poster / overview / year / id).
 // It's metadata only — it does not resolve playable sources; sources come
@@ -46,23 +56,72 @@ type MetadataSearcher interface {
 
 type Handler struct {
 	mgr        Manager
+	sources    SourceSearcher
 	meta       MetadataSearcher
 	adminCheck func(*http.Request) bool
 	logger     *slog.Logger
 }
 
-// NewHandler builds the handler. meta may be nil (no TMDb configured →
+// NewHandler builds the handler. mgr may be nil (streaming off → /search,
+// /discover, /stream not used). sources may be nil (no Torznab indexer →
+// /sources/* returns 503). meta may be nil (no TMDb configured →
 // /discover returns 503). adminCheck reports whether the caller may START
 // a torrent (spend bandwidth); pass nil to use the default claims role
 // check.
-func NewHandler(mgr Manager, meta MetadataSearcher, adminCheck func(*http.Request) bool, logger *slog.Logger) *Handler {
+func NewHandler(mgr Manager, sources SourceSearcher, meta MetadataSearcher, adminCheck func(*http.Request) bool, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if adminCheck == nil {
 		adminCheck = claimsAdmin
 	}
-	return &Handler{mgr: mgr, meta: meta, adminCheck: adminCheck, logger: logger}
+	return &Handler{mgr: mgr, sources: sources, meta: meta, adminCheck: adminCheck, logger: logger}
+}
+
+// imdbIDPattern is the canonical IMDb id form: "tt" + 7 or 8 digits.
+var imdbIDPattern = regexp.MustCompile(`^tt\d{7,8}$`)
+
+// SourcesMovie resolves streamable sources for a movie by IMDb id.
+//
+// GET /torrent/sources/movie/{imdbId}
+func (h *Handler) SourcesMovie(w http.ResponseWriter, r *http.Request) {
+	h.sourcesByIMDb(w, r, torrentstream.MediaTypeMovie)
+}
+
+// SourcesSeries resolves streamable sources for a series by IMDb id.
+//
+// GET /torrent/sources/series/{imdbId}
+func (h *Handler) SourcesSeries(w http.ResponseWriter, r *http.Request) {
+	h.sourcesByIMDb(w, r, torrentstream.MediaTypeSeries)
+}
+
+// sourcesByIMDb validates the IMDb id, queries the aggregator (cache →
+// Torznab) and returns the normalised, sorted sources under the canonical
+// {data} envelope.
+func (h *Handler) sourcesByIMDb(w http.ResponseWriter, r *http.Request, mt torrentstream.MediaType) {
+	imdbID := strings.TrimSpace(chi.URLParam(r, "imdbId"))
+	if !imdbIDPattern.MatchString(imdbID) {
+		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_IMDB_ID",
+			"imdbId must be a valid IMDb id (e.g. tt0133093)")
+		return
+	}
+	if h.sources == nil {
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "INDEXER_DISABLED",
+			"no source indexer is configured on this server")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	results, err := h.sources.Sources(ctx, mt, imdbID)
+	if err != nil {
+		h.logger.Warn("torrent sources failed", "type", mt, "imdb", imdbID, "error", err)
+		handlers.RespondError(w, r, http.StatusBadGateway, "INDEXER_UNAVAILABLE",
+			"source indexer unavailable")
+		return
+	}
+	handlers.RespondData(w, http.StatusOK, results)
 }
 
 // claimsAdmin is the default "may start a download" gate: admin role.

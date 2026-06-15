@@ -1795,5 +1795,17 @@
       "confirm": "Aplicar",
       "summary": "{{count}} total · {{overwrite}} sobrescribir · {{skip}} saltar"
     }
+  },
+  "sources": {
+    "title": "Fuentes",
+    "loading": "Buscando fuentes…",
+    "empty": "No se encontraron fuentes para este título.",
+    "error": "No se pudieron obtener las fuentes.",
+    "retry": "Reintentar",
+    "play": "Reproducir",
+    "seeders": "{{count}} seeders",
+    "disabledTitle": "Sin indexadores",
+    "disabledDesc": "No hay ningún indexador de fuentes configurado en este servidor.",
+    "playError": "No se pudo reproducir. Puede que el streaming de torrent esté desactivado o que el formato no sea compatible con el navegador."
   }
 }

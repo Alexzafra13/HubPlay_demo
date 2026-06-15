@@ -141,10 +141,14 @@ type IPTVDeps struct {
 	Schedules IPTVSchedulesRepo
 }
 
-// TorrentDeps es el motor de streaming BitTorrent para fuentes legales.
-// nil (Enabled=false en config) = el surface /torrent/* no se monta.
+// TorrentDeps agrupa el motor de streaming BitTorrent y el agregador de
+// fuentes Torznab. Ambos son opcionales e independientes:
+//   - Manager nil (torrent.enabled=false) ⇒ no se montan /torrent/{discover,
+//     search,stream}.
+//   - Sources nil (sin torznab.indexers) ⇒ no se montan /torrent/sources/*.
 type TorrentDeps struct {
 	Manager *torrentstream.Manager
+	Sources *torrentstream.SourceService
 }
 
 // FederationDeps es el manager de peer-to-peer sharing. nil = todo el

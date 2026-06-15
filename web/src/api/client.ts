@@ -69,6 +69,7 @@ import type {
   ApiErrorBody,
   TorrentSearchResult,
   TorrentDiscoverResult,
+  MediaSourceType,
 } from "./types";
 import { ApiError } from "./types";
 import { getClientCapabilitiesHeader } from "./clientCapabilities";
@@ -481,6 +482,21 @@ export class ApiClient {
 
   torrentStreamURL(src: string): string {
     return `${this.baseUrl}/torrent/stream?src=${encodeURIComponent(src)}`;
+  }
+
+  // getMediaSources resolves streamable sources for a title by IMDb id via
+  // the Torznab aggregator (/torrent/sources/{type}/{imdbId}). Results are
+  // already normalised + sorted (seeders → quality → size) and cached
+  // server-side per (type, imdbId). Play one by passing its magnet_uri (or
+  // torrent_url) to torrentStreamURL.
+  async getMediaSources(
+    type: MediaSourceType,
+    imdbId: string,
+  ): Promise<TorrentSearchResult[]> {
+    return this.request<TorrentSearchResult[]>(
+      "GET",
+      `/torrent/sources/${type}/${encodeURIComponent(imdbId)}`,
+    );
   }
 
   async getUsers(): Promise<User[]> {

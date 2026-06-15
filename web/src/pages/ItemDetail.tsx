@@ -11,6 +11,7 @@ import {
   CastChip,
 } from "@/components/media";
 import { RecommendationsRail } from "@/components/media/RecommendationsRail";
+import { SourceList } from "@/components/media/SourceList";
 import { VideoPlayer } from "@/components/player";
 import { ImageManager } from "@/components/ImageManager";
 import { IdentifyDialog } from "@/components/IdentifyDialog";
@@ -515,6 +516,27 @@ export default function ItemDetail() {
         {(item.type === "movie" || item.type === "series") && id && (
           <RecommendationsRail itemId={id} />
         )}
+
+        {/* External sources — streamable copies resolved by IMDb id via
+            the Torznab aggregator. Only shown for movies/series that have
+            an imdb id; the SourceList itself hides gracefully when no
+            indexer is configured on the server (503/404). */}
+        {(item.type === "movie" || item.type === "series") &&
+          item.external_ids?.imdb && (
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-text-primary">
+                {t("sources.title", { defaultValue: "Fuentes" })}
+              </h2>
+              <SourceList
+                type={item.type === "series" ? "series" : "movie"}
+                imdbId={
+                  item.external_ids.imdb.startsWith("tt")
+                    ? item.external_ids.imdb
+                    : `tt${item.external_ids.imdb}`
+                }
+              />
+            </section>
+          )}
 
         {/* Media info — technical metadata (codecs, audio tracks,
             subtitles). Lowest signal for a casual user, highest for

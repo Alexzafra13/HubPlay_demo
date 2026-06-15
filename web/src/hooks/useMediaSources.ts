@@ -1,0 +1,49 @@
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/api/client";
+import type { MediaSourceType, TorrentSearchResult } from "@/api/types";
+
+export interface UseMediaSourcesResult {
+  /** Normalised, sorted sources (seeders → quality → size). */
+  sources: TorrentSearchResult[];
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  /** Re-run the query (bypasses the React Query cache). */
+  refetch: () => void;
+}
+
+/**
+ * useMediaSources fetches the streamable sources for a title by IMDb id
+ * from the backend Torznab aggregator (/torrent/sources/{type}/{imdbId}).
+ *
+ * The query is disabled until both `type` and a non-empty `imdbId` are
+ * present (so it's safe to call before the item's metadata has loaded),
+ * and can be further gated with `options.enabled`. Results are kept fresh
+ * for 5 minutes client-side on top of the server-side cache.
+ */
+export function useMediaSources(
+  type: MediaSourceType | undefined,
+  imdbId: string | null | undefined,
+  options?: { enabled?: boolean },
+): UseMediaSourcesResult {
+  const enabled = Boolean(type && imdbId) && (options?.enabled ?? true);
+
+  const query = useQuery({
+    queryKey: ["media-sources", type, imdbId],
+    queryFn: () =>
+      api.getMediaSources(type as MediaSourceType, imdbId as string),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+
+  return {
+    sources: query.data ?? [],
+    isLoading: query.isLoading && enabled,
+    isError: query.isError,
+    error: query.error,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
+}

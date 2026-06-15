@@ -20,6 +20,12 @@ services:
       # operator type a connection string. SQLite remains the default
       # until the operator explicitly flips the switch in the UI.
       - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
+      # Agregación de fuentes Torznab/Newznab (opcional). Apunta a tu propio
+      # Prowlarr/Jackett para habilitar la búsqueda de fuentes por IMDb id.
+      # Vacío ⇒ los endpoints /torrent/sources/* no se montan. Para
+      # reproducir un resultado, además pon torrent.enabled:true en el YAML.
+      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-}
+      - HUBPLAY_TORZNAB_API_KEY=${HUBPLAY_TORZNAB_API_KEY:-}
     # The hubplay process never crashes on a missing/unreachable
     # `db` — SQLite is the default, the bundled DSN is just an
     # *offer*. `depends_on` with `service_healthy` keeps the boot

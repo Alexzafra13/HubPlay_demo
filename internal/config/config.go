@@ -134,13 +134,16 @@ type IPTVTransmuxConfig struct {
 	ReadyTimeout time.Duration `yaml:"ready_timeout"`
 }
 
-// TorrentConfig: motor de streaming BitTorrent para fuentes LEGALES
-// (Internet Archive, dominio público, Creative Commons, o magnets que el
-// operador añade y tiene derecho a usar). El feature está OFF por defecto:
-// el binario no arranca el cliente torrent ni monta los handlers salvo
-// que `enabled: true`. No incluye —por diseño— ningún scraper de indexers
-// de terceros; el buscador integrado consulta catálogos legales (ver
-// internal/torrentstream).
+// TorrentConfig: motor de streaming BitTorrent + agregación de fuentes.
+// El feature está OFF por defecto: el binario no arranca el cliente
+// torrent ni monta los handlers de streaming salvo que `enabled: true`.
+//
+// Fuentes integradas:
+//   - El buscador por texto consulta Internet Archive (catálogo legal).
+//   - Si el operador configura indexers Torznab/Newznab (`torznab.indexers`,
+//     p.ej. su propio Prowlarr/Jackett) se habilita la búsqueda de fuentes
+//     por IMDb id. Lo que el operador apunte ahí, y si tiene derecho a esos
+//     resultados, es responsabilidad del operador.
 type TorrentConfig struct {
 	// Enabled: false → el módulo torrent no se cablea (sin cliente, sin
 	// rutas HTTP). Default false.
@@ -166,6 +169,38 @@ type TorrentConfig struct {
 	// MetadataTimeout: espera máxima a resolver los metadatos del torrent
 	// (magnet → info) antes de fallar. Default 60s.
 	MetadataTimeout time.Duration `yaml:"metadata_timeout"`
+
+	// Torznab: indexers Torznab/Newznab para la búsqueda de fuentes por
+	// IMDb id. Vacío ⇒ los endpoints /torrent/sources/* no se montan.
+	Torznab TorznabConfig `yaml:"torznab"`
+}
+
+// TorznabConfig agrupa los indexers Torznab/Newznab y la caché de
+// resultados. Es independiente de `enabled`: la búsqueda de fuentes
+// funciona aunque el motor de streaming esté apagado (la reproducción
+// sí requiere `enabled: true`).
+type TorznabConfig struct {
+	// Indexers configurados por el operador. Normalmente uno (un Prowlarr
+	// que ya agrega varios), pero se admiten varios.
+	Indexers []TorznabIndexerConfig `yaml:"indexers"`
+
+	// CacheTTL: tiempo de vida de los resultados cacheados por (tipo,
+	// imdbid). Default 20m.
+	CacheTTL time.Duration `yaml:"cache_ttl"`
+}
+
+// TorznabIndexerConfig describe un endpoint Torznab/Newznab.
+type TorznabIndexerConfig struct {
+	// Name etiqueta la fuente en resultados y logs.
+	Name string `yaml:"name"`
+	// URL base de la API Torznab del indexer.
+	URL string `yaml:"url"`
+	// APIKey se añade como ?apikey=.
+	APIKey string `yaml:"api_key"`
+	// Categories enviadas como cat= (default 2000 películas / 5000 series).
+	Categories []string `yaml:"categories"`
+	// Trackers añadidos a los magnets construidos desde un infohash suelto.
+	Trackers []string `yaml:"trackers"`
 }
 
 // ObservabilityConfig: endpoint Prometheus /metrics. Default activado en
@@ -190,14 +225,14 @@ type ObservabilityConfig struct {
 }
 
 type StreamingConfig struct {
-	SegmentDuration             int           `yaml:"segment_duration"`                 // segundos, default 6
-	MaxTranscodeSessions        int           `yaml:"max_transcode_sessions"`           // cap global, default 4
-	MaxTranscodeSessionsPerUser int           `yaml:"max_transcode_sessions_per_user"`  // cap per-user, default 2 — evita que 1 user agote el pool con seek-loops o fanout
-	TranscodePreset             string        `yaml:"transcode_preset"`                 // veryfast, fast, medium
-	DefaultAudioBitrate         string        `yaml:"default_audio_bitrate"`            // p.ej. "192k"
-	CacheDir                    string        `yaml:"cache_dir"`                        // directorio de salida del transcode
-	IdleTimeout                 time.Duration `yaml:"idle_timeout"`                     // limpieza de sesiones idle, default 90s
-	TranscodeTimeout            time.Duration `yaml:"transcode_timeout"`                // duración máxima por transcode, default 4h
+	SegmentDuration             int           `yaml:"segment_duration"`                // segundos, default 6
+	MaxTranscodeSessions        int           `yaml:"max_transcode_sessions"`          // cap global, default 4
+	MaxTranscodeSessionsPerUser int           `yaml:"max_transcode_sessions_per_user"` // cap per-user, default 2 — evita que 1 user agote el pool con seek-loops o fanout
+	TranscodePreset             string        `yaml:"transcode_preset"`                // veryfast, fast, medium
+	DefaultAudioBitrate         string        `yaml:"default_audio_bitrate"`           // p.ej. "192k"
+	CacheDir                    string        `yaml:"cache_dir"`                       // directorio de salida del transcode
+	IdleTimeout                 time.Duration `yaml:"idle_timeout"`                    // limpieza de sesiones idle, default 90s
+	TranscodeTimeout            time.Duration `yaml:"transcode_timeout"`               // duración máxima por transcode, default 4h
 	HWAccel                     HWAccelConfig `yaml:"hardware_acceleration"`
 }
 
@@ -404,6 +439,9 @@ func defaults() *Config {
 			IdleTimeout:     5 * time.Minute,
 			ReadaheadBytes:  16 << 20,
 			MetadataTimeout: 60 * time.Second,
+			Torznab: TorznabConfig{
+				CacheTTL: 20 * time.Minute,
+			},
 		},
 		Observability: ObservabilityConfig{
 			MetricsEnabled: true,
@@ -416,7 +454,7 @@ func defaults() *Config {
 		},
 		Upload: UploadConfig{
 			Enabled:           true,
-			StagingDir:        "", // resolved relative to config dir in Load
+			StagingDir:        "",                      // resolved relative to config dir in Load
 			MaxBytesPerUpload: 50 * 1024 * 1024 * 1024, // 50 GiB
 			MinDurationMs:     1000,
 		},
@@ -489,6 +527,22 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("HUBPLAY_STREAMING_CACHE_DIR"); v != "" {
 		cfg.Streaming.CacheDir = v
+	}
+	// Torznab indexer via env (el caso docker-compose de un único Prowlarr/
+	// Jackett). Si ya hay indexers en el YAML, override el primero; si no,
+	// crea uno. La API key es opcional (algunos indexers la llevan en la URL).
+	if v := os.Getenv("HUBPLAY_TORZNAB_URL"); v != "" {
+		key := os.Getenv("HUBPLAY_TORZNAB_API_KEY")
+		if len(cfg.Torrent.Torznab.Indexers) == 0 {
+			cfg.Torrent.Torznab.Indexers = []TorznabIndexerConfig{
+				{Name: "default", URL: v, APIKey: key},
+			}
+		} else {
+			cfg.Torrent.Torznab.Indexers[0].URL = v
+			if key != "" {
+				cfg.Torrent.Torznab.Indexers[0].APIKey = key
+			}
+		}
 	}
 }
 

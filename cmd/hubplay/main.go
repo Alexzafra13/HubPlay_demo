@@ -341,6 +341,31 @@ func run(configPath string) error {
 		})
 	}
 
+	// Agregador de fuentes Torznab/Newznab (búsqueda por IMDb id). Es
+	// independiente del cliente torrent: se cablea si el operador configuró
+	// indexers, aunque el motor de streaming esté apagado (la reproducción
+	// sí necesita torrent.enabled). nil ⇒ /torrent/sources/* no se monta.
+	var sourceSvc *torrentstream.SourceService
+	if len(cfg.Torrent.Torznab.Indexers) > 0 {
+		indexers := make([]torrentstream.TorznabIndexer, 0, len(cfg.Torrent.Torznab.Indexers))
+		for _, ix := range cfg.Torrent.Torznab.Indexers {
+			if ix.URL == "" {
+				continue
+			}
+			indexers = append(indexers, torrentstream.TorznabIndexer{
+				Name:       ix.Name,
+				URL:        ix.URL,
+				APIKey:     ix.APIKey,
+				Categories: ix.Categories,
+				Trackers:   ix.Trackers,
+			})
+		}
+		if len(indexers) > 0 {
+			client := torrentstream.NewTorznabClient(indexers, logger)
+			sourceSvc = torrentstream.NewSourceService(client, cfg.Torrent.Torznab.CacheTTL, logger)
+		}
+	}
+
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
 
@@ -523,6 +548,7 @@ func run(configPath string) error {
 		},
 		Torrent: api.TorrentDeps{
 			Manager: torrentMgr,
+			Sources: sourceSvc,
 		},
 		Federation: api.FederationDeps{
 			Manager: federationManager,
