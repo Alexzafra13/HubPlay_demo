@@ -69,6 +69,7 @@ import type {
   ApiErrorBody,
   TorrentSearchResult,
   MediaSourceType,
+  DownloadJob,
   IndexerStatus,
   IndexerInput,
 } from "./types";
@@ -493,6 +494,19 @@ export class ApiClient {
     return this.request<TorrentSearchResult[]>("GET", "/torrent/sources/search", {
       params: { q: query, type },
     });
+  }
+
+  // downloadSource fully downloads a source into the matching library's
+  // "Descargas" folder and triggers a rescan (admin-only). Returns the job.
+  async downloadSource(src: string, type: MediaSourceType): Promise<DownloadJob> {
+    return this.request<DownloadJob>("POST", "/torrent/download", {
+      body: { src, type },
+    });
+  }
+
+  // listDownloads returns the current download jobs with progress.
+  async listDownloads(): Promise<DownloadJob[]> {
+    return this.request<DownloadJob[]>("GET", "/torrent/downloads");
   }
 
   // ── Admin: Torznab/Prowlarr indexer management (plug-and-play, DB-backed) ──

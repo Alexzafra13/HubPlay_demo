@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
@@ -11,7 +12,35 @@ import (
 	torrenthandler "hubplay/internal/api/handlers/torrent"
 	"hubplay/internal/auth"
 	authmodel "hubplay/internal/auth/model"
+	"hubplay/internal/library"
+	"hubplay/internal/torrentstream"
 )
+
+// torrentLibraryTarget adapts the library service to the download handler's
+// LibraryTarget: it resolves a "Descargas" folder inside the library whose
+// content type matches the requested media type, and rescans it afterward.
+type torrentLibraryTarget struct{ svc *library.Service }
+
+func (t torrentLibraryTarget) DownloadDir(ctx context.Context, mt torrentstream.MediaType) (string, string, error) {
+	libs, err := t.svc.List(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	want := "movies"
+	if mt == torrentstream.MediaTypeSeries {
+		want = "shows"
+	}
+	for _, l := range libs {
+		if l.ContentType == want && len(l.Paths) > 0 {
+			return l.ID, filepath.Join(l.Paths[0], "Descargas"), nil
+		}
+	}
+	return "", "", torrenthandler.ErrNoLibrary
+}
+
+func (t torrentLibraryTarget) Scan(ctx context.Context, libraryID string) error {
+	return t.svc.Scan(ctx, libraryID)
+}
 
 // mountStreaming registra el surface de player: master playlist HLS,
 // per-quality playlist + segmento, direct play, stop session,
@@ -493,6 +522,17 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 			r.Get("/sources/search", h.SourcesSearch)
 			r.Get("/sources/movie/{imdbId}", h.SourcesMovie)
 			r.Get("/sources/series/{imdbId}", h.SourcesSeries)
+		}
+		// Download to library: needs the engine (download) + a library to
+		// land in + rescan. Admin-only (enforced in the handler).
+		if deps.Torrent.Manager != nil && deps.Catalog.Libraries != nil {
+			dh := torrenthandler.NewDownloadHandler(
+				deps.Torrent.Manager,
+				torrentLibraryTarget{svc: deps.Catalog.Libraries},
+				nil, deps.Infra.Logger,
+			)
+			r.Post("/download", dh.Create)
+			r.Get("/downloads", dh.List)
 		}
 	})
 

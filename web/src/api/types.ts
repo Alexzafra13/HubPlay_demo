@@ -1965,6 +1965,17 @@ export interface TorrentSearchResult {
 // MediaSourceType selects the IMDb-keyed source aggregation endpoint.
 export type MediaSourceType = "movie" | "series";
 
+// DownloadJob is a download-to-library job (/torrent/download[s]).
+export interface DownloadJob {
+  id: string;
+  name: string;
+  dest: string;
+  status: "queued" | "downloading" | "copying" | "completed" | "failed";
+  bytes_done: number;
+  bytes_total: number;
+  error?: string;
+}
+
 // IndexerInput is the create/update payload for a Torznab/Prowlarr indexer
 // managed from the admin panel (persisted in the DB — no yaml/env edits).
 export interface IndexerInput {

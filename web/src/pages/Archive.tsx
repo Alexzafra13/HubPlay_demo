@@ -119,7 +119,7 @@ export default function Archive() {
           icon={<SearchIcon strokeWidth={1.5} />}
         />
       ) : (
-        <SourceResults sources={sources} />
+        <SourceResults sources={sources} downloadType={type} />
       )}
     </div>
   );

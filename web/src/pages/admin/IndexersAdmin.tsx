@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
 import { IndexersPanel } from "@/components/admin/IndexersPanel";
+import { DownloadsPanel } from "@/components/admin/DownloadsPanel";
 
 // IndexersAdmin — centralized admin home for the torrent/source stack:
 // manage Torznab/Prowlarr indexers, plus quick links to the bundled
@@ -32,6 +33,7 @@ export default function IndexersAdmin() {
         </p>
       </div>
 
+      <DownloadsPanel />
       <IndexersPanel />
     </div>
   );

@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, X, HardDrive, RefreshCw } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { Play, X, HardDrive, RefreshCw, Download, Check } from "lucide-react";
 import { api } from "@/api/client";
 import { ApiError, type MediaSourceType, type TorrentSearchResult } from "@/api/types";
 import { useMediaSources } from "@/hooks/useMediaSources";
+import { useAuthStore } from "@/store/auth";
 import { Button, Spinner, EmptyState } from "@/components/common";
 
 interface SourceListProps {
@@ -82,14 +84,20 @@ function groupByQuality(
 export function SourceResults({
   sources,
   onPlay,
+  downloadType,
 }: {
   sources: TorrentSearchResult[];
   onPlay?: (source: TorrentSearchResult) => void;
+  /** When set and the user is an admin, each row shows a "Download" button
+   *  that saves the source to the library (this media type). */
+  downloadType?: MediaSourceType;
 }) {
   const { t } = useTranslation();
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const [playing, setPlaying] = useState<{ src: string; title: string } | null>(
     null,
   );
+  const canDownload = isAdmin && downloadType !== undefined;
   const otherLabel = t("sources.other", { defaultValue: "Otros" });
   const groups = useMemo(
     () => groupByQuality(sources, otherLabel),
@@ -131,6 +139,7 @@ export function SourceResults({
                   key={s.infohash || s.identifier}
                   source={s}
                   onPlay={() => handlePlay(s)}
+                  downloadType={canDownload ? downloadType : undefined}
                 />
               ))}
             </ul>
@@ -205,15 +214,17 @@ export function SourceList({ type, imdbId, enabled = true, onPlay }: SourceListP
       </div>
     );
   }
-  return <SourceResults sources={sources} onPlay={onPlay} />;
+  return <SourceResults sources={sources} onPlay={onPlay} downloadType={type} />;
 }
 
 function SourceRow({
   source,
   onPlay,
+  downloadType,
 }: {
   source: TorrentSearchResult;
   onPlay: () => void;
+  downloadType?: MediaSourceType;
 }) {
   const { t } = useTranslation();
   const size = formatSize(source.size_bytes);
@@ -244,6 +255,7 @@ function SourceRow({
           ) : null}
         </div>
       </div>
+      {downloadType ? <DownloadButton source={source} type={downloadType} /> : null}
       <button
         type="button"
         onClick={onPlay}
@@ -253,6 +265,38 @@ function SourceRow({
         {t("sources.play", { defaultValue: "Reproducir" })}
       </button>
     </li>
+  );
+}
+
+// DownloadButton starts a "download to library" for one source (admin).
+function DownloadButton({
+  source,
+  type,
+}: {
+  source: TorrentSearchResult;
+  type: MediaSourceType;
+}) {
+  const { t } = useTranslation();
+  const m = useMutation({
+    mutationFn: () => api.downloadSource(bestSrc(source), type),
+  });
+  return (
+    <button
+      type="button"
+      onClick={() => m.mutate()}
+      disabled={m.isPending || m.isSuccess}
+      title={
+        m.isError && m.error instanceof ApiError
+          ? m.error.message
+          : t("sources.downloadHint", { defaultValue: "Descargar a la biblioteca" })
+      }
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-text-secondary transition hover:border-border-strong hover:text-text-primary disabled:opacity-60"
+    >
+      {m.isSuccess ? <Check className="size-3.5" /> : <Download className="size-3.5" />}
+      {m.isSuccess
+        ? t("sources.queued", { defaultValue: "En cola" })
+        : t("sources.download", { defaultValue: "Descargar" })}
+    </button>
   );
 }
 

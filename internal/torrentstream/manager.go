@@ -99,6 +99,10 @@ type Manager struct {
 	sessions map[string]*Session // keyed by infohash hex
 	bySrc    map[string]*Session // keyed by the src (magnet/URL) used to start it
 
+	downloads map[string]*downloadJob // keyed by job id
+	dlCtx     context.Context         // background ctx for download goroutines
+	dlCancel  context.CancelFunc
+
 	allowPrivate bool
 
 	reaperStop chan struct{}
@@ -131,6 +135,7 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 		return nil, fmt.Errorf("torrentstream: new client: %w", err)
 	}
 
+	dlCtx, dlCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		opts:         opts,
 		client:       client,
@@ -139,6 +144,9 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 		allowPrivate: opts.AllowPrivateUpstreams,
 		sessions:     make(map[string]*Session),
 		bySrc:        make(map[string]*Session),
+		downloads:    make(map[string]*downloadJob),
+		dlCtx:        dlCtx,
+		dlCancel:     dlCancel,
 		reaperStop:   make(chan struct{}),
 		reaperDone:   make(chan struct{}),
 		now:          time.Now,
@@ -286,6 +294,7 @@ func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
 
 // Close stops the reaper and the torrent client.
 func (m *Manager) Close() error {
+	m.dlCancel() // stop any in-flight downloads
 	close(m.reaperStop)
 	<-m.reaperDone
 	errs := m.client.Close()
