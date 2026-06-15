@@ -62,12 +62,6 @@ type TorznabIndexer struct {
 	Trackers []string
 }
 
-// ProwlarrTorznabURL composes the standard Torznab results endpoint from a
-// Prowlarr root URL.
-func ProwlarrTorznabURL(baseURL string) string {
-	return strings.TrimRight(baseURL, "/") + "/api/v1/indexers/all/results/torznab"
-}
-
 // perIndexerTimeout bounds a single indexer round-trip so one hung/slow
 // endpoint can't hold up the whole fan-out (which runs concurrently).
 const perIndexerTimeout = 8 * time.Second
@@ -109,49 +103,114 @@ func NewTorznabClient(source IndexerProvider, logger *slog.Logger) *TorznabClien
 	}
 }
 
-// Search fans the query out across every configured indexer CONCURRENTLY,
-// normalises and merges the results, drops duplicate infohashes and sorts
-// by availability/quality. Each indexer gets its own strict timeout
-// (perIndexerTO), so one hung/slow endpoint can't hold up the others or
-// the API response. An indexer that errors is logged and skipped so one
-// bad endpoint doesn't sink the whole search; an all-empty run surfaces
-// the first error so the caller can report a failure.
+// torznabEndpoint is a concrete Torznab feed to query (already resolved
+// from an indexer record).
+type torznabEndpoint struct {
+	url    string
+	apiKey string
+	name   string // for logging only
+}
+
+// looksLikeTorznab reports whether raw is already a Torznab feed URL (a
+// Jackett "/all/results/torznab" aggregate, a Prowlarr per-indexer "/{id}/
+// api", etc.) rather than a bare Prowlarr root that must be expanded.
+func looksLikeTorznab(raw string) bool {
+	r := strings.ToLower(raw)
+	return strings.Contains(r, "torznab") || strings.Contains(r, "/api/v2.0/")
+}
+
+// resolveEndpoints turns one configured indexer into the concrete Torznab
+// feeds to query.
+//
+//   - A full Torznab URL (Jackett aggregate, or an explicit feed) is used
+//     as-is.
+//   - A bare Prowlarr root is EXPANDED: Prowlarr has no combined Torznab
+//     feed, so we enumerate its indexers via the native API
+//     (/api/v1/indexer) and query each one's per-indexer Torznab feed
+//     (/{id}/api), which honours imdbid. Results are merged upstream.
+func (c *TorznabClient) resolveEndpoints(ctx context.Context, idx TorznabIndexer) []torznabEndpoint {
+	raw := strings.TrimSpace(idx.URL)
+	if raw == "" {
+		raw = strings.TrimSpace(idx.BaseURL)
+	}
+	if raw == "" {
+		return nil
+	}
+	if looksLikeTorznab(raw) {
+		return []torznabEndpoint{{url: raw, apiKey: idx.APIKey, name: idx.Name}}
+	}
+	list, err := fetchProwlarrIndexers(ctx, c.httpClient, raw, idx.APIKey)
+	if err != nil {
+		c.logger.Warn("torznab: prowlarr indexer list failed", "indexer", idx.Name, "error", err)
+		return nil
+	}
+	base := strings.TrimRight(raw, "/")
+	eps := make([]torznabEndpoint, 0, len(list))
+	for _, pix := range list {
+		if !pix.Enable {
+			continue
+		}
+		eps = append(eps, torznabEndpoint{
+			url:    fmt.Sprintf("%s/%d/api", base, pix.ID),
+			apiKey: idx.APIKey,
+			name:   idx.Name + "/" + pix.Name,
+		})
+	}
+	return eps
+}
+
+// Search fans the query out across every resolved Torznab feed
+// CONCURRENTLY, normalises and merges the results, drops duplicate
+// infohashes and sorts by availability/quality. Each feed gets its own
+// strict timeout (perIndexerTO), so one hung/slow endpoint can't hold up
+// the others or the API response. A feed that errors is logged and skipped;
+// an all-empty run surfaces the first error so the caller can report it.
 //
 // imdbID is the canonical "ttNNN…" form (the handler validates it); term
 // is an optional free-text fallback for indexers that don't resolve by
 // IMDb id.
 func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term string) ([]SearchResult, error) {
 	indexers := c.source.Indexers(ctx)
-	// Per-indexer result slots, written by index so the merged order is
-	// deterministic (indexer order) regardless of which goroutine finishes
-	// first.
-	results := make([][]SearchResult, len(indexers))
-	errs := make([]error, len(indexers))
+
+	type job struct {
+		ep  torznabEndpoint
+		idx TorznabIndexer
+	}
+	var jobs []job
+	for _, idx := range indexers {
+		for _, ep := range c.resolveEndpoints(ctx, idx) {
+			jobs = append(jobs, job{ep: ep, idx: idx})
+		}
+	}
+
+	results := make([][]SearchResult, len(jobs))
+	errs := make([]error, len(jobs))
 
 	var wg sync.WaitGroup
-	for i, idx := range indexers {
+	for i := range jobs {
 		wg.Add(1)
-		go func(i int, idx TorznabIndexer) {
+		go func(i int) {
 			defer wg.Done()
+			j := jobs[i]
 			ictx, cancel := context.WithTimeout(ctx, c.perIndexerTO)
 			defer cancel()
 
-			items, err := c.queryIndexer(ictx, idx, mt, imdbID, term)
+			items, err := c.queryEndpoint(ictx, j.ep, j.idx, mt, imdbID, term)
 			if err != nil {
-				// Note: we log the indexer NAME, never the built URL — it
-				// carries the apikey.
-				c.logger.Warn("torznab: indexer query failed", "indexer", idx.Name, "error", err)
+				// Log the endpoint NAME, never the built URL — it carries
+				// the apikey.
+				c.logger.Warn("torznab: query failed", "endpoint", j.ep.name, "error", err)
 				errs[i] = err
 				return
 			}
 			out := make([]SearchResult, 0, len(items))
 			for _, it := range items {
-				if r, ok := normalizeItem(it, idx); ok {
+				if r, ok := normalizeItem(it, j.idx); ok {
 					out = append(out, r)
 				}
 			}
 			results[i] = out
-		}(i, idx)
+		}(i)
 	}
 	wg.Wait()
 
@@ -159,7 +218,7 @@ func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term s
 		out      []SearchResult
 		firstErr error
 	)
-	for i := range indexers {
+	for i := range jobs {
 		out = append(out, results[i]...)
 		if firstErr == nil && errs[i] != nil {
 			firstErr = errs[i]
@@ -172,10 +231,10 @@ func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term s
 	return dedupeByInfoHash(out), nil
 }
 
-// queryIndexer performs a single indexer round-trip and returns the raw
-// parsed items.
-func (c *TorznabClient) queryIndexer(ctx context.Context, idx TorznabIndexer, mt MediaType, imdbID, term string) ([]torznabItem, error) {
-	reqURL, err := buildTorznabURL(idx, mt, imdbID, term)
+// queryEndpoint performs a single Torznab feed round-trip and returns the
+// raw parsed items.
+func (c *TorznabClient) queryEndpoint(ctx context.Context, ep torznabEndpoint, idx TorznabIndexer, mt MediaType, imdbID, term string) ([]torznabItem, error) {
+	reqURL, err := buildTorznabURL(ep.url, ep.apiKey, idx, mt, imdbID, term)
 	if err != nil {
 		return nil, fmt.Errorf("torznab: build url: %w", err)
 	}
@@ -202,16 +261,16 @@ func (c *TorznabClient) queryIndexer(ctx context.Context, idx TorznabIndexer, mt
 // indexer so a hostile or broken endpoint can't exhaust memory.
 const maxTorznabResponseBytes = 8 << 20
 
-// buildTorznabURL assembles the Torznab query string. The IMDb id is sent
-// without the leading "tt" (Torznab spec). Existing query params on the
-// base URL (some Jackett configs embed an apikey there) are preserved.
-func buildTorznabURL(idx TorznabIndexer, mt MediaType, imdbID, term string) (string, error) {
-	u, err := url.Parse(idx.URL)
+// buildTorznabURL assembles the Torznab query string onto a concrete feed
+// endpoint. The IMDb id is sent without the leading "tt" (Torznab spec).
+// Existing query params on the endpoint are preserved.
+func buildTorznabURL(endpoint, apiKey string, idx TorznabIndexer, mt MediaType, imdbID, term string) (string, error) {
+	u, err := url.Parse(endpoint)
 	if err != nil {
 		return "", err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("invalid indexer url %q", idx.URL)
+		return "", fmt.Errorf("invalid endpoint url %q", endpoint)
 	}
 	q := u.Query()
 	switch mt {
@@ -239,8 +298,8 @@ func buildTorznabURL(idx TorznabIndexer, mt MediaType, imdbID, term string) (str
 		}
 	}
 	q.Set("cat", strings.Join(cats, ","))
-	if idx.APIKey != "" {
-		q.Set("apikey", idx.APIKey)
+	if apiKey != "" {
+		q.Set("apikey", apiKey)
 	}
 	q.Set("o", "xml")
 	u.RawQuery = q.Encode()

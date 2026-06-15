@@ -9,23 +9,15 @@ import (
 	"testing"
 )
 
-func TestProwlarrTorznabURL(t *testing.T) {
-	got := ProwlarrTorznabURL("http://localhost:9696/")
-	want := "http://localhost:9696/api/v1/indexers/all/results/torznab"
-	if got != want {
-		t.Errorf("got %q want %q", got, want)
+func TestLooksLikeTorznab(t *testing.T) {
+	if !looksLikeTorznab("http://j:9117/api/v2.0/indexers/all/results/torznab") {
+		t.Error("jackett aggregate should look like torznab")
 	}
-}
-
-func TestResolveTorznabEndpoint(t *testing.T) {
-	// A Prowlarr root composes the standard path.
-	if got := resolveTorznabEndpoint("http://localhost:9696"); got != "http://localhost:9696/api/v1/indexers/all/results/torznab" {
-		t.Errorf("prowlarr root: got %q", got)
+	if !looksLikeTorznab("http://p:9696/1/api?x=torznab") {
+		t.Error("explicit torznab should match")
 	}
-	// A full Torznab endpoint (contains "torznab") is left as-is.
-	jackett := "http://localhost:9117/api/v2.0/indexers/all/results/torznab"
-	if got := resolveTorznabEndpoint(jackett); got != jackett {
-		t.Errorf("jackett full url should be untouched: got %q", got)
+	if looksLikeTorznab("http://localhost:9696") {
+		t.Error("a bare prowlarr root must NOT look like torznab (it gets expanded)")
 	}
 }
 
@@ -53,14 +45,14 @@ func TestBuildTorznabURLCustomCategories(t *testing.T) {
 		MovieCategories:  []string{"2040", "2050"},
 		SeriesCategories: []string{"5040"},
 	}
-	raw, err := buildTorznabURL(idx, MediaTypeMovie, "tt1", "")
+	raw, err := buildTorznabURL(idx.URL, "", idx, MediaTypeMovie, "tt1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(raw, "cat=2040%2C2050") {
 		t.Errorf("movie cat not applied: %s", raw)
 	}
-	raw2, _ := buildTorznabURL(idx, MediaTypeSeries, "tt1", "")
+	raw2, _ := buildTorznabURL(idx.URL, "", idx, MediaTypeSeries, "tt1", "")
 	if !strings.Contains(raw2, "cat=5040") {
 		t.Errorf("series cat not applied: %s", raw2)
 	}
@@ -85,7 +77,7 @@ func capsServer(t *testing.T, errBody string, status int) *httptest.Server {
 	})
 	mux.HandleFunc("/api/v1/indexer", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `[{"name":"1337x","enable":true},{"name":"Disabled","enable":false}]`)
+		_, _ = io.WriteString(w, `[{"id":1,"name":"1337x","enable":true},{"id":2,"name":"Disabled","enable":false}]`)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -126,8 +118,9 @@ func TestStoreStatuses(t *testing.T) {
 
 	store := NewIndexerStore(newFakeKV())
 	// Names chosen so the stable sort puts "aaa-prowlarr" first.
+	// A bare Prowlarr root → reachability + trackers via the native API.
 	if _, err := store.Add(context.Background(), IndexerInput{
-		Name: "aaa-prowlarr", URL: good.URL + "/torznab", BaseURL: good.URL, APIKey: "k", Enabled: true,
+		Name: "aaa-prowlarr", BaseURL: good.URL, APIKey: "k", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +146,44 @@ func TestStoreStatuses(t *testing.T) {
 	}
 	if st[1].Reachable || st[1].Error == "" {
 		t.Errorf("second indexer should be unreachable with an error: %+v", st[1])
+	}
+}
+
+// TestSearchProwlarrExpansion verifies a bare Prowlarr root is expanded:
+// HubPlay enumerates /api/v1/indexer and queries each enabled indexer's
+// per-indexer Torznab feed (/{id}/api).
+func TestSearchProwlarrExpansion(t *testing.T) {
+	queried := make(chan int, 4)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/indexer", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[{"id":7,"name":"1337x","enable":true},{"id":8,"name":"off","enable":false}]`)
+	})
+	mux.HandleFunc("/7/api", func(w http.ResponseWriter, _ *http.Request) {
+		queried <- 7
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = io.WriteString(w, sampleFeed)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewTorznabClient(StaticIndexers{
+		{Name: "prowlarr", BaseURL: srv.URL, APIKey: "k"},
+	}, nil)
+	res, err := c.Search(context.Background(), MediaTypeMovie, "tt0133093", "")
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("expected results from the expanded per-indexer feed")
+	}
+	select {
+	case id := <-queried:
+		if id != 7 {
+			t.Errorf("queried wrong indexer id: %d", id)
+		}
+	default:
+		t.Error("the enabled indexer's /7/api feed was never queried")
 	}
 }
 

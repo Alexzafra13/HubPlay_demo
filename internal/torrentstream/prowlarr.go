@@ -41,26 +41,37 @@ type IndexerStatus struct {
 	Trackers  []string `json:"trackers,omitempty"`
 }
 
-// TestTorznabConnection validates a Torznab endpoint + API key by issuing a
-// caps query, without needing a pre-built client. Used by the admin "test
-// before save" endpoint. baseOrURL may be a full Torznab URL or a Prowlarr
-// root (in which case the standard path is composed).
+// TestTorznabConnection validates an indexer address + API key without a
+// pre-built client. Used by the admin "test before save" endpoint.
+// baseOrURL may be a full Torznab URL (caps query) or a Prowlarr root (in
+// which case we verify via the native indexer-list API).
 func TestTorznabConnection(ctx context.Context, baseOrURL, apiKey string) error {
-	torznabURL := resolveTorznabEndpoint(baseOrURL)
 	client := &http.Client{Timeout: 10 * time.Second}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return pingTorznab(ctx, client, torznabURL, apiKey)
+	_, err := probeIndexer(ctx, client, baseOrURL, apiKey)
+	return err
 }
 
-// resolveTorznabEndpoint returns a usable Torznab results URL: the input
-// as-is when it already points at a torznab path, otherwise the composed
-// Prowlarr path.
-func resolveTorznabEndpoint(raw string) string {
-	if strings.Contains(raw, "torznab") || strings.Contains(raw, "/api/v2.0/") {
-		return raw
+// probeIndexer checks reachability of an indexer address. For a Torznab
+// feed URL it issues a caps query; for a bare Prowlarr root it lists the
+// native indexers (returning their enabled names so the admin UI can show
+// what the instance aggregates).
+func probeIndexer(ctx context.Context, client *http.Client, raw, apiKey string) ([]string, error) {
+	if looksLikeTorznab(raw) {
+		return nil, pingTorznab(ctx, client, raw, apiKey)
 	}
-	return ProwlarrTorznabURL(raw)
+	list, err := fetchProwlarrIndexers(ctx, client, raw, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list))
+	for _, ix := range list {
+		if ix.Enable {
+			names = append(names, ix.Name)
+		}
+	}
+	return names, nil
 }
 
 // torznabError mirrors the <error> element Torznab returns for bad
@@ -131,16 +142,18 @@ func parseTorznabError(body []byte) error {
 }
 
 // prowlarrIndexer is the slice of Prowlarr's native /api/v1/indexer JSON we
-// read to enumerate aggregated trackers.
+// read to enumerate the per-indexer Torznab feeds (Prowlarr has no combined
+// feed). id is needed to build /{id}/api.
 type prowlarrIndexer struct {
+	ID     int    `json:"id"`
 	Name   string `json:"name"`
 	Enable bool   `json:"enable"`
 }
 
-// fetchProwlarrIndexers queries Prowlarr's native indexer listing (JSON)
-// and returns the names of the enabled trackers. Best-effort: any failure
-// is returned to the caller, which treats it as "not available".
-func fetchProwlarrIndexers(ctx context.Context, client *http.Client, baseURL, apiKey string) ([]string, error) {
+// fetchProwlarrIndexers queries Prowlarr's native indexer listing (JSON).
+// Any failure (unreachable, bad key → 401, not a Prowlarr → 404) is
+// returned so the caller can surface "not connected".
+func fetchProwlarrIndexers(ctx context.Context, client *http.Client, baseURL, apiKey string) ([]prowlarrIndexer, error) {
 	u := strings.TrimRight(baseURL, "/") + "/api/v1/indexer"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -152,7 +165,7 @@ func fetchProwlarrIndexers(ctx context.Context, client *http.Client, baseURL, ap
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unreachable: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
@@ -162,11 +175,5 @@ func fetchProwlarrIndexers(ctx context.Context, client *http.Client, baseURL, ap
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&list); err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(list))
-	for _, ix := range list {
-		if ix.Enable {
-			names = append(names, ix.Name)
-		}
-	}
-	return names, nil
+	return list, nil
 }

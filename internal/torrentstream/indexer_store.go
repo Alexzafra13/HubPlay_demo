@@ -199,22 +199,14 @@ func (s *IndexerStore) Indexers(ctx context.Context) []TorznabIndexer {
 	return out
 }
 
-// toTorznabIndexer resolves a record into a search-ready indexer. The URL
-// field is forgiving: a Prowlarr root (no torznab path) gets the standard
-// path composed; a full Torznab/Jackett endpoint is used as-is. base_url is
-// the fallback when url is empty.
+// toTorznabIndexer maps a record to a search-ready indexer. URL/BaseURL are
+// passed through verbatim; the client resolves them at search time (a full
+// Torznab URL is used as-is; a bare Prowlarr root is expanded to its
+// per-indexer feeds).
 func (r IndexerRecord) toTorznabIndexer() TorznabIndexer {
-	raw := r.URL
-	if raw == "" {
-		raw = r.BaseURL
-	}
-	resolved := ""
-	if raw != "" {
-		resolved = resolveTorznabEndpoint(raw)
-	}
 	return TorznabIndexer{
 		Name:             r.Name,
-		URL:              resolved,
+		URL:              r.URL,
 		BaseURL:          r.BaseURL,
 		APIKey:           r.APIKey,
 		MovieCategories:  r.MovieCategories,
@@ -242,20 +234,18 @@ func (s *IndexerStore) Statuses(ctx context.Context) ([]IndexerStatus, error) {
 		wg.Add(1)
 		go func(i int, r IndexerRecord) {
 			defer wg.Done()
-			pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			pctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 			defer cancel()
-			ti := r.toTorznabIndexer()
-			if err := pingTorznab(pctx, s.httpClient, ti.URL, ti.APIKey); err != nil {
+			raw := r.URL
+			if raw == "" {
+				raw = r.BaseURL
+			}
+			names, err := probeIndexer(pctx, s.httpClient, raw, r.APIKey)
+			if err != nil {
 				out[i].Error = err.Error()
 			} else {
 				out[i].Reachable = true
-				// Best-effort: when it's a Prowlarr root, list the
-				// trackers it aggregates so the admin UI can show them.
-				if r.BaseURL != "" {
-					if names, err := fetchProwlarrIndexers(pctx, s.httpClient, r.BaseURL, r.APIKey); err == nil {
-						out[i].Trackers = names
-					}
-				}
+				out[i].Trackers = names
 			}
 		}(i, r)
 	}

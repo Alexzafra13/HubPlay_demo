@@ -25,7 +25,7 @@ services:
       # se autoconecta en el primer arranque (se siembra el indexer en BD).
       # No tienes que buscar ninguna api key ni tocar el panel: solo abre
       # Prowlarr (http://TU_IP:9696) UNA vez para elegir qué trackers activar.
-      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696/api/v1/indexers/all/results/torznab}
+      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696}
       - HUBPLAY_TORZNAB_API_KEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
     # The hubplay process never crashes on a missing/unreachable
     # `db` — SQLite is the default, the bundled DSN is just an

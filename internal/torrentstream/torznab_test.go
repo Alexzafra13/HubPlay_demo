@@ -131,12 +131,9 @@ func TestDedupeByInfoHash(t *testing.T) {
 }
 
 func TestBuildTorznabURL(t *testing.T) {
-	idx := TorznabIndexer{
-		Name:   "prowlarr",
-		URL:    "http://localhost:9696/api/torznab",
-		APIKey: "secret",
-	}
-	raw, err := buildTorznabURL(idx, MediaTypeMovie, "tt0133093", "")
+	idx := TorznabIndexer{Name: "prowlarr"}
+	endpoint := "http://localhost:9696/api/torznab"
+	raw, err := buildTorznabURL(endpoint, "secret", idx, MediaTypeMovie, "tt0133093", "")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -159,7 +156,7 @@ func TestBuildTorznabURL(t *testing.T) {
 	}
 
 	// Series → tvsearch + default tv category.
-	raw2, _ := buildTorznabURL(idx, MediaTypeSeries, "tt1234567", "")
+	raw2, _ := buildTorznabURL(endpoint, "secret", idx, MediaTypeSeries, "tt1234567", "")
 	u2, _ := url.Parse(raw2)
 	if u2.Query().Get("t") != "tvsearch" {
 		t.Errorf("series t: %q", u2.Query().Get("t"))
@@ -170,7 +167,7 @@ func TestBuildTorznabURL(t *testing.T) {
 }
 
 func TestBuildTorznabURLInvalid(t *testing.T) {
-	if _, err := buildTorznabURL(TorznabIndexer{URL: "not-a-url"}, MediaTypeMovie, "tt1", ""); err == nil {
+	if _, err := buildTorznabURL("not-a-url", "", TorznabIndexer{}, MediaTypeMovie, "tt1", ""); err == nil {
 		t.Fatal("expected error for url without scheme/host")
 	}
 }
@@ -211,8 +208,8 @@ func TestSearchPerIndexerTimeout(t *testing.T) {
 	defer slow.Close()
 
 	c := NewTorznabClient(StaticIndexers{
-		{Name: "slow", URL: slow.URL},
-		{Name: "fast", URL: fast.URL},
+		{Name: "slow", URL: slow.URL + "/torznab"},
+		{Name: "fast", URL: fast.URL + "/torznab"},
 	}, nil)
 	c.perIndexerTO = 150 * time.Millisecond
 

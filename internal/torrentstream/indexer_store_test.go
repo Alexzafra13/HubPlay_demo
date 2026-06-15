@@ -104,7 +104,7 @@ func TestIndexerStoreSeed(t *testing.T) {
 	}
 }
 
-func TestIndexerStoreIndexersFiltersAndResolves(t *testing.T) {
+func TestIndexerStoreIndexersFilters(t *testing.T) {
 	ctx := context.Background()
 	s := NewIndexerStore(newFakeKV())
 	_, _ = s.Add(ctx, IndexerInput{Name: "on", BaseURL: "http://localhost:9696", Enabled: true})
@@ -114,8 +114,9 @@ func TestIndexerStoreIndexersFiltersAndResolves(t *testing.T) {
 	if len(idx) != 1 {
 		t.Fatalf("only enabled indexers: got %d", len(idx))
 	}
-	want := "http://localhost:9696/api/v1/indexers/all/results/torznab"
-	if idx[0].URL != want {
-		t.Errorf("base_url should resolve to prowlarr torznab path: got %q", idx[0].URL)
+	// URL/BaseURL are passed through verbatim; the client resolves them at
+	// search time (Prowlarr root → per-indexer expansion).
+	if idx[0].BaseURL != "http://localhost:9696" || idx[0].URL != "" {
+		t.Errorf("record should be passed through raw: %+v", idx[0])
 	}
 }
