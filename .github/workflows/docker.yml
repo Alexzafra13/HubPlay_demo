@@ -107,7 +107,12 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.target || 'default' }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target || 'default' }}
+          # ignore-error: el export a GitHub Actions Cache falla a veces de
+          # forma transitoria ("error writing layer blob: not_found", un fallo
+          # del backend de caché de GHA, no del build). La imagen ya se ha
+          # construido y pusheado para entonces, así que un fallo de caché no
+          # debe tumbar el job — solo perdemos la aceleración del próximo build.
+          cache-to: type=gha,mode=max,scope=${{ matrix.target || 'default' }},ignore-error=true
 
       # Vulnerability scan on the freshly built image. Only runs on the
       # hwaccel target because that's the single-platform build we can
