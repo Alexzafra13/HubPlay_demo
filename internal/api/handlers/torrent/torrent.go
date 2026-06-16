@@ -39,11 +39,11 @@ type Manager interface {
 }
 
 // SourceSearcher is the slice of *torrentstream.SourceService the handler
-// needs for the IMDb-keyed source aggregation (/torrent/sources/*). nil
-// when no Torznab indexer is configured.
+// needs for source aggregation (/torrent/sources/*). nil when no Torznab
+// indexer is configured. Resolve runs the hybrid search (imdbid + title)
+// described by the Query.
 type SourceSearcher interface {
-	Sources(ctx context.Context, mt torrentstream.MediaType, imdbID string) ([]torrentstream.SearchResult, error)
-	SearchText(ctx context.Context, mt torrentstream.MediaType, query string) ([]torrentstream.SearchResult, error)
+	Resolve(ctx context.Context, q torrentstream.Query) ([]torrentstream.SearchResult, error)
 }
 
 // MetadataSearcher is the slice of *provider.Manager used to ENRICH the
@@ -122,7 +122,7 @@ func (h *Handler) SourcesSearch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	results, err := h.sources.SearchText(ctx, mt, query)
+	results, err := h.sources.Resolve(ctx, torrentstream.Query{Type: mt, Title: query})
 	if err != nil {
 		h.logger.Warn("torrent text search failed", "query", query, "error", err)
 		h.respondSourceError(w, r, err)
@@ -164,13 +164,34 @@ func (h *Handler) sourcesByIMDb(w http.ResponseWriter, r *http.Request, mt torre
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	results, err := h.sources.Sources(ctx, mt, imdbID)
+	// Optional title/year/season/episode let the client enrich the query so
+	// the text-search pass (which most indexers actually answer) can run
+	// alongside the imdbid pass. All optional — imdbid alone still works.
+	q := torrentstream.Query{
+		Type:    mt,
+		IMDbID:  imdbID,
+		Title:   strings.TrimSpace(r.URL.Query().Get("title")),
+		Year:    atoiOr0(r.URL.Query().Get("year")),
+		Season:  atoiOr0(r.URL.Query().Get("season")),
+		Episode: atoiOr0(r.URL.Query().Get("episode")),
+	}
+	results, err := h.sources.Resolve(ctx, q)
 	if err != nil {
 		h.logger.Warn("torrent sources failed", "type", mt, "imdb", imdbID, "error", err)
 		h.respondSourceError(w, r, err)
 		return
 	}
 	handlers.RespondData(w, http.StatusOK, results)
+}
+
+// atoiOr0 parses a positive integer query param, returning 0 for empty or
+// invalid input (the "not provided" sentinel for Query's numeric fields).
+func atoiOr0(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // claimsAdmin is the default "may start a download" gate: admin role.
@@ -303,13 +324,20 @@ func (h *Handler) DiscoverSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var results []torrentstream.SearchResult
-	if imdb := strings.TrimSpace(meta.ExternalIDs["imdb"]); imdbIDPattern.MatchString(imdb) {
-		results, err = h.sources.Sources(ctx, mt, imdb)
-	} else {
-		// No IMDb id → best-effort title search.
-		results, err = h.sources.SearchText(ctx, mt, meta.Title)
+	// Build a hybrid query: imdbid (precise) when TMDb gave us one, AND the
+	// title+year so the text-search pass runs too — most indexers don't
+	// answer imdbid lookups, so the title pass is what usually returns hits.
+	q := torrentstream.Query{
+		Type:    mt,
+		Title:   meta.Title,
+		Year:    meta.Year,
+		Season:  atoiOr0(r.URL.Query().Get("season")),
+		Episode: atoiOr0(r.URL.Query().Get("episode")),
 	}
+	if imdb := strings.TrimSpace(meta.ExternalIDs["imdb"]); imdbIDPattern.MatchString(imdb) {
+		q.IMDbID = imdb
+	}
+	results, err := h.sources.Resolve(ctx, q)
 	if err != nil {
 		h.logger.Warn("discover sources failed", "tmdb", tmdbID, "error", err)
 		h.respondSourceError(w, r, err)

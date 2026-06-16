@@ -29,10 +29,13 @@
   solución estándar es **proxear el stream a través del servidor** (el debrid
   solo ve la IP de HubPlay). HubPlay ya sirve streams por el backend, así que
   encaja bien. Ver §5.4.
-- Recomendación: plan por fases (§8). Fase 0 arregla la búsqueda (sin deps
-  nuevas, valor inmediato). Fase 1 añade la abstracción **debrid** + proxy de
-  stream (el corazón de la experiencia Torrentio). Fase 2: multi-proveedor,
-  detección de cacheados, claves por usuario y handoff opcional a *arr.
+- Recomendación: plan por fases (§9).
+
+> **🟢 DECISIÓN (2026-06-16): se hace SIN debrid.** El resolver de
+> reproducción es el **motor P2P propio** (`anacrolix/torrent`, ya integrado),
+> no un servicio debrid. La sección debrid de abajo se conserva como
+> referencia / enchufe opcional futuro. Lo que aplica al trabajo real es la
+> **§8.bis (enfoque sin debrid)** y el **plan §9**.
 
 ---
 
@@ -339,29 +342,84 @@ deja explícita.
 
 ---
 
-## 9. Plan por fases (propuesta)
+## 8.bis. Enfoque ELEGIDO: sin debrid (motor P2P como resolver)
 
-**Fase 0 — Arreglar la resolución de fuentes (sin deps nuevas).**
-- imdbid + título+año (pelis) / título+`SxxEyy` (series), fusionar+dedupe.
-- Pasar título/año/temporada/episodio desde el handler/front hasta la query.
-- (Opc.) migrar a la API nativa de Prowlarr `/api/v1/search`.
-- Resultado: las fuentes **aparecen** (resuelve el bug de la captura).
+La experiencia tipo Torrentio se construye **sobre el motor P2P propio** que
+HubPlay ya tiene (`internal/torrentstream`, `anacrolix/torrent v1.61.0`). No
+se integra ningún debrid. Esto es más simple, sin dependencias externas, sin
+baneos multi-IP, sin la volatilidad de RD, y mantiene la postura legal más
+limpia (fuentes propias del operador).
 
-**Fase 1 — Debrid + proxy de stream (el corazón "Torrentio").**
-- Interfaz `Debrid` + **un** proveedor (TorBox o RD).
-- `Resolve(infohash) -> URL directa`; proxy Range-aware por el servidor.
-- Config `torrent.debrid.*` (global), OFF por defecto.
-- UI: botón "Reproducir" usa debrid si está configurado; fallback P2P si no.
+### Lo que ya existe (≈70% hecho)
+- **Streaming secuencial mientras descarga**: `Session.Reader()` →
+  `NewReader()` + `SetReadahead(16MiB)` + `SetResponsive()`; sirve por HTTP
+  con `Range`/seeking (`session.go`). Es el patrón correcto.
+- **Sesión compartida entre viewers** (una descarga sirve a todos):
+  `GetActive`/`bySrc`/`holders` (`manager.go`). Es la "cache" casera.
+- SSRF-guard, magnet + `.torrent`, reaper por idle, cap de sesiones,
+  limpieza de scratch, jobs de "descargar a biblioteca".
+- **Privacidad**: el peer del swarm es el **servidor**, no el navegador → la
+  IP del usuario final nunca toca el torrent. (Contrapartida: la IP del
+  operador sí — más exposición legal para quien lo despliega.)
 
-**Fase 2 — Pulido y multi-proveedor.**
-- `CheckCached` + badges "instantáneo" (TorBox; Zilean para RD/AD).
-- Multi-proveedor; claves **por usuario**.
-- Filtros/orden avanzados en UI (resolución/idioma/códec — metadata ya está).
-- (Opc.) handoff "descargar a biblioteca" a qBittorrent / Sonarr / Radarr.
+### El techo honesto (física del P2P)
+Sin una cache que no controlas (la del debrid), el arranque está limitado:
+- bien sembrado + ya caliente en el servidor → arranca en segundos;
+- frío / pocos seeders / 4K HEVC a transcodificar → buffer perceptible + CPU.
+  No hay forma de evitarlo sin cache. Hay que **gestionar la expectativa**.
 
-**Fase 3 — (opcional) addon Stremio.**
-- Exponer HubPlay como addon Stremio (`/manifest.json`, `/stream/...`) para
-  reutilizar la resolución+debrid desde Stremio. Solo si interesa.
+### Los 4 gaps reales (el plumbing del torrent NO es el problema)
+1. **🔴 Transcode/transmux.** Hoy `guessContentType` tiene el TODO: MKV/AVI/TS
+   "querrían un remux (futuro, reusando el path ffmpeg de IPTV)". La mayoría
+   de torrents son MKV/HEVC/AC3 → **hoy se ven en negro / sin audio** en el
+   navegador. Hay que meter `Session.Reader()` por el `internal/stream.Decide`
+   existente (direct-play / transcode), con ffmpeg leyendo del propio
+   `/torrent/stream` (que bloquea hasta que llegan las piezas), igual que el
+   transmux IPTV. **Sin esto, "salen fuentes" pero no se reproducen.**
+2. **🔴 Selección consciente del códec = el "¿cacheado?" de este mundo.** La
+   señal nº1 de pick deja de ser "cached" y pasa a ser **"direct-play +
+   seeders"**: un 1080p x264 MP4 con 500 seeders gana a un 4K HEVC con 3
+   seeders, aunque el `QualityScore` diga lo contrario. Hay que **reordenar
+   `Curate` para modo P2P** (seeders/direct-play por encima de resolución).
+   La metadata ya se parsea; solo falta usarla para elegir.
+3. **🟠 Latencia de arranque.** (a) magnet→metadata por DHT (hasta 60s):
+   **preferir el `.torrent` que Prowlarr sirve** sobre el magnet. (b) buffer
+   inicial: **pre-warm** (arrancar el top source al abrir la ficha).
+4. **🟠 Cache caliente.** Hoy el reaper borra el scratch al quedar idle →
+   re-ver = re-descargar. Una **LRU en disco** (con cuota) deja lo reciente
+   caliente → re-play instantáneo y lo popular caliente para todos.
+
+> La interfaz `Debrid` (§6.2) queda como **enchufe opcional futuro**, no se
+> construye ahora.
+
+---
+
+## 9. Plan por fases (enfoque SIN debrid)
+
+**P0 — Arreglar la resolución de fuentes (sin deps nuevas). ← EN CURSO**
+- Búsqueda híbrida: `imdbid` (preciso, para indexadores que lo soportan) **+**
+  texto `título+año` (pelis) / `título SxxEyy` (series), fusionado + dedupe.
+- **Verificación de match** (título/año/episodio) sobre los resultados del
+  pase de texto, para matar falsos positivos (remakes, títulos parecidos).
+- Pasar título/año/temporada/episodio desde el handler hasta la query.
+- Resultado: las fuentes **aparecen y son las correctas** (resuelve la
+  captura). Independiente del resolver de playback.
+
+**P1 — Transcode wiring + selección por códec (que de verdad se reproduzca).**
+- Meter `Session.Reader()` por `internal/stream.Decide` (transmux estilo
+  IPTV) para MKV/HEVC/AC3.
+- Reordenar `Curate` para modo P2P: priorizar direct-play + seeders.
+
+**P2 — Latencia.**
+- Preferir `.torrent` sobre magnet; pre-warm del top source al abrir ficha.
+
+**P3 — Cache LRU en disco.**
+- Retener lo reciente (con cuota) en vez de borrar siempre el scratch →
+  re-play instantáneo; lo popular sigue caliente para todos.
+
+**P4 — (opcional, futuro) Debrid como enchufe.**
+- Solo si en el futuro se quiere reproducción instantánea para contenido no
+  cacheado/poco sembrado. Interfaz `Debrid` + proxy de stream (§5–§6).
 
 ---
 

@@ -18,6 +18,10 @@ interface SourceListProps {
   /** Cabecera de la sección. La pinta el propio SourceList para poder
    *  ocultarla entera (no sólo el cuerpo) cuando no hay fuentes. */
   title?: string;
+  /** Título/año reales de la obra: habilitan el pase de búsqueda por texto
+   *  en el servidor (sin ellos muchos títulos salen "sin fuentes"). */
+  mediaTitle?: string;
+  year?: number;
 }
 
 // formatSize renders bytes as GB (decimal). Returns "" when unknown.
@@ -165,12 +169,12 @@ export function SourceResults({
  * SourceList resolves the sources for a title by IMDb id (via the Torznab
  * aggregator) and renders them with SourceResults.
  */
-export function SourceList({ type, imdbId, enabled = true, onPlay, title }: SourceListProps) {
+export function SourceList({ type, imdbId, enabled = true, onPlay, title, mediaTitle, year }: SourceListProps) {
   const { t } = useTranslation();
   const { sources, isLoading, isError, error, refetch } = useMediaSources(
     type,
     imdbId,
-    { enabled },
+    { enabled, title: mediaTitle, year },
   );
 
   const featureDisabled =

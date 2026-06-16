@@ -32,7 +32,7 @@ type SourceService struct {
 // searcher is the slice of *TorznabClient SourceService needs, kept as an
 // interface so tests can inject a fake (and assert cache behaviour).
 type searcher interface {
-	Search(ctx context.Context, mt MediaType, imdbID, term string) ([]SearchResult, error)
+	Search(ctx context.Context, q Query) ([]SearchResult, error)
 }
 
 // NewSourceService builds the aggregator. ttl <= 0 defaults to 20 minutes.
@@ -53,24 +53,28 @@ func NewSourceService(client searcher, ttl time.Duration, opts FilterOptions, lo
 	}
 }
 
-// Sources returns the curated streamable sources for an IMDb id. The raw
-// indexer results are served from the cache on a hit (queried + cached on a
-// miss); curation is applied on every call so context-supplied preferences
-// are honoured. The caller (handler) is responsible for validating imdbID.
-func (s *SourceService) Sources(ctx context.Context, mt MediaType, imdbID string) ([]SearchResult, error) {
-	return s.fetchCached(ctx, string(mt)+":"+imdbID, func() ([]SearchResult, error) {
-		return s.client.Search(ctx, mt, imdbID, "")
+// Resolve is the unified entry point: it runs the hybrid indexer search for
+// the given Query (imdbid + text, merged and verified) and applies curation.
+// The raw indexer results are served from the cache on a hit (queried +
+// cached on a miss); curation runs on every call so context-supplied
+// preferences are honoured. The caller (handler) validates the Query.
+func (s *SourceService) Resolve(ctx context.Context, q Query) ([]SearchResult, error) {
+	return s.fetchCached(ctx, q.cacheKey(), func() ([]SearchResult, error) {
+		return s.client.Search(ctx, q)
 	})
 }
 
+// Sources returns the curated streamable sources for an IMDb id (no title
+// hint). Thin wrapper over Resolve, kept for callers/tests that only have an
+// id. Prefer Resolve with a Title so the text-search pass can run.
+func (s *SourceService) Sources(ctx context.Context, mt MediaType, imdbID string) ([]SearchResult, error) {
+	return s.Resolve(ctx, Query{Type: mt, IMDbID: imdbID})
+}
+
 // SearchText returns curated sources for a free-text query (the general
-// torrent search box) — the same pipeline as Sources but keyed by the
-// query text instead of an IMDb id.
+// torrent search box) — Resolve keyed by the query text.
 func (s *SourceService) SearchText(ctx context.Context, mt MediaType, query string) ([]SearchResult, error) {
-	q := strings.TrimSpace(query)
-	return s.fetchCached(ctx, "q:"+string(mt)+":"+strings.ToLower(q), func() ([]SearchResult, error) {
-		return s.client.Search(ctx, mt, "", q)
-	})
+	return s.Resolve(ctx, Query{Type: mt, Title: strings.TrimSpace(query)})
 }
 
 // fetchCached serves the RAW results from the cache (querying via fetch on a

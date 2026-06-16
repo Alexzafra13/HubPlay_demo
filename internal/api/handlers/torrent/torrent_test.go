@@ -189,22 +189,13 @@ func TestDiscover_ReturnsMappedResults(t *testing.T) {
 type fakeSources struct {
 	res    []torrentstream.SearchResult
 	err    error
-	gotMT  torrentstream.MediaType
-	gotID  string
+	gotQ   torrentstream.Query
 	called bool
 }
 
-func (f *fakeSources) Sources(_ context.Context, mt torrentstream.MediaType, imdbID string) ([]torrentstream.SearchResult, error) {
+func (f *fakeSources) Resolve(_ context.Context, q torrentstream.Query) ([]torrentstream.SearchResult, error) {
 	f.called = true
-	f.gotMT = mt
-	f.gotID = imdbID
-	return f.res, f.err
-}
-
-func (f *fakeSources) SearchText(_ context.Context, mt torrentstream.MediaType, query string) ([]torrentstream.SearchResult, error) {
-	f.called = true
-	f.gotMT = mt
-	f.gotID = query
+	f.gotQ = q
 	return f.res, f.err
 }
 
@@ -217,8 +208,8 @@ func TestSourcesSearch(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200 (%s)", rr.Code, rr.Body.String())
 	}
-	if fs.gotMT != torrentstream.MediaTypeSeries || fs.gotID != "matrix" {
-		t.Errorf("forwarded args: mt=%q q=%q", fs.gotMT, fs.gotID)
+	if fs.gotQ.Type != torrentstream.MediaTypeSeries || fs.gotQ.Title != "matrix" {
+		t.Errorf("forwarded args: mt=%q q=%q", fs.gotQ.Type, fs.gotQ.Title)
 	}
 }
 
@@ -287,8 +278,8 @@ func TestSources_MovieReturnsData(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200 (%s)", rr.Code, rr.Body.String())
 	}
-	if fs.gotMT != torrentstream.MediaTypeMovie || fs.gotID != "tt0133093" {
-		t.Errorf("forwarded wrong args: mt=%q id=%q", fs.gotMT, fs.gotID)
+	if fs.gotQ.Type != torrentstream.MediaTypeMovie || fs.gotQ.IMDbID != "tt0133093" {
+		t.Errorf("forwarded wrong args: mt=%q id=%q", fs.gotQ.Type, fs.gotQ.IMDbID)
 	}
 	if !strings.Contains(rr.Body.String(), `"quality":"1080p"`) ||
 		!strings.Contains(rr.Body.String(), `"seeders":42`) {
@@ -305,8 +296,8 @@ func TestSources_SeriesForwardsType(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200", rr.Code)
 	}
-	if fs.gotMT != torrentstream.MediaTypeSeries {
-		t.Errorf("media type: got %q want series", fs.gotMT)
+	if fs.gotQ.Type != torrentstream.MediaTypeSeries {
+		t.Errorf("media type: got %q want series", fs.gotQ.Type)
 	}
 }
 
@@ -323,8 +314,8 @@ func TestDiscoverSources_ResolvesImdbAndSearches(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200 (%s)", rr.Code, rr.Body.String())
 	}
-	if fs.gotID != "tt0133093" {
-		t.Errorf("expected sources resolved by imdbid, got %q", fs.gotID)
+	if fs.gotQ.IMDbID != "tt0133093" {
+		t.Errorf("expected sources resolved by imdbid, got %q", fs.gotQ.IMDbID)
 	}
 }
 

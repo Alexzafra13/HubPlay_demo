@@ -18,7 +18,7 @@ func TestSearchRateLimited(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := NewTorznabClient(StaticIndexers{{Name: "x", URL: srv.URL + "/torznab"}}, nil)
-	_, err := c.Search(context.Background(), MediaTypeMovie, "tt0133093", "")
+	_, err := c.Search(context.Background(), Query{Type: MediaTypeMovie, IMDbID: "tt0133093"})
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("want ErrRateLimited, got %v", err)
 	}
@@ -146,7 +146,7 @@ func TestDedupeByInfoHash(t *testing.T) {
 func TestBuildTorznabURL(t *testing.T) {
 	idx := TorznabIndexer{Name: "prowlarr"}
 	endpoint := "http://localhost:9696/api/torznab"
-	raw, err := buildTorznabURL(endpoint, "secret", idx, MediaTypeMovie, "tt0133093", "")
+	raw, err := buildTorznabURL(endpoint, "secret", idx, Query{Type: MediaTypeMovie, IMDbID: "tt0133093"}, modeIMDb)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestBuildTorznabURL(t *testing.T) {
 	}
 
 	// Series → tvsearch + default tv category.
-	raw2, _ := buildTorznabURL(endpoint, "secret", idx, MediaTypeSeries, "tt1234567", "")
+	raw2, _ := buildTorznabURL(endpoint, "secret", idx, Query{Type: MediaTypeSeries, IMDbID: "tt1234567"}, modeIMDb)
 	u2, _ := url.Parse(raw2)
 	if u2.Query().Get("t") != "tvsearch" {
 		t.Errorf("series t: %q", u2.Query().Get("t"))
@@ -179,8 +179,54 @@ func TestBuildTorznabURL(t *testing.T) {
 	}
 }
 
+func TestBuildTorznabURLTextMode(t *testing.T) {
+	idx := TorznabIndexer{Name: "prowlarr"}
+	endpoint := "http://localhost:9696/api/torznab"
+
+	// Movie text pass: generic t=search with "Title Year", no imdbid.
+	raw, err := buildTorznabURL(endpoint, "", idx,
+		Query{Type: MediaTypeMovie, Title: "Dune", Year: 2021, IMDbID: "tt1160419"}, modeText)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	q := mustParseQuery(t, raw)
+	if q.Get("t") != "search" {
+		t.Errorf("t: got %q want search", q.Get("t"))
+	}
+	if q.Get("q") != "Dune 2021" {
+		t.Errorf("q: got %q want %q", q.Get("q"), "Dune 2021")
+	}
+	if q.Get("imdbid") != "" {
+		t.Errorf("text mode must not send imdbid, got %q", q.Get("imdbid"))
+	}
+
+	// Series imdbid pass carries season/ep.
+	raw2, _ := buildTorznabURL(endpoint, "", idx,
+		Query{Type: MediaTypeSeries, IMDbID: "tt0903747", Season: 1, Episode: 2}, modeIMDb)
+	q2 := mustParseQuery(t, raw2)
+	if q2.Get("season") != "1" || q2.Get("ep") != "2" {
+		t.Errorf("series imdb mode season/ep: season=%q ep=%q", q2.Get("season"), q2.Get("ep"))
+	}
+
+	// Series text pass embeds SxxEyy in the query string.
+	raw3, _ := buildTorznabURL(endpoint, "", idx,
+		Query{Type: MediaTypeSeries, Title: "Breaking Bad", Season: 1, Episode: 2}, modeText)
+	if got := mustParseQuery(t, raw3).Get("q"); got != "Breaking Bad S01E02" {
+		t.Errorf("series text q: got %q", got)
+	}
+}
+
+func mustParseQuery(t *testing.T, raw string) url.Values {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	return u.Query()
+}
+
 func TestBuildTorznabURLInvalid(t *testing.T) {
-	if _, err := buildTorznabURL("not-a-url", "", TorznabIndexer{}, MediaTypeMovie, "tt1", ""); err == nil {
+	if _, err := buildTorznabURL("not-a-url", "", TorznabIndexer{}, Query{Type: MediaTypeMovie, IMDbID: "tt1"}, modeIMDb); err == nil {
 		t.Fatal("expected error for url without scheme/host")
 	}
 }
@@ -227,7 +273,7 @@ func TestSearchPerIndexerTimeout(t *testing.T) {
 	c.perIndexerTO = 150 * time.Millisecond
 
 	start := time.Now()
-	res, err := c.Search(context.Background(), MediaTypeMovie, "tt0133093", "")
+	res, err := c.Search(context.Background(), Query{Type: MediaTypeMovie, IMDbID: "tt0133093"})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("search: %v", err)

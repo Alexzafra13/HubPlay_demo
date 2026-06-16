@@ -479,10 +479,20 @@ export class ApiClient {
   async getMediaSources(
     type: MediaSourceType,
     imdbId: string,
+    opts?: { title?: string; year?: number; season?: number; episode?: number },
   ): Promise<TorrentSearchResult[]> {
+    // title/year (and season/episode for series) let the server run the
+    // text-search pass alongside the imdbid pass — most indexers only answer
+    // text queries, so without these many titles resolve to "no sources".
+    const params: Record<string, string> = {};
+    if (opts?.title) params.title = opts.title;
+    if (opts?.year) params.year = String(opts.year);
+    if (opts?.season) params.season = String(opts.season);
+    if (opts?.episode) params.episode = String(opts.episode);
     return this.request<TorrentSearchResult[]>(
       "GET",
       `/torrent/sources/${type}/${encodeURIComponent(imdbId)}`,
+      Object.keys(params).length > 0 ? { params } : undefined,
     );
   }
 

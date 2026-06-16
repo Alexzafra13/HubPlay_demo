@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -190,20 +191,27 @@ func (c *TorznabClient) resolveEndpoints(ctx context.Context, idx TorznabIndexer
 // the others or the API response. A feed that errors is logged and skipped;
 // an all-empty run surfaces the first error so the caller can report it.
 //
-// imdbID is the canonical "ttNNN…" form (the handler validates it); term
-// is an optional free-text fallback for indexers that don't resolve by
-// IMDb id.
-func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term string) ([]SearchResult, error) {
+// The Query drives a HYBRID search: each endpoint is queried by imdbid
+// (precise, trusted) AND by composed free text (title+year / title+SxxEyy,
+// broadly supported). The two passes run concurrently and their results are
+// merged, so an indexer that ignores imdbid still contributes via text. The
+// text pass is title-verified (matchesQuery) to drop false positives; the
+// imdbid pass is trusted as-is.
+func (c *TorznabClient) Search(ctx context.Context, q Query) ([]SearchResult, error) {
 	indexers := c.source.Indexers(ctx)
+	modes := q.modes()
 
 	type job struct {
-		ep  torznabEndpoint
-		idx TorznabIndexer
+		ep   torznabEndpoint
+		idx  TorznabIndexer
+		mode queryMode
 	}
 	var jobs []job
 	for _, idx := range indexers {
 		for _, ep := range c.resolveEndpoints(ctx, idx) {
-			jobs = append(jobs, job{ep: ep, idx: idx})
+			for _, m := range modes {
+				jobs = append(jobs, job{ep: ep, idx: idx, mode: m})
+			}
 		}
 	}
 
@@ -219,7 +227,7 @@ func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term s
 			ictx, cancel := context.WithTimeout(ctx, c.perIndexerTO)
 			defer cancel()
 
-			items, err := c.queryEndpoint(ictx, j.ep, j.idx, mt, imdbID, term)
+			items, err := c.queryEndpoint(ictx, j.ep, j.idx, q, j.mode)
 			if err != nil {
 				// Log the endpoint NAME, never the built URL — it carries
 				// the apikey.
@@ -229,9 +237,16 @@ func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term s
 			}
 			out := make([]SearchResult, 0, len(items))
 			for _, it := range items {
-				if r, ok := normalizeItem(it, j.idx); ok {
-					out = append(out, r)
+				r, ok := normalizeItem(it, j.idx)
+				if !ok {
+					continue
 				}
+				// Verify the text pass against the requested title; trust the
+				// imdbid pass (the indexer matched the id).
+				if j.mode == modeText && !matchesQuery(r, q) {
+					continue
+				}
+				out = append(out, r)
 			}
 			results[i] = out
 		}(i)
@@ -257,8 +272,8 @@ func (c *TorznabClient) Search(ctx context.Context, mt MediaType, imdbID, term s
 
 // queryEndpoint performs a single Torznab feed round-trip and returns the
 // raw parsed items.
-func (c *TorznabClient) queryEndpoint(ctx context.Context, ep torznabEndpoint, idx TorznabIndexer, mt MediaType, imdbID, term string) ([]torznabItem, error) {
-	reqURL, err := buildTorznabURL(ep.url, ep.apiKey, idx, mt, imdbID, term)
+func (c *TorznabClient) queryEndpoint(ctx context.Context, ep torznabEndpoint, idx TorznabIndexer, q Query, mode queryMode) ([]torznabItem, error) {
+	reqURL, err := buildTorznabURL(ep.url, ep.apiKey, idx, q, mode)
 	if err != nil {
 		return nil, fmt.Errorf("torznab: build url: %w", err)
 	}
@@ -289,9 +304,16 @@ func (c *TorznabClient) queryEndpoint(ctx context.Context, ep torznabEndpoint, i
 const maxTorznabResponseBytes = 8 << 20
 
 // buildTorznabURL assembles the Torznab query string onto a concrete feed
-// endpoint. The IMDb id is sent without the leading "tt" (Torznab spec).
-// Existing query params on the endpoint are preserved.
-func buildTorznabURL(endpoint, apiKey string, idx TorznabIndexer, mt MediaType, imdbID, term string) (string, error) {
+// endpoint for one search mode. The IMDb id is sent without the leading "tt"
+// (Torznab spec). Existing query params on the endpoint are preserved.
+//
+//   - modeIMDb uses the typed search (t=movie / t=tvsearch) with imdbid, plus
+//     season/ep for a scoped series episode — the precise path for indexers
+//     that index by IMDb id.
+//   - modeText uses the generic t=search with a composed query string
+//     ("Title Year" / "Title SxxEyy"); many indexers return nothing for
+//     t=movie/tvsearch with only free text, so the generic type is widest.
+func buildTorznabURL(endpoint, apiKey string, idx TorznabIndexer, query Query, mode queryMode) (string, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return "", err
@@ -300,25 +322,32 @@ func buildTorznabURL(endpoint, apiKey string, idx TorznabIndexer, mt MediaType, 
 		return "", fmt.Errorf("invalid endpoint url %q", endpoint)
 	}
 	q := u.Query()
-	// Free-text (no imdbid) uses the generic "search" type — many indexers
-	// return nothing for t=movie/tvsearch with only a text query. The typed
-	// searches are reserved for the IMDb-id path.
-	switch {
-	case imdbID == "" && term != "":
+
+	switch mode {
+	case modeIMDb:
+		if query.Type == MediaTypeSeries {
+			q.Set("t", "tvsearch")
+			if query.Season > 0 {
+				q.Set("season", strconv.Itoa(query.Season))
+				if query.Episode > 0 {
+					q.Set("ep", strconv.Itoa(query.Episode))
+				}
+			}
+		} else {
+			q.Set("t", "movie")
+		}
+		if id := imdbDigits(query.IMDbID); id != "" {
+			q.Set("imdbid", id)
+		}
+	default: // modeText
 		q.Set("t", "search")
-	case mt == MediaTypeSeries:
-		q.Set("t", "tvsearch")
-	default:
-		q.Set("t", "movie")
+		if term := query.textQuery(); term != "" {
+			q.Set("q", term)
+		}
 	}
-	if id := imdbDigits(imdbID); id != "" {
-		q.Set("imdbid", id)
-	}
-	if term != "" {
-		q.Set("q", term)
-	}
+
 	var cats []string
-	if mt == MediaTypeSeries {
+	if query.Type == MediaTypeSeries {
 		cats = idx.SeriesCategories
 		if len(cats) == 0 {
 			cats = []string{"5000"}

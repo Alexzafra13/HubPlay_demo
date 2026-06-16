@@ -41,14 +41,28 @@ describe("SourceList", () => {
       },
     ]);
 
-    render(wrap(<SourceList type="movie" imdbId="tt0133093" />));
+    render(
+      wrap(
+        <SourceList
+          type="movie"
+          imdbId="tt0133093"
+          mediaTitle="The Matrix"
+          year={1999}
+        />,
+      ),
+    );
 
     expect(await screen.findByText("The Matrix 2160p UHD")).toBeInTheDocument();
     // Quality is now a group header.
     expect(screen.getByText("4K")).toBeInTheDocument();
     expect(screen.getByText(/8\.00 GB/)).toBeInTheDocument();
     expect(screen.getByText(/👤 120/)).toBeInTheDocument();
-    expect(api.getMediaSources).toHaveBeenCalledWith("movie", "tt0133093");
+    // Title/year are forwarded so the server can run the text-search pass.
+    expect(api.getMediaSources).toHaveBeenCalledWith(
+      "movie",
+      "tt0133093",
+      expect.objectContaining({ title: "The Matrix", year: 1999 }),
+    );
   });
 
   it("delegates playback to onPlay when provided", async () => {
