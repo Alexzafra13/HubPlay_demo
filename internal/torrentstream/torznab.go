@@ -98,7 +98,17 @@ type TorznabClient struct {
 	// idxCache memoises each Prowlarr root's indexer list so we don't hit
 	// /api/v1/indexer on every search (the list rarely changes).
 	idxCache *ttlCache[[]prowlarrIndexer]
+	// breaker skips an endpoint for a cooldown window after it answers 429,
+	// so a single rate-limit doesn't snowball into a self-inflicted ban.
+	breaker *cooldownBreaker
+	// now is the clock (overridable in tests for the breaker).
+	now func() time.Time
 }
+
+// rateLimitCooldown is how long an endpoint is skipped after a 429 before we
+// probe it again. Public trackers throttle aggressively; backing off is the
+// polite (and effective) response.
+const rateLimitCooldown = 5 * time.Minute
 
 // NewTorznabClient builds a client over the given indexer source.
 func NewTorznabClient(source IndexerProvider, logger *slog.Logger) *TorznabClient {
@@ -111,7 +121,44 @@ func NewTorznabClient(source IndexerProvider, logger *slog.Logger) *TorznabClien
 		perIndexerTO: perIndexerTimeout,
 		logger:       logger,
 		idxCache:     newTTLCache[[]prowlarrIndexer](5 * time.Minute),
+		breaker:      newCooldownBreaker(rateLimitCooldown),
+		now:          time.Now,
 	}
+}
+
+// cooldownBreaker is a tiny per-key circuit breaker: once tripped, a key is
+// reported "open" (skip it) until its cooldown elapses. Concurrency-safe.
+type cooldownBreaker struct {
+	mu    sync.Mutex
+	until map[string]time.Time
+	dur   time.Duration
+}
+
+func newCooldownBreaker(dur time.Duration) *cooldownBreaker {
+	return &cooldownBreaker{until: make(map[string]time.Time), dur: dur}
+}
+
+// open reports whether key is still cooling down (and lazily forgets expired
+// entries).
+func (b *cooldownBreaker) open(key string, now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	u, ok := b.until[key]
+	if !ok {
+		return false
+	}
+	if !now.Before(u) {
+		delete(b.until, key)
+		return false
+	}
+	return true
+}
+
+// trip starts (or extends) the cooldown for key.
+func (b *cooldownBreaker) trip(key string, now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.until[key] = now.Add(b.dur)
 }
 
 // prowlarrIndexers returns the (cached) native indexer list for a Prowlarr
@@ -201,54 +248,49 @@ func (c *TorznabClient) Search(ctx context.Context, q Query) ([]SearchResult, er
 	indexers := c.source.Indexers(ctx)
 	modes := q.modes()
 
-	type job struct {
-		ep   torznabEndpoint
-		idx  TorznabIndexer
-		mode queryMode
+	type target struct {
+		ep  torznabEndpoint
+		idx TorznabIndexer
 	}
-	var jobs []job
+	var targets []target
 	for _, idx := range indexers {
 		for _, ep := range c.resolveEndpoints(ctx, idx) {
-			for _, m := range modes {
-				jobs = append(jobs, job{ep: ep, idx: idx, mode: m})
-			}
+			targets = append(targets, target{ep: ep, idx: idx})
 		}
 	}
 
-	results := make([][]SearchResult, len(jobs))
-	errs := make([]error, len(jobs))
+	results := make([][]SearchResult, len(targets))
+	errs := make([]error, len(targets))
+	rateLimited := make([]bool, len(targets)) // tripped now OR still cooling down
+	now := c.now()
 
 	var wg sync.WaitGroup
-	for i := range jobs {
+	for i := range targets {
+		// Circuit breaker: skip an endpoint that 429'd recently instead of
+		// hammering it again (the snowball that causes the self-ban).
+		if c.breaker.open(targets[i].ep.url, now) {
+			rateLimited[i] = true
+			c.logger.Debug("torznab: skipping endpoint in cooldown", "endpoint", targets[i].ep.name)
+			continue
+		}
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			j := jobs[i]
-			ictx, cancel := context.WithTimeout(ctx, c.perIndexerTO)
-			defer cancel()
-
-			items, err := c.queryEndpoint(ictx, j.ep, j.idx, q, j.mode)
-			if err != nil {
-				// Log the endpoint NAME, never the built URL — it carries
-				// the apikey.
-				c.logger.Warn("torznab: query failed", "endpoint", j.ep.name, "error", err)
+			out, limited, err := c.searchEndpoint(ctx, targets[i].ep, targets[i].idx, q, modes)
+			switch {
+			case limited:
+				// Back off this endpoint for the cooldown window.
+				c.breaker.trip(targets[i].ep.url, c.now())
+				rateLimited[i] = true
+				c.logger.Warn("torznab: endpoint rate-limited; cooling down",
+					"endpoint", targets[i].ep.name, "cooldown", c.breaker.dur)
+			case err != nil:
+				// Log the endpoint NAME, never the built URL — it carries the apikey.
+				c.logger.Warn("torznab: query failed", "endpoint", targets[i].ep.name, "error", err)
 				errs[i] = err
-				return
+			default:
+				results[i] = out
 			}
-			out := make([]SearchResult, 0, len(items))
-			for _, it := range items {
-				r, ok := normalizeItem(it, j.idx)
-				if !ok {
-					continue
-				}
-				// Verify the text pass against the requested title; trust the
-				// imdbid pass (the indexer matched the id).
-				if j.mode == modeText && !matchesQuery(r, q) {
-					continue
-				}
-				out = append(out, r)
-			}
-			results[i] = out
 		}(i)
 	}
 	wg.Wait()
@@ -256,18 +298,73 @@ func (c *TorznabClient) Search(ctx context.Context, q Query) ([]SearchResult, er
 	var (
 		out      []SearchResult
 		firstErr error
+		anyRL    bool
 	)
-	for i := range jobs {
+	for i := range targets {
 		out = append(out, results[i]...)
+		if rateLimited[i] {
+			anyRL = true
+		}
 		if firstErr == nil && errs[i] != nil {
 			firstErr = errs[i]
 		}
 	}
-	if len(out) == 0 && firstErr != nil {
-		return nil, firstErr
+	if len(out) == 0 {
+		// Prefer the rate-limit signal so the UI shows "wait and retry" rather
+		// than a generic failure when everything we have is cooling down.
+		if anyRL {
+			return nil, ErrRateLimited
+		}
+		if firstErr != nil {
+			return nil, firstErr
+		}
 	}
 	sortSources(out)
 	return dedupeByInfoHash(out), nil
+}
+
+// searchEndpoint queries one feed across the requested modes SEQUENTIALLY (not
+// a parallel burst — kinder to per-second rate limits) with early-exit: the
+// precise imdbid pass runs first, and the broad text pass is skipped entirely
+// when imdbid already produced hits. Returns the normalised results, whether
+// the endpoint rate-limited us (429), and the first non-429 error otherwise.
+func (c *TorznabClient) searchEndpoint(ctx context.Context, ep torznabEndpoint, idx TorznabIndexer, q Query, modes []queryMode) ([]SearchResult, bool, error) {
+	var (
+		out      []SearchResult
+		firstErr error
+	)
+	for _, mode := range modes {
+		ictx, cancel := context.WithTimeout(ctx, c.perIndexerTO)
+		items, err := c.queryEndpoint(ictx, ep, idx, q, mode)
+		cancel()
+		if err != nil {
+			if errors.Is(err, ErrRateLimited) {
+				return out, true, err
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, it := range items {
+			r, ok := normalizeItem(it, idx)
+			if !ok {
+				continue
+			}
+			// Verify the text pass against the requested title; trust the
+			// imdbid pass (the indexer matched the id).
+			if mode == modeText && !matchesQuery(r, q) {
+				continue
+			}
+			out = append(out, r)
+		}
+		// De-amplify: if the imdbid pass already found hits, don't also run the
+		// broad text pass against the same endpoint.
+		if mode == modeIMDb && len(out) > 0 {
+			break
+		}
+	}
+	return out, false, firstErr
 }
 
 // queryEndpoint performs a single Torznab feed round-trip and returns the
