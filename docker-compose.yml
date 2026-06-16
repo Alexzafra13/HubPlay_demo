@@ -1,3 +1,12 @@
+# HubPlay — compose BASE (sin torrent).
+#
+#   docker compose up -d
+#
+# Para el stack con descargas/fuentes torrent (Prowlarr + FlareSolverr),
+# usa el OTRO fichero:
+#
+#   docker compose -f docker-compose.torrent.yml up -d
+#
 services:
   hubplay:
     build: .
@@ -20,30 +29,9 @@ services:
       # operator type a connection string. SQLite remains the default
       # until the operator explicitly flips the switch in the UI.
       - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
-      # Agregación de fuentes Torznab/Prowlarr — TURNKEY. Apunta al Prowlarr
-      # empaquetado (servido bajo /prowlarr) con la MISMA api key que
-      # pre-siembra el init de abajo, así que HubPlay se autoconecta en el
-      # primer arranque (siembra el indexer en BD). No tienes que buscar
-      # ninguna api key ni tocar el panel: solo abre Prowlarr UNA vez para
-      # elegir qué trackers activar (ver nginx en deploy/nginx/).
-      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696/prowlarr}
-      - HUBPLAY_TORZNAB_API_KEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
-      # Activa el motor de streaming para poder REPRODUCIR las fuentes vía
-      # HubPlay (la búsqueda funciona sin esto; la reproducción no).
-      - HUBPLAY_TORRENT_ENABLED=${HUBPLAY_TORRENT_ENABLED:-true}
-      # Permite bajar el .torrent del Prowlarr empaquetado (host interno de
-      # docker, IP privada). Sin esto el guard SSRF bloquea /{id}/download.
-      - HUBPLAY_TORRENT_ALLOW_PRIVATE=${HUBPLAY_TORRENT_ALLOW_PRIVATE:-true}
-    # The hubplay process never crashes on a missing/unreachable
-    # `db` — SQLite is the default, the bundled DSN is just an
-    # *offer*. `depends_on` with `service_healthy` keeps the boot
-    # ordering predictable for operators who DID flip the switch
-    # (they get a ready Postgres before the binary tries to open).
     depends_on:
       db:
         condition: service_healthy
-      prowlarr:
-        condition: service_started
     restart: unless-stopped
     # La app drena en hasta 30s (transcodes/uploads en vuelo + checkpoint
     # WAL). El default de Docker (10s) la mataría a mitad; damos margen.
@@ -58,15 +46,8 @@ services:
         max-file: "3"
 
   # Bundled Postgres for the plug-and-play "Switch to PostgreSQL"
-  # toggle in the admin panel. ~30 MB RAM idle — small change for a
-  # significantly nicer UX (no DSN to copy/paste, no external server
-  # to provision). SQLite users pay nothing else: the binary defaults
-  # to SQLite and only opens this DB when the operator flips the
-  # toggle and restarts.
-  #
-  # Operators who want to use a managed / external Postgres can
-  # simply leave the toggle off and paste a custom DSN in the
-  # "Advanced — custom DSN" section of the panel.
+  # toggle in the admin panel. ~30 MB RAM idle. SQLite remains the
+  # default until the operator flips the switch and restarts.
   db:
     image: postgres:16-alpine
     container_name: hubplay-db
@@ -75,14 +56,7 @@ services:
       - POSTGRES_USER=hubplay
       - POSTGRES_PASSWORD=${HUBPLAY_POSTGRES_PASSWORD:-hubplay}
     volumes:
-      # Named volume keeps the data across container recreates. Docker
-      # Compose namespaces this so two stacks on the same host don't
-      # collide.
       - hubplay_pgdata:/var/lib/postgresql/data
-    # No host port exposed by default — the Postgres only talks to
-    # the hubplay container over the internal docker network. If you
-    # want to attach `psql` from the host, add a `ports:` entry in
-    # your `.env` setup or use `docker exec hubplay-db psql -U hubplay`.
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hubplay -d hubplay"]
@@ -96,72 +70,5 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # prowlarr-init: pre-siembra el config.xml de Prowlarr (api key conocida +
-  # ruta /prowlarr + auth de LAN) ANTES de que arranque, SOLO si no existe.
-  # Esto hace la autoconexión 100% fiable sin depender de que la imagen
-  # respete las variables de entorno de la api key. Corre una vez y termina.
-  prowlarr-init:
-    image: busybox:1.36
-    container_name: hubplay-prowlarr-init
-    user: "${PUID:-1000}:${PGID:-1000}"
-    command: sh -c "[ -f /config/config.xml ] || printf '%s' '<Config><BindAddress>*</BindAddress><Port>9696</Port><UrlBase>/prowlarr</UrlBase><ApiKey>${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}</ApiKey><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired><LogLevel>info</LogLevel><LaunchBrowser>False</LaunchBrowser><AnalyticsEnabled>False</AnalyticsEnabled><InstanceName>Prowlarr</InstanceName></Config>' > /config/config.xml"
-    volumes:
-      - prowlarr_config:/config
-    restart: "no"
-
-  # Prowlarr empaquetado: el AGREGADOR de indexers. HubPlay solo consume su
-  # API Torznab. Llega ya autoconectado (config.xml pre-sembrado).
-  #
-  # Único paso manual (una vez): abre la UI de Prowlarr y, en "Indexers",
-  # añade los trackers que quieras usar. Eso NO se preconfigura a propósito:
-  # qué fuentes activas es tu decisión y tu responsabilidad. Acceso local +
-  # remoto vía tu proxy bajo /prowlarr (ver deploy/nginx/).
-  #
-  # Seguridad: la auth de la UI está abierta para direcciones de LAN
-  # (DisabledForLocalAddresses). Si lo expones a Internet, cambia
-  # PROWLARR_API_KEY en .env y/o pon una auth real en Prowlarr.
-  prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
-    container_name: hubplay-prowlarr
-    depends_on:
-      prowlarr-init:
-        condition: service_completed_successfully
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - TZ=${TZ:-Europe/Madrid}
-    ports:
-      # Acceso directo opcional (LAN): http://TU_IP:9696/prowlarr
-      - "${PROWLARR_HOST_PORT:-9696}:9696"
-    volumes:
-      - prowlarr_config:/config
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # FlareSolverr: resuelve los retos de Cloudflare para indexers que lo
-  # usan (muchos públicos). Prowlarr lo usa como "Indexer Proxy". Pesa
-  # bastante (Chrome headless) pero evita los 429/403 de esos trackers.
-  #
-  # Para activarlo en Prowlarr (una vez): Settings → Indexers → Indexer
-  # Proxies → ➕ FlareSolverr → Host http://flaresolverr:8191, Tag "flare";
-  # luego pon el tag "flare" a los indexers tras Cloudflare.
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: hubplay-flaresolverr
-    environment:
-      - TZ=${TZ:-Europe/Madrid}
-      - LOG_LEVEL=warning
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
 volumes:
   hubplay_pgdata:
-  prowlarr_config:

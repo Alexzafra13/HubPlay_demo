@@ -1,0 +1,119 @@
+# HubPlay — compose CON stack torrent (Prowlarr + FlareSolverr).
+#
+#   docker compose -f docker-compose.torrent.yml up -d
+#
+# Incluye: HubPlay (con motor torrent + autoconexión a Prowlarr), Postgres,
+# Prowlarr (autoconfigurado), FlareSolverr (Cloudflare). /media va en RW para
+# poder descargar a la biblioteca. Si NO quieres torrent, usa docker-compose.yml.
+services:
+  hubplay:
+    build: .
+    image: ghcr.io/alexzafra13/hubplay_demo:latest
+    container_name: hubplay
+    ports:
+      - "${HUBPLAY_HOST_PORT:-8097}:8096"
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      # /media en RW: necesario para "Descargar a biblioteca".
+      - ${HUBPLAY_MEDIA_MOVIES:-./peliculas}:/media/peliculas
+      - ${HUBPLAY_MEDIA_SERIES:-./series}:/media/series
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
+      # Autoconexión al Prowlarr empaquetado (servido bajo /prowlarr) con la
+      # misma api key que pre-siembra el init → HubPlay se conecta solo.
+      - HUBPLAY_TORZNAB_URL=${HUBPLAY_TORZNAB_URL:-http://prowlarr:9696/prowlarr}
+      - HUBPLAY_TORZNAB_API_KEY=${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}
+      # Motor de streaming (reproducir) + bajar el .torrent del Prowlarr
+      # interno (host privado de docker, si no el guard SSRF lo bloquea).
+      - HUBPLAY_TORRENT_ENABLED=${HUBPLAY_TORRENT_ENABLED:-true}
+      - HUBPLAY_TORRENT_ALLOW_PRIVATE=${HUBPLAY_TORRENT_ALLOW_PRIVATE:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      prowlarr:
+        condition: service_started
+    restart: unless-stopped
+    stop_grace_period: 40s
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    container_name: hubplay-db
+    environment:
+      - POSTGRES_DB=hubplay
+      - POSTGRES_USER=hubplay
+      - POSTGRES_PASSWORD=${HUBPLAY_POSTGRES_PASSWORD:-hubplay}
+    volumes:
+      - hubplay_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hubplay -d hubplay"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Pre-siembra el config.xml de Prowlarr (api key + /prowlarr + auth de LAN)
+  # SOLO si no existe → autoconexión 100% fiable. Corre una vez y termina.
+  prowlarr-init:
+    image: busybox:1.36
+    container_name: hubplay-prowlarr-init
+    user: "${PUID:-1000}:${PGID:-1000}"
+    command: sh -c "[ -f /config/config.xml ] || printf '%s' '<Config><BindAddress>*</BindAddress><Port>9696</Port><UrlBase>/prowlarr</UrlBase><ApiKey>${PROWLARR_API_KEY:-0123456789abcdef0123456789abcdef}</ApiKey><AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired><LogLevel>info</LogLevel><LaunchBrowser>False</LaunchBrowser><AnalyticsEnabled>False</AnalyticsEnabled><InstanceName>Prowlarr</InstanceName></Config>' > /config/config.xml"
+    volumes:
+      - prowlarr_config:/config
+    restart: "no"
+
+  # Prowlarr: agregador de indexers. Único paso manual: abre su UI y añade
+  # los trackers (y FlareSolverr para los Cloudflare). Acceso bajo /prowlarr.
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: hubplay-prowlarr
+    depends_on:
+      prowlarr-init:
+        condition: service_completed_successfully
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+    ports:
+      - "${PROWLARR_HOST_PORT:-9696}:9696"
+    volumes:
+      - prowlarr_config:/config
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # FlareSolverr: resuelve Cloudflare para indexers que lo necesiten.
+  # Actívalo en Prowlarr: Indexer Proxies → FlareSolverr (http://flaresolverr:8191).
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: hubplay-flaresolverr
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+      - LOG_LEVEL=warning
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hubplay_pgdata:
+  prowlarr_config:
