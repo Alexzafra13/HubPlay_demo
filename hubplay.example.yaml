@@ -159,6 +159,10 @@ torrent:
       preferred_language: ""      # "Spanish"/"Latino"/… prioriza ese idioma.
       max_per_resolution: 5       # top N por resolución (0 = default 5).
       allow_cam: false            # true = NO filtra CAM/TS/Screener.
+      prefer_highest_quality: false # true = orden clásico (resolución primero).
+                                  # false (default, modelo P2P): primero lo que
+                                  # el navegador reproduce directo (H.264) y lo
+                                  # mejor sembrado.
 
 mdns:
   # Anuncia el servidor en la LAN como "<hostname>.local". Permite

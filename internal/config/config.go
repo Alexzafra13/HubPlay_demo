@@ -218,6 +218,13 @@ type CurationConfig struct {
 	// AllowCam, si es true, NO filtra releases CAM/TS/Screener. Default
 	// false (se filtran).
 	AllowCam bool `yaml:"allow_cam"`
+	// PreferHighestQuality invierte el orden por defecto: si es true, prioriza
+	// la resolución más alta por encima de todo (orden clásico). Por defecto
+	// (false) el orden es el del modelo P2P-sin-debrid: primero lo que el
+	// navegador reproduce directo (H.264) y lo mejor sembrado, porque un 4K
+	// HEVC sin seeders ni se transmite ni se decodifica. Ponlo true si tu
+	// servidor transcodifica todo y siempre quieres la máxima calidad.
+	PreferHighestQuality bool `yaml:"prefer_highest_quality"`
 }
 
 // TorznabIndexerConfig describe un endpoint Torznab/Newznab. Prowlarr es

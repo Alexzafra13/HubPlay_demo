@@ -10,6 +10,7 @@ func src(title string, seeders int, sizeBytes int64) SearchResult {
 		Seeders:      seeders,
 		SizeBytes:    sizeBytes,
 		Resolution:   m.Resolution,
+		Codec:        m.Codec,
 		Languages:    m.Languages,
 		IsCam:        m.IsCam,
 		QualityScore: m.QualityScore,
@@ -56,13 +57,15 @@ func TestCurateMaxSize(t *testing.T) {
 	}
 }
 
-func TestCurateSortCascade(t *testing.T) {
+func TestCurateSortCascade_QualityFirstWhenOptedOut(t *testing.T) {
 	in := []SearchResult{
 		src("Movie 1080p WEB-DL", 100, 5e9),
 		src("Movie 2160p WEB-DL", 5, 20e9),
 		src("Movie 2160p WEB-DL big", 5, 25e9),
 	}
-	out := Curate(in, DefaultFilterOptions())
+	opts := DefaultFilterOptions()
+	opts.PreferWebPlayable = false // classic resolution-first ordering
+	out := Curate(in, opts)
 	// Quality first: both 2160p ahead of 1080p despite far fewer seeders.
 	if out[0].Resolution != "2160p" || out[1].Resolution != "2160p" {
 		t.Fatalf("4K should rank first: %+v", out)
@@ -73,6 +76,32 @@ func TestCurateSortCascade(t *testing.T) {
 	}
 	if out[2].Resolution != "1080p" {
 		t.Errorf("1080p should be last: %+v", out[2])
+	}
+}
+
+// Default (P2P) cascade: with codecs tied, availability (seeders) beats raw
+// resolution — the well-seeded 1080p ranks ahead of the barely-seeded 4K.
+func TestCurateSortCascade_SeedersBeatResolutionByDefault(t *testing.T) {
+	in := []SearchResult{
+		src("Movie 2160p WEB-DL", 5, 20e9),
+		src("Movie 1080p WEB-DL", 100, 5e9),
+	}
+	out := Curate(in, DefaultFilterOptions())
+	if out[0].Resolution != "1080p" {
+		t.Fatalf("well-seeded 1080p should rank first in P2P mode: %+v", out)
+	}
+}
+
+// Web-playable (H.264) beats a transcode-needing HEVC even at higher
+// resolution / similar seeders — the "plays now" signal leads.
+func TestCurateWebPlayableFirst(t *testing.T) {
+	in := []SearchResult{
+		src("Movie 2160p WEB-DL x265", 50, 20e9), // HEVC, needs transcode
+		src("Movie 1080p WEB-DL x264", 50, 5e9),  // H.264, plays directly
+	}
+	out := Curate(in, DefaultFilterOptions())
+	if out[0].Codec != "H.264" {
+		t.Fatalf("web-playable H.264 should rank first: %+v", out)
 	}
 }
 

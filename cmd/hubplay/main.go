@@ -365,6 +365,7 @@ func run(configPath string) error {
 		PreferredLanguage:  curation.PreferredLanguage,
 		MaxPerResolution:   maxPerRes,
 		ExcludeCam:         !curation.AllowCam,
+		PreferWebPlayable:  !curation.PreferHighestQuality,
 	}
 	torznabClient := torrentstream.NewTorznabClient(indexerStore, logger)
 	sourceSvc := torrentstream.NewSourceService(torznabClient, cfg.Torrent.Torznab.CacheTTL, curationOpts, logger)
