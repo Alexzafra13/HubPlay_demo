@@ -427,6 +427,19 @@ Sin una cache que no controlas (la del debrid), el arranque está limitado:
 - Solo si en el futuro se quiere reproducción instantánea para contenido no
   cacheado/poco sembrado. Interfaz `Debrid` + proxy de stream (§5–§6).
 
+**P5 — Preferencia de idioma de audio (pedido por el usuario, no urgente).**
+- Objetivo: poder fijar un idioma preferido (p. ej. español) para que, al
+  buscar/ordenar fuentes, las releases con ese audio suban arriba.
+- Mecánica realista: el idioma NO viene como dato estructurado, hay que
+  inferirlo del nombre de la release (`SPANISH`, `CASTELLANO`, `LATINO`,
+  `ES`, `MULTI`, `DUAL`, `VOSE`…). Heurística de parseo + señal extra en el
+  ranking de `Curate` (enchufa con P1a). Sin garantías: si no hay release en
+  ese idioma, se cae al mejor disponible (no dejar al usuario sin nada).
+- Alcance: (1) campo `audio_lang` detectado por fuente; (2) preferencia de
+  usuario (perfil) o filtro en la query de búsqueda; (3) boost en el orden,
+  con modo "preferir" (sube) vs "solo" (filtra). Recomendado "preferir".
+- UI: selector de idioma en la búsqueda + ajuste por defecto en preferencias.
+
 ---
 
 ## 10. Riesgos y preguntas abiertas
