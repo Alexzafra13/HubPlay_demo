@@ -173,7 +173,8 @@ function SourcesModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { sources, isLoading, isError } = useDiscoverSources(type, movie.tmdb_id);
+  const { sources, isLoading, isError, error } = useDiscoverSources(type, movie.tmdb_id);
+  const rateLimited = error instanceof ApiError && error.code === "RATE_LIMITED";
 
   return (
     <div
@@ -216,7 +217,12 @@ function SourcesModal({
                 </div>
               ) : isError ? (
                 <p className="py-3 text-sm text-text-muted">
-                  {t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
+                  {rateLimited
+                    ? t("sources.rateLimited", {
+                        defaultValue:
+                          "El indexador está saturando peticiones. Espera unos segundos y reintenta.",
+                      })
+                    : t("sources.error", { defaultValue: "No se pudieron obtener las fuentes." })}
                 </p>
               ) : (
                 <SourceResults sources={sources} downloadType={type} />
