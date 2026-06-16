@@ -52,6 +52,10 @@ export function useMediaSources(
     // Indexers can be rate-limited; don't re-hit them on tab focus/reconnect.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // Don't auto-refire a failed (e.g. rate-limited) query when the title is
+    // reopened — that re-hits the indexer and can snowball into a 429. The
+    // explicit "Reintentar" button is the deliberate retry path.
+    retryOnMount: false,
   });
 
   return {
@@ -83,6 +87,10 @@ export function useDiscoverSources(
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // Don't auto-refire a failed (e.g. rate-limited) query when the title is
+    // reopened — that re-hits the indexer and can snowball into a 429. The
+    // explicit "Reintentar" button is the deliberate retry path.
+    retryOnMount: false,
   });
   return {
     sources: result.data ?? [],
@@ -116,6 +124,10 @@ export function useMediaSearch(
     // Indexers can be rate-limited; don't re-hit them on tab focus/reconnect.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // Don't auto-refire a failed (e.g. rate-limited) query when the title is
+    // reopened — that re-hits the indexer and can snowball into a 429. The
+    // explicit "Reintentar" button is the deliberate retry path.
+    retryOnMount: false,
   });
 
   return {

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,6 +22,67 @@ func TestSearchRateLimited(t *testing.T) {
 	_, err := c.Search(context.Background(), Query{Type: MediaTypeMovie, IMDbID: "tt0133093"})
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("want ErrRateLimited, got %v", err)
+	}
+}
+
+// After a 429 the endpoint must be skipped for the cooldown window instead of
+// being hammered again (the snowball that gets you self-banned).
+func TestSearchCircuitBreaker(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	c := NewTorznabClient(StaticIndexers{{Name: "x", URL: srv.URL + "/torznab"}}, nil)
+
+	if _, err := c.Search(context.Background(), Query{Type: MediaTypeMovie, IMDbID: "tt0133093"}); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("first search: want ErrRateLimited, got %v", err)
+	}
+	after := hits.Load()
+	if after == 0 {
+		t.Fatal("expected the endpoint to be queried at least once")
+	}
+
+	// Second search must skip the cooling-down endpoint (no new hits) yet still
+	// surface the rate-limit so the UI can say "wait and retry".
+	if _, err := c.Search(context.Background(), Query{Type: MediaTypeMovie, IMDbID: "tt0133093"}); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("second search: want ErrRateLimited, got %v", err)
+	}
+	if got := hits.Load(); got != after {
+		t.Errorf("breaker should skip the endpoint: hits went %d → %d", after, got)
+	}
+}
+
+// When the precise imdbid pass already returns hits, the broad text pass must
+// be skipped (halves the load on the endpoint).
+func TestSearchDeAmplifiesWhenIMDbHits(t *testing.T) {
+	var imdbHits, textHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("t") == "search" {
+			textHits.Add(1)
+		} else { // t=movie / t=tvsearch → the imdbid pass
+			imdbHits.Add(1)
+		}
+		_, _ = io.WriteString(w, sampleFeed)
+	}))
+	defer srv.Close()
+	c := NewTorznabClient(StaticIndexers{{Name: "x", URL: srv.URL + "/torznab"}}, nil)
+
+	res, err := c.Search(context.Background(), Query{
+		Type: MediaTypeMovie, IMDbID: "tt0133093", Title: "Some Movie", Year: 2020,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("expected results from the imdbid pass")
+	}
+	if got := imdbHits.Load(); got != 1 {
+		t.Errorf("imdbid pass should run once, got %d", got)
+	}
+	if got := textHits.Load(); got != 0 {
+		t.Errorf("text pass should be skipped when imdbid hits, got %d", got)
 	}
 }
 
