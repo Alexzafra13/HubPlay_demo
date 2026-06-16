@@ -15,7 +15,7 @@ type fakeSearcher struct {
 	err   error
 }
 
-func (f *fakeSearcher) Search(_ context.Context, _ MediaType, _, _ string) ([]SearchResult, error) {
+func (f *fakeSearcher) Search(_ context.Context, _ Query) ([]SearchResult, error) {
 	f.calls++
 	return f.res, f.err
 }

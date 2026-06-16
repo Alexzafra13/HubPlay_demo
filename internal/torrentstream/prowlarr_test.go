@@ -45,14 +45,14 @@ func TestBuildTorznabURLCustomCategories(t *testing.T) {
 		MovieCategories:  []string{"2040", "2050"},
 		SeriesCategories: []string{"5040"},
 	}
-	raw, err := buildTorznabURL(idx.URL, "", idx, MediaTypeMovie, "tt1", "")
+	raw, err := buildTorznabURL(idx.URL, "", idx, Query{Type: MediaTypeMovie, IMDbID: "tt1"}, modeIMDb)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(raw, "cat=2040%2C2050") {
 		t.Errorf("movie cat not applied: %s", raw)
 	}
-	raw2, _ := buildTorznabURL(idx.URL, "", idx, MediaTypeSeries, "tt1", "")
+	raw2, _ := buildTorznabURL(idx.URL, "", idx, Query{Type: MediaTypeSeries, IMDbID: "tt1"}, modeIMDb)
 	if !strings.Contains(raw2, "cat=5040") {
 		t.Errorf("series cat not applied: %s", raw2)
 	}
@@ -170,7 +170,7 @@ func TestSearchProwlarrExpansion(t *testing.T) {
 	c := NewTorznabClient(StaticIndexers{
 		{Name: "prowlarr", BaseURL: srv.URL, APIKey: "k"},
 	}, nil)
-	res, err := c.Search(context.Background(), MediaTypeMovie, "tt0133093", "")
+	res, err := c.Search(context.Background(), Query{Type: MediaTypeMovie, IMDbID: "tt0133093"})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}

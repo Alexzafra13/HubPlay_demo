@@ -509,12 +509,22 @@ func mountTorrent(r chi.Router, deps Dependencies) {
 	if deps.Torrent.Sources != nil {
 		sources = deps.Torrent.Sources
 	}
-	h := torrenthandler.NewHandler(deps.Torrent.Manager, sources, meta, nil, deps.Infra.Logger)
+	var vod torrenthandler.VODPreparer
+	if deps.Torrent.VOD != nil {
+		vod = deps.Torrent.VOD
+	}
+	h := torrenthandler.NewHandler(deps.Torrent.Manager, sources, meta, vod, nil, deps.Infra.Logger)
 	r.Route("/torrent", func(r chi.Router) {
 		// Streaming surface (Internet Archive search + magnet playback).
 		if deps.Torrent.Manager != nil {
 			r.Get("/search", h.Search)
 			r.Get("/stream", h.Stream)
+			// Play decision (direct vs HLS remux) + HLS output of the remux.
+			r.Get("/play", h.Play)
+			if deps.Torrent.VOD != nil {
+				r.Get("/hls/{infohash}/index.m3u8", h.HLSPlaylist)
+				r.Get("/hls/{infohash}/{segment}", h.HLSSegment)
+			}
 		}
 		// Discovery grid (TMDb posters) — needs a metadata provider.
 		if meta != nil {

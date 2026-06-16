@@ -320,6 +320,7 @@ func run(configPath string) error {
 	// por defecto; sólo se cablea con `torrent.enabled: true`. nil ⇒ el
 	// surface /torrent/* no se monta.
 	var torrentMgr *torrentstream.Manager
+	var torrentVOD *torrentstream.VODTransmux
 	if cfg.Torrent.Enabled {
 		dataDir := cfg.Torrent.DataDir
 		if dataDir == "" {
@@ -340,6 +341,25 @@ func run(configPath string) error {
 		}
 		lc.AddService("torrent manager", func(context.Context) error {
 			return torrentMgr.Close()
+		})
+
+		// VOD transcoder: decides direct-play vs cheap `-c copy` HLS remux
+		// (H.264-in-MKV) vs full reencode (HEVC/AV1/XviD), reusing the same
+		// hardware encoder the stream manager detected. Probes via ffprobe.
+		vodHW := streamManager.HWAccelInfo()
+		torrentVOD, err = torrentstream.NewVODTransmux(torrentstream.VODConfig{
+			WorkRoot:         filepath.Join(dataDir, "transcode"),
+			IdleTimeout:      cfg.Torrent.IdleTimeout,
+			Encoder:          vodHW.Encoder,
+			HWAccelInputArgs: stream.HWAccelInputArgs(vodHW.Selected, vodHW.Device),
+			AllowReencode:    !cfg.Torrent.DisableReencode,
+		}, logger)
+		if err != nil {
+			return err
+		}
+		lc.AddService("torrent vod transmux", func(context.Context) error {
+			torrentVOD.Shutdown()
+			return nil
 		})
 	}
 
@@ -365,6 +385,7 @@ func run(configPath string) error {
 		PreferredLanguage:  curation.PreferredLanguage,
 		MaxPerResolution:   maxPerRes,
 		ExcludeCam:         !curation.AllowCam,
+		PreferWebPlayable:  !curation.PreferHighestQuality,
 	}
 	torznabClient := torrentstream.NewTorznabClient(indexerStore, logger)
 	sourceSvc := torrentstream.NewSourceService(torznabClient, cfg.Torrent.Torznab.CacheTTL, curationOpts, logger)
@@ -552,6 +573,7 @@ func run(configPath string) error {
 		Torrent: api.TorrentDeps{
 			Manager:      torrentMgr,
 			Sources:      sourceSvc,
+			VOD:          torrentVOD,
 			IndexerStore: indexerStore,
 		},
 		Federation: api.FederationDeps{

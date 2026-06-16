@@ -1934,6 +1934,17 @@ export class ApiError extends Error {
   }
 }
 
+// TorrentPlayResponse is the /torrent/play decision: how to deliver a source.
+//   - "direct": play `url` in a <video> as-is.
+//   - "hls": load `url` (an HLS playlist) with hls.js — the server is remuxing
+//     a browser-incompatible container (e.g. H.264-in-MKV).
+//   - "reencode": the codec needs a full transcode that isn't wired yet; the
+//     UI shows a "not supported yet" notice instead of a black screen.
+export interface TorrentPlayResponse {
+  mode: "direct" | "hls" | "reencode";
+  url?: string;
+}
+
 // TorrentSearchResult is one streamable item from /torrent/search (Internet
 // Archive) or /torrent/sources/* (Torznab aggregation). `torrent_url` (a
 // magnet or http(s) .torrent) is passed to /torrent/stream to play it;

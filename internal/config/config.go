@@ -170,6 +170,12 @@ type TorrentConfig struct {
 	// (magnet → info) antes de fallar. Default 60s.
 	MetadataTimeout time.Duration `yaml:"metadata_timeout"`
 
+	// DisableReencode desactiva el camino de transcode pesado (reencode
+	// HEVC/AV1/XviD → H.264). Default false (reencode activo). Ponlo true en
+	// hosts flojos: esas fuentes se marcan como no reproducibles en vez de
+	// quemar CPU. El remux barato (-c copy) no se ve afectado.
+	DisableReencode bool `yaml:"disable_reencode"`
+
 	// AllowPrivateUpstreams: relaja el guard SSRF al BAJAR un .torrent por
 	// http(s) — permite hosts privados/LAN como el Prowlarr empaquetado
 	// (resuelve a IP privada de docker y sirve el .torrent en /{id}/download).
@@ -218,6 +224,13 @@ type CurationConfig struct {
 	// AllowCam, si es true, NO filtra releases CAM/TS/Screener. Default
 	// false (se filtran).
 	AllowCam bool `yaml:"allow_cam"`
+	// PreferHighestQuality invierte el orden por defecto: si es true, prioriza
+	// la resolución más alta por encima de todo (orden clásico). Por defecto
+	// (false) el orden es el del modelo P2P-sin-debrid: primero lo que el
+	// navegador reproduce directo (H.264) y lo mejor sembrado, porque un 4K
+	// HEVC sin seeders ni se transmite ni se decodifica. Ponlo true si tu
+	// servidor transcodifica todo y siempre quieres la máxima calidad.
+	PreferHighestQuality bool `yaml:"prefer_highest_quality"`
 }
 
 // TorznabIndexerConfig describe un endpoint Torznab/Newznab. Prowlarr es

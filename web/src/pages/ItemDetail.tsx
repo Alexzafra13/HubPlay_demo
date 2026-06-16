@@ -526,6 +526,8 @@ export default function ItemDetail() {
             <SourceList
               type={item.type === "series" ? "series" : "movie"}
               title={t("sources.title", { defaultValue: "Fuentes" })}
+              mediaTitle={item.title}
+              year={item.year ?? undefined}
               imdbId={
                 item.external_ids.imdb.startsWith("tt")
                   ? item.external_ids.imdb

@@ -24,14 +24,24 @@ type FilterOptions struct {
 	MaxPerResolution int
 	// ExcludeCam drops cam/TS/screener releases. Default true.
 	ExcludeCam bool
+	// PreferWebPlayable puts browser-playable releases (H.264) ahead of ones
+	// that need server-side transcoding (HEVC/AV1/XviD) and ranks by
+	// availability (seeders) ABOVE raw resolution. This is the right default
+	// for the P2P-without-debrid model: a 4K HEVC with no seeders neither
+	// streams (no peers) nor plays (no browser decode), so "plays now +
+	// available" beats "highest resolution". Set false to keep the classic
+	// resolution-first ordering (e.g. when a strong server transcodes
+	// everything and you always want the best quality).
+	PreferWebPlayable bool
 }
 
 // DefaultFilterOptions is the sane baseline: drop cams, top 5 per
-// resolution, no other restrictions.
+// resolution, prefer browser-playable + well-seeded releases.
 func DefaultFilterOptions() FilterOptions {
 	return FilterOptions{
-		ExcludeCam:       true,
-		MaxPerResolution: 5,
+		ExcludeCam:        true,
+		MaxPerResolution:  5,
+		PreferWebPlayable: true,
 	}
 }
 
@@ -81,23 +91,35 @@ func Curate(in []SearchResult, opts FilterOptions) []SearchResult {
 
 	pref := strings.ToLower(strings.TrimSpace(opts.PreferredLanguage))
 	sort.SliceStable(out, func(i, j int) bool {
-		ri, rj := resolutionRank(out[i].Resolution), resolutionRank(out[j].Resolution)
-		if ri != rj {
-			return ri > rj
-		}
-		if out[i].Seeders != out[j].Seeders {
-			return out[i].Seeders > out[j].Seeders
+		a, b := out[i], out[j]
+		if opts.PreferWebPlayable {
+			// P2P cascade: web-playable → seeders → resolution.
+			if wa, wb := webPlayRank(a.Codec), webPlayRank(b.Codec); wa != wb {
+				return wa > wb
+			}
+			if a.Seeders != b.Seeders {
+				return a.Seeders > b.Seeders
+			}
+			if ra, rb := resolutionRank(a.Resolution), resolutionRank(b.Resolution); ra != rb {
+				return ra > rb
+			}
+		} else {
+			// Classic cascade: resolution → seeders.
+			if ra, rb := resolutionRank(a.Resolution), resolutionRank(b.Resolution); ra != rb {
+				return ra > rb
+			}
+			if a.Seeders != b.Seeders {
+				return a.Seeders > b.Seeders
+			}
 		}
 		if pref != "" {
-			pi, pj := hasLanguage(out[i], pref), hasLanguage(out[j], pref)
-			if pi != pj {
-				return pi // preferred-language result first
+			if pa, pb := hasLanguage(a, pref), hasLanguage(b, pref); pa != pb {
+				return pa // preferred-language result first
 			}
 		}
 		// Smaller size wins the final tiebreak; unknown sizes (0) sink so
 		// real, sized releases are preferred.
-		si, sj := normalizedSize(out[i].SizeBytes), normalizedSize(out[j].SizeBytes)
-		return si < sj
+		return normalizedSize(a.SizeBytes) < normalizedSize(b.SizeBytes)
 	})
 
 	if opts.MaxPerResolution > 0 {
@@ -140,6 +162,22 @@ func hasLanguage(r SearchResult, pref string) bool {
 		}
 	}
 	return false
+}
+
+// webPlayRank scores how likely a release plays directly in a browser
+// <video> tag without a server-side transcode. H.264 is the safe case; an
+// unknown codec (not advertised in the title) is a maybe; HEVC/AV1/XviD
+// usually need transcoding (kept in sync with the UI's webRiskyCodec). Higher
+// is better.
+func webPlayRank(codec string) int {
+	switch codec {
+	case "H.264":
+		return 2
+	case "": // codec not advertised in the title
+		return 1
+	default: // HEVC, AV1, XviD …
+		return 0
+	}
 }
 
 // resolutionRank orders resolutions for sorting (higher is better).

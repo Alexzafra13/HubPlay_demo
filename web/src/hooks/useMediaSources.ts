@@ -24,14 +24,28 @@ export interface UseMediaSourcesResult {
 export function useMediaSources(
   type: MediaSourceType | undefined,
   imdbId: string | null | undefined,
-  options?: { enabled?: boolean },
+  options?: {
+    enabled?: boolean;
+    /** Title/year (and season/episode for series) enable the server-side
+     *  text-search pass — without them many titles resolve to "no sources". */
+    title?: string;
+    year?: number;
+    season?: number;
+    episode?: number;
+  },
 ): UseMediaSourcesResult {
   const enabled = Boolean(type && imdbId) && (options?.enabled ?? true);
+  const { title, year, season, episode } = options ?? {};
 
   const query = useQuery({
-    queryKey: ["media-sources", type, imdbId],
+    queryKey: ["media-sources", type, imdbId, title, year, season, episode],
     queryFn: () =>
-      api.getMediaSources(type as MediaSourceType, imdbId as string),
+      api.getMediaSources(type as MediaSourceType, imdbId as string, {
+        title,
+        year,
+        season,
+        episode,
+      }),
     enabled,
     retry: false,
     staleTime: 5 * 60_000,
