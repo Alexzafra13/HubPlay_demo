@@ -68,6 +68,7 @@ import type {
   UserData,
   ApiErrorBody,
   TorrentSearchResult,
+  TorrentPlayResponse,
   TorrentDiscoverResult,
   MediaSourceType,
   DownloadJob,
@@ -469,6 +470,15 @@ export class ApiClient {
   // (cookie auth travels automatically).
   torrentStreamURL(src: string): string {
     return `${this.baseUrl}/torrent/stream?src=${encodeURIComponent(src)}`;
+  }
+
+  // torrentPlay asks the server how to deliver a source: "direct" → play the
+  // returned url in a <video>; "hls" → load it with hls.js (the server is
+  // remuxing an H.264-in-MKV style release); "reencode" → not yet supported.
+  async torrentPlay(src: string): Promise<TorrentPlayResponse> {
+    return this.request<TorrentPlayResponse>("GET", "/torrent/play", {
+      params: { src },
+    });
   }
 
   // getMediaSources resolves streamable sources for a title by IMDb id via

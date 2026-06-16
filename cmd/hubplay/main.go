@@ -320,6 +320,7 @@ func run(configPath string) error {
 	// por defecto; sólo se cablea con `torrent.enabled: true`. nil ⇒ el
 	// surface /torrent/* no se monta.
 	var torrentMgr *torrentstream.Manager
+	var torrentVOD *torrentstream.VODTransmux
 	if cfg.Torrent.Enabled {
 		dataDir := cfg.Torrent.DataDir
 		if dataDir == "" {
@@ -340,6 +341,21 @@ func run(configPath string) error {
 		}
 		lc.AddService("torrent manager", func(context.Context) error {
 			return torrentMgr.Close()
+		})
+
+		// VOD transcoder: decides direct-play vs cheap `-c copy` HLS remux so
+		// browser-incompatible containers (H.264-in-MKV) still play. Probes
+		// via ffprobe; nil prober defaults inside NewVODTransmux.
+		torrentVOD, err = torrentstream.NewVODTransmux(torrentstream.VODConfig{
+			WorkRoot:    filepath.Join(dataDir, "transcode"),
+			IdleTimeout: cfg.Torrent.IdleTimeout,
+		}, logger)
+		if err != nil {
+			return err
+		}
+		lc.AddService("torrent vod transmux", func(context.Context) error {
+			torrentVOD.Shutdown()
+			return nil
 		})
 	}
 
@@ -553,6 +569,7 @@ func run(configPath string) error {
 		Torrent: api.TorrentDeps{
 			Manager:      torrentMgr,
 			Sources:      sourceSvc,
+			VOD:          torrentVOD,
 			IndexerStore: indexerStore,
 		},
 		Federation: api.FederationDeps{

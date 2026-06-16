@@ -1,9 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Hls from "hls.js";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { Play, X, RefreshCw, Download, Check } from "lucide-react";
 import { api } from "@/api/client";
-import { ApiError, type MediaSourceType, type TorrentSearchResult } from "@/api/types";
+import {
+  ApiError,
+  type MediaSourceType,
+  type TorrentPlayResponse,
+  type TorrentSearchResult,
+} from "@/api/types";
 import { useMediaSources } from "@/hooks/useMediaSources";
 import { useAuthStore } from "@/store/auth";
 import { Button, Spinner } from "@/components/common";
@@ -116,7 +122,9 @@ export function SourceResults({
       onPlay(s);
       return;
     }
-    setPlaying({ src: api.torrentStreamURL(bestSrc(s)), title: s.title });
+    // Pass the raw source; the modal asks /torrent/play how to deliver it
+    // (direct vs HLS remux) before attaching it to the player.
+    setPlaying({ src: bestSrc(s), title: s.title });
   }
 
   if (sources.length === 0) {
@@ -156,6 +164,7 @@ export function SourceResults({
 
       {playing && (
         <SourcePlayerModal
+          key={playing.src}
           src={playing.src}
           title={playing.title}
           onClose={() => setPlaying(null)}
@@ -328,7 +337,63 @@ function SourcePlayerModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // play: null while resolving the delivery mode; then the decided shape.
+  // The modal is keyed by src (remounts per source), so state starts fresh —
+  // no synchronous reset needed.
+  const [play, setPlay] = useState<TorrentPlayResponse | null>(null);
   const [errored, setErrored] = useState(false);
+
+  // Browser HLS capabilities, derived once: Safari plays HLS natively;
+  // everyone else needs MSE (hls.js).
+  const nativeHls = useMemo(
+    () =>
+      document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== "",
+    [],
+  );
+  const hlsSupported = useMemo(() => Hls.isSupported(), []);
+
+  // Ask the server how to deliver this source (direct vs HLS remux).
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .torrentPlay(src)
+      .then((r) => {
+        if (!cancelled) setPlay(r);
+      })
+      .catch(() => {
+        if (!cancelled) setErrored(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  // For the HLS (remux) mode, attach hls.js — or set the native source on
+  // Safari. The "no support at all" case is handled by derived render below,
+  // so the effect never needs to set state synchronously.
+  useEffect(() => {
+    if (play?.mode !== "hls" || !play.url) return;
+    const video = videoRef.current;
+    if (!video) return;
+    if (nativeHls) {
+      video.src = play.url;
+      return;
+    }
+    if (!hlsSupported) return;
+    const hls = new Hls();
+    hls.loadSource(play.url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (data.fatal) setErrored(true);
+    });
+    return () => hls.destroy();
+  }, [play, nativeHls, hlsSupported]);
+
+  const showReencode = play?.mode === "reencode";
+  const showUnsupported =
+    play?.mode === "hls" && !nativeHls && !hlsSupported;
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
@@ -353,7 +418,7 @@ function SourcePlayerModal({
           </button>
         </div>
         <div className="relative aspect-video w-full bg-black">
-          {errored ? (
+          {errored || showUnsupported ? (
             <div className="flex h-full items-center justify-center px-6 text-center">
               <p className="text-sm text-text-secondary">
                 {t("sources.playError", {
@@ -362,10 +427,24 @@ function SourcePlayerModal({
                 })}
               </p>
             </div>
+          ) : showReencode ? (
+            <div className="flex h-full items-center justify-center px-6 text-center">
+              <p className="text-sm text-text-secondary">
+                {t("sources.reencodeUnsupported", {
+                  defaultValue:
+                    "Este formato (p. ej. HEVC/AV1) necesita transcodificación, que todavía no está disponible. Prueba con una fuente H.264.",
+                })}
+              </p>
+            </div>
+          ) : !play ? (
+            <div className="flex h-full items-center justify-center">
+              <Spinner size="md" />
+            </div>
           ) : (
             <video
               key={src}
-              src={src}
+              ref={videoRef}
+              src={play.mode === "direct" ? play.url : undefined}
               controls
               autoPlay
               className="h-full w-full"

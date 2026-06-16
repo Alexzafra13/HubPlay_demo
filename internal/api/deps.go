@@ -149,6 +149,10 @@ type IPTVDeps struct {
 type TorrentDeps struct {
 	Manager *torrentstream.Manager
 	Sources *torrentstream.SourceService
+	// VOD transcodifica el fichero del torrent para el navegador (direct-play
+	// vs remux HLS). nil ⇒ /torrent/play cae a direct y no se montan las rutas
+	// /torrent/hls/*.
+	VOD *torrentstream.VODTransmux
 	// IndexerStore persiste los indexers Torznab/Prowlarr gestionados
 	// desde el panel admin (/admin/indexers), en DB (app_settings) — sin
 	// tocar YAML/env ni reiniciar. nil ⇒ la superficie admin no se monta.

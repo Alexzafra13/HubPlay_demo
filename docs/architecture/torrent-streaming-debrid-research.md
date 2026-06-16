@@ -406,9 +406,13 @@ Sin una cache que no controlas (la del debrid), el arranque está limitado:
   captura). Independiente del resolver de playback.
 
 **P1 — Transcode wiring + selección por códec (que de verdad se reproduzca).**
-- Meter `Session.Reader()` por `internal/stream.Decide` (transmux estilo
-  IPTV) para MKV/HEVC/AC3.
-- Reordenar `Curate` para modo P2P: priorizar direct-play + seeders.
+- ✅ **P1a**: `Curate` reordenado para modo P2P (web-playable + seeders).
+- ✅ **P1b-1**: gestor VOD propio (`VODTransmux`) — ffprobe del fichero por un
+  loopback interno → decisión `DecidePlayMode` (direct / remux / reencode) →
+  **remux `-c copy` a HLS** para H.264-en-MKV (audio a AAC si hace falta);
+  endpoints `/torrent/play` + `/torrent/hls/*`; player con hls.js.
+- ⏳ **P1b-2** (siguiente): reencode HEVC/AC3/AV1/XviD con hwaccel
+  (VAAPI/NVENC/QSV), reusando el patrón de `internal/stream`.
 
 **P2 — Latencia.**
 - Preferir `.torrent` sobre magnet; pre-warm del top source al abrir ficha.
