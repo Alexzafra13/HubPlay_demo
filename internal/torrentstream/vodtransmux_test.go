@@ -54,7 +54,7 @@ func newTestVOD(t *testing.T, p probe.Prober) *VODTransmux {
 // fakeStarter writes a playlist + one segment so waitFirstSegment succeeds,
 // and records whether stop was called.
 func fakeStarter(stopped *atomic.Bool) transcodeStarter {
-	return func(_ context.Context, _, workDir string, _ bool) (func(), error) {
+	return func(_ context.Context, _ []string, workDir string) (func(), error) {
 		_ = os.WriteFile(filepath.Join(workDir, "index.m3u8"), []byte("#EXTM3U\n"), 0o644)
 		_ = os.WriteFile(filepath.Join(workDir, "seg-00000.ts"), []byte("ts"), 0o644)
 		return func() { stopped.Store(true) }, nil
@@ -125,11 +125,29 @@ func TestVODPrepare_Reencode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if res.Mode != PlayReencode {
-		t.Fatalf("mode: got %v want reencode", res.Mode)
+	if res.Mode != PlayReencode || res.HLS {
+		t.Fatalf("disabled reencode: got mode=%v hls=%v want reencode/false", res.Mode, res.HLS)
 	}
 	if _, ok := m.PlaylistPath("ff"); ok {
-		t.Error("reencode (not yet wired) must not create a session")
+		t.Error("disabled reencode must not create a session")
+	}
+}
+
+func TestVODPrepare_ReencodeEnabled(t *testing.T) {
+	var stopped atomic.Bool
+	m := newTestVOD(t, fakeProber{res: probeResult("matroska,webm", "hevc", "ac3")})
+	m.allowReencode = true
+	m.start = fakeStarter(&stopped)
+
+	res, err := m.Prepare(context.Background(), &fakePlayable{ih: "ee"})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if res.Mode != PlayReencode || !res.HLS {
+		t.Fatalf("enabled reencode: got mode=%v hls=%v want reencode/true", res.Mode, res.HLS)
+	}
+	if _, ok := m.PlaylistPath("ee"); !ok {
+		t.Error("enabled reencode should create an HLS session")
 	}
 }
 

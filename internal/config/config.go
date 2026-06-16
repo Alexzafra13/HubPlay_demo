@@ -170,6 +170,12 @@ type TorrentConfig struct {
 	// (magnet → info) antes de fallar. Default 60s.
 	MetadataTimeout time.Duration `yaml:"metadata_timeout"`
 
+	// DisableReencode desactiva el camino de transcode pesado (reencode
+	// HEVC/AV1/XviD → H.264). Default false (reencode activo). Ponlo true en
+	// hosts flojos: esas fuentes se marcan como no reproducibles en vez de
+	// quemar CPU. El remux barato (-c copy) no se ve afectado.
+	DisableReencode bool `yaml:"disable_reencode"`
+
 	// AllowPrivateUpstreams: relaja el guard SSRF al BAJAR un .torrent por
 	// http(s) — permite hosts privados/LAN como el Prowlarr empaquetado
 	// (resuelve a IP privada de docker y sirve el .torrent en /{id}/download).

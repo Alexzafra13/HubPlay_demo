@@ -343,12 +343,16 @@ func run(configPath string) error {
 			return torrentMgr.Close()
 		})
 
-		// VOD transcoder: decides direct-play vs cheap `-c copy` HLS remux so
-		// browser-incompatible containers (H.264-in-MKV) still play. Probes
-		// via ffprobe; nil prober defaults inside NewVODTransmux.
+		// VOD transcoder: decides direct-play vs cheap `-c copy` HLS remux
+		// (H.264-in-MKV) vs full reencode (HEVC/AV1/XviD), reusing the same
+		// hardware encoder the stream manager detected. Probes via ffprobe.
+		vodHW := streamManager.HWAccelInfo()
 		torrentVOD, err = torrentstream.NewVODTransmux(torrentstream.VODConfig{
-			WorkRoot:    filepath.Join(dataDir, "transcode"),
-			IdleTimeout: cfg.Torrent.IdleTimeout,
+			WorkRoot:         filepath.Join(dataDir, "transcode"),
+			IdleTimeout:      cfg.Torrent.IdleTimeout,
+			Encoder:          vodHW.Encoder,
+			HWAccelInputArgs: stream.HWAccelInputArgs(vodHW.Selected, vodHW.Device),
+			AllowReencode:    !cfg.Torrent.DisableReencode,
 		}, logger)
 		if err != nil {
 			return err

@@ -411,8 +411,10 @@ Sin una cache que no controlas (la del debrid), el arranque está limitado:
   loopback interno → decisión `DecidePlayMode` (direct / remux / reencode) →
   **remux `-c copy` a HLS** para H.264-en-MKV (audio a AAC si hace falta);
   endpoints `/torrent/play` + `/torrent/hls/*`; player con hls.js.
-- ⏳ **P1b-2** (siguiente): reencode HEVC/AC3/AV1/XviD con hwaccel
-  (VAAPI/NVENC/QSV), reusando el patrón de `internal/stream`.
+- ✅ **P1b-2**: reencode HEVC/AC3/AV1/XviD → H.264+AAC a HLS, con el mismo
+  encoder hardware que detecta `stream.DetectHWAccel` (VAAPI/NVENC/QSV/
+  VideoToolbox; libx264 si no hay). Opt-out `torrent.disable_reencode` para
+  hosts flojos. `/torrent/play` ya devuelve `hls` también para reencode.
 
 **P2 — Latencia.**
 - Preferir `.torrent` sobre magnet; pre-warm del top source al abrir ficha.

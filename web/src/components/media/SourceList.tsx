@@ -432,7 +432,7 @@ function SourcePlayerModal({
               <p className="text-sm text-text-secondary">
                 {t("sources.reencodeUnsupported", {
                   defaultValue:
-                    "Este formato (p. ej. HEVC/AV1) necesita transcodificación, que todavía no está disponible. Prueba con una fuente H.264.",
+                    "Este formato (p. ej. HEVC/AV1) necesita transcodificación, que está desactivada en este servidor. Prueba con una fuente H.264.",
                 })}
               </p>
             </div>

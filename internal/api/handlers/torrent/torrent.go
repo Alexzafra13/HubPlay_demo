@@ -495,15 +495,16 @@ func (h *Handler) Play(w http.ResponseWriter, r *http.Request) {
 			"could not prepare playback for this source")
 		return
 	}
-	switch res.Mode {
-	case torrentstream.PlayRemux:
+	switch {
+	case res.HLS:
+		// A transcode (remux or reencode) is running → play from HLS.
 		handlers.RespondData(w, http.StatusOK, playResponse{
 			Mode: "hls",
 			URL:  "/api/v1/torrent/hls/" + res.InfoHash + "/index.m3u8",
 		})
-	case torrentstream.PlayReencode:
-		// Detected but not yet wired (P1b-2). Tell the UI so it can warn
-		// instead of showing a black screen.
+	case res.Mode == torrentstream.PlayReencode:
+		// Needs a re-encode but it's disabled on this server → tell the UI so
+		// it can warn instead of showing a black screen.
 		handlers.RespondData(w, http.StatusOK, playResponse{Mode: "reencode"})
 	default:
 		handlers.RespondData(w, http.StatusOK, playResponse{Mode: "direct", URL: directStreamURL(src)})

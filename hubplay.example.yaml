@@ -119,6 +119,9 @@ torrent:
   idle_timeout: "5m"         # cierra la sesión tras este tiempo sin lecturas.
   readahead_bytes: 16777216  # ventana de lectura secuencial (16 MiB) para "ver mientras descarga".
   metadata_timeout: "60s"    # espera máxima a resolver metadatos del magnet.
+  disable_reencode: false    # true en hosts flojos: HEVC/AV1/XviD se marcan
+                             # como no reproducibles en vez de transcodificar
+                             # (el remux barato H.264-en-MKV sigue activo).
 
   # Agregación de fuentes Torznab/Newznab (búsqueda por IMDb id). Es
   # INDEPENDIENTE de enabled: la búsqueda funciona aunque el streaming esté

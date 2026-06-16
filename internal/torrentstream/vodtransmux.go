@@ -36,6 +36,12 @@ type VODTransmux struct {
 	logger      *slog.Logger
 	idleTimeout time.Duration
 
+	// reencode settings: encoder name + decode-side hwaccel flags (from
+	// stream.DetectHWAccel), and whether reencode is allowed at all.
+	encoder          string
+	hwAccelInputArgs []string
+	allowReencode    bool
+
 	// start is the seam that actually launches the transcoder; overridden in
 	// tests so the lifecycle can be exercised without a real ffmpeg.
 	start transcodeStarter
@@ -63,9 +69,10 @@ type Playable interface {
 	Touch()
 }
 
-// transcodeStarter launches a transcode of inputURL into workDir and returns
-// a stop func. The default implementation runs ffmpeg; tests inject a fake.
-type transcodeStarter func(ctx context.Context, inputURL, workDir string, audioTranscode bool) (stop func(), err error)
+// transcodeStarter runs ffmpeg with the given argv (the manager builds them
+// for remux or reencode) and returns a stop func. The default implementation
+// execs ffmpeg; tests inject a fake.
+type transcodeStarter func(ctx context.Context, args []string, workDir string) (stop func(), err error)
 
 // vodSession is one running remux.
 type vodSession struct {
@@ -77,7 +84,11 @@ type vodSession struct {
 
 // PlayResult tells the handler how to deliver a source.
 type PlayResult struct {
-	Mode     PlayMode
+	Mode PlayMode
+	// HLS is true when a transcode (remux OR reencode) is running and the
+	// content should be played from the HLS playlist. False for direct play
+	// and for reencode that was declined (disabled).
+	HLS      bool
 	InfoHash string // for HLS, the key under which the playlist/segments live
 }
 
@@ -87,6 +98,12 @@ type VODConfig struct {
 	FFmpegBin   string
 	Prober      probe.Prober
 	IdleTimeout time.Duration
+	// Encoder + HWAccelInputArgs select the reencode encoder (from
+	// stream.DetectHWAccel); empty Encoder defaults to software libx264.
+	Encoder          string
+	HWAccelInputArgs []string
+	// AllowReencode gates the CPU-heavy reencode path. Default true.
+	AllowReencode bool
 }
 
 // NewVODTransmux builds the manager and starts its loopback reader server +
@@ -109,15 +126,18 @@ func NewVODTransmux(cfg VODConfig, logger *slog.Logger) (*VODTransmux, error) {
 	}
 
 	m := &VODTransmux{
-		workRoot:    cfg.WorkRoot,
-		prober:      cfg.Prober,
-		logger:      logger,
-		idleTimeout: cfg.IdleTimeout,
-		readers:     make(map[string]Playable),
-		sessions:    make(map[string]*vodSession),
-		now:         time.Now,
-		reaperStop:  make(chan struct{}),
-		reaperDone:  make(chan struct{}),
+		workRoot:         cfg.WorkRoot,
+		prober:           cfg.Prober,
+		logger:           logger,
+		idleTimeout:      cfg.IdleTimeout,
+		encoder:          cfg.Encoder,
+		hwAccelInputArgs: cfg.HWAccelInputArgs,
+		allowReencode:    cfg.AllowReencode,
+		readers:          make(map[string]Playable),
+		sessions:         make(map[string]*vodSession),
+		now:              time.Now,
+		reaperStop:       make(chan struct{}),
+		reaperDone:       make(chan struct{}),
 	}
 	m.start = m.startFFmpeg
 	if err := m.startLoopback(); err != nil {
@@ -185,12 +205,12 @@ func (t *touchReader) Read(b []byte) (int, error) {
 func (m *VODTransmux) Prepare(ctx context.Context, sess Playable) (PlayResult, error) {
 	ih := strings.ToLower(sess.InfoHash())
 
-	// Already remuxing this content → reuse.
+	// Already transcoding this content → reuse the running HLS session.
 	m.mu.Lock()
 	if s, ok := m.sessions[ih]; ok {
 		s.lastAccess.set(m.now())
 		m.mu.Unlock()
-		return PlayResult{Mode: PlayRemux, InfoHash: ih}, nil
+		return PlayResult{Mode: PlayRemux, HLS: true, InfoHash: ih}, nil
 	}
 	m.readers[ih] = sess
 	m.mu.Unlock()
@@ -202,15 +222,23 @@ func (m *VODTransmux) Prepare(ctx context.Context, sess Playable) (PlayResult, e
 	}
 	mode := DecidePlayMode(info)
 
+	// Reencode is opt-out: a 4K HEVC software transcode is brutal on weak
+	// hosts, so an operator can disable it and have those sources reported as
+	// unsupported instead.
+	if mode == PlayReencode && !m.allowReencode {
+		m.unregisterReader(ih)
+		return PlayResult{Mode: PlayReencode, InfoHash: ih}, nil
+	}
+
 	switch mode {
-	case PlayRemux:
-		if err := m.startRemux(ctx, ih, info); err != nil {
+	case PlayRemux, PlayReencode:
+		if err := m.startTranscode(ctx, ih, mode, info); err != nil {
 			m.unregisterReader(ih)
 			return PlayResult{}, err
 		}
-		return PlayResult{Mode: PlayRemux, InfoHash: ih}, nil
+		return PlayResult{Mode: mode, HLS: true, InfoHash: ih}, nil
 	default:
-		// Direct play and (for now) reencode need no running transcoder.
+		// Direct play needs no running transcoder.
 		m.unregisterReader(ih)
 		return PlayResult{Mode: mode, InfoHash: ih}, nil
 	}
@@ -243,15 +271,21 @@ func mediaInfoFromProbe(res *probe.Result) MediaInfo {
 	return mi
 }
 
-func (m *VODTransmux) startRemux(ctx context.Context, ih string, info MediaInfo) error {
+func (m *VODTransmux) startTranscode(ctx context.Context, ih string, mode PlayMode, info MediaInfo) error {
 	workDir := filepath.Join(m.workRoot, ih)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("torrentstream: vod session dir: %w", err)
 	}
 	inputURL := m.baseURL + "/r/" + ih
+	var args []string
+	if mode == PlayReencode {
+		args = buildVODReencodeArgs(inputURL, workDir, m.encoder, m.hwAccelInputArgs)
+	} else {
+		args = buildVODRemuxArgs(inputURL, workDir, AudioNeedsTranscode(info.AudioCodec))
+	}
 	// Detached context: the transcode outlives the request that triggered it
 	// (other viewers join the same HLS output); the reaper stops it on idle.
-	stop, err := m.start(context.WithoutCancel(ctx), inputURL, workDir, AudioNeedsTranscode(info.AudioCodec))
+	stop, err := m.start(context.WithoutCancel(ctx), args, workDir)
 	if err != nil {
 		_ = os.RemoveAll(workDir)
 		return fmt.Errorf("torrentstream: vod start: %w", err)
@@ -399,9 +433,8 @@ func (m *VODTransmux) reapIdle(now time.Time) {
 }
 
 // startFFmpeg is the default transcodeStarter: it launches ffmpeg with the
-// remux argv and returns a stop func that kills it.
-func (m *VODTransmux) startFFmpeg(ctx context.Context, inputURL, workDir string, audioTranscode bool) (func(), error) {
-	args := buildVODRemuxArgs(inputURL, workDir, audioTranscode)
+// given argv and returns a stop func that kills it.
+func (m *VODTransmux) startFFmpeg(ctx context.Context, args []string, workDir string) (func(), error) {
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	cmd.Stderr = newVODStderr(m.logger, filepath.Base(workDir))
 	if err := cmd.Start(); err != nil {
