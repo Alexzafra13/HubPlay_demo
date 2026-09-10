@@ -80,10 +80,10 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 ---
 
-## Métricas rápidas (verificadas 2026-06-10)
+## Métricas rápidas (verificadas 2026-09-10)
 
-- **400** ficheros `.go` de producción en `internal/`+`cmd/` · **224** `_test.go` (~56%)
-- **102** test files en frontend, **747/747** vitest verdes; `knip` como hard gate (0 dead code).
+- **400+** ficheros `.go` de producción en `internal/`+`cmd/` · ~56% con `_test.go`; `go test ./...` = 43 paquetes verdes
+- **106** test files en frontend, **763/763** vitest verdes; `knip` como hard gate (0 dead code).
 - **31** docs de arquitectura en `docs/architecture/`
 - **272** rutas HTTP registradas (router + mounts), con guard de drift OpenAPI.
 
@@ -110,6 +110,8 @@ Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
 - `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback; P0/P1/P2 ✅, queda P3)
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 0/1/2 + Bloques 1/2 cerrados; Fases 3–5 abiertas)
+- `audit-2026-09-10-torrent-vod.md` — audit del módulo torrent/VOD (T-1..T-7 ✅; T-8/T-9 abiertos)
+- `conventions.md` § "Desarrollo en Windows" — Go por zip en `~/sdk/go`, `CI=true pnpm install`, `gofmt -l` ruido por CRLF
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
 - `archive/` — sesiones y audits cerrados (no se lee al inicio; solo arqueología)
 - `README.md` — política de docs/memory/

@@ -1356,3 +1356,30 @@ Aplican también a comentarios generados por IA. Antes de escribir un doc-commen
 2. ¿Esto es contexto histórico de la PR? → Va al commit message, no al código.
 3. ¿Estoy parafraseando el nombre de la función? → Borrar.
 4. ¿Esto es realmente un invariante no obvio? → OK, comentar.
+
+## Desarrollo en Windows (2026-09-10)
+
+Notas empíricas de levantar el entorno en la máquina Windows del proyecto:
+
+- **Go**: `winget install GoLang.Go` lanza un MSI que se queda esperando el
+  UAC si no hay consola interactiva. Alternativa sin admin: descargar el
+  zip de `go.dev/dl` y descomprimirlo en `~/sdk/go`; añadir `~/sdk/go/bin`
+  al PATH (`export PATH="$HOME/sdk/go/bin:$PATH"` en Git Bash).
+  `GOTOOLCHAIN=auto` respeta el `go 1.25.11` del `go.mod`.
+- **pnpm sin TTY** (Claude Code, CI local): si `node_modules` está desfasado
+  del lockfile, `pnpm install` intenta recrearlo y aborta con
+  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`. Usar `CI=true pnpm install
+  --frozen-lockfile`. Si un proceso node tiene ficheros abiertos, el
+  borrado falla con `EPERM`; borrar `web/node_modules` a mano y reinstalar.
+- **`gofmt -l` es ruido** con checkout CRLF (autocrlf): lista ~200 ficheros
+  que en CI (Linux, LF) están bien. Comprobar formato con `gofmt -d` sobre
+  los ficheros tocados, no con `-l` global.
+- **Tests con rutas absolutas**: `filepath.IsAbs("/var/lib/x")` es `false`
+  en Windows. Construir la ruta con
+  `filepath.Join(filepath.VolumeName(dir)+string(filepath.Separator), ...)`
+  para que sea absoluta en ambas plataformas.
+- **`go test -race`** necesita CGO/gcc en Windows; localmente se corre sin
+  `-race` y se confía en el job de CI para la detección de races.
+- El backend "de verdad" se levanta con `docker compose -f
+  docker-compose.dev.yml up --build` (puerto 8097, Postgres 16) o con
+  `.claude/launch.json` (Vite en 3000 apuntando a 8094/8097).

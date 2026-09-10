@@ -6,7 +6,93 @@
 
 ---
 
-## 🔭 Estado actual (2026-06-14, fin de sesión)
+## 🔭 Estado actual (2026-09-10, retomando tras ~3 meses parado)
+
+**Salud:** MVP funcional, cerca de early-production. `main` == `origin/main`
+(`f30a4709`), sin ramas locales con trabajo sin fusionar.
+
+| Área | Estado |
+|---|---|
+| Tests backend | `go test ./...` verde en Windows (43 paquetes) tras arreglar 1 test no portable (`setup/service_test.go`, ruta absoluta estilo Linux) |
+| Tests frontend | **763/763** vitest (106 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning informativo (React Compiler + `useVirtualizer`, no accionable) |
+| Rama de trabajo | `main` (cambios de esta sesión sin commitear al cierre; ver abajo) |
+| Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta**: PB-19/26/29-31/33/36-39 + gaps de test 1-6 |
+| Audit prod 2026-06-08 | Fases 0/1/2 ✅. Fase 3: **M18, M19, M20 ✅ (2026-09-10)**, M24 parcial; M21/M23 abiertos. Fases 4–5 abiertas |
+| Audit federación 2026-06-12 | F-1/3/4 ✅, F-2 parcial, **F-10 ✅ (2026-09-10)**; F-5..F-9, F-11..F-13 abiertos |
+| **Audit torrent 2026-09-10** (NUEVO) | `audit-2026-09-10-torrent-vod.md`: T-1..T-7, T-10, T-11 ✅; T-8, T-9 abiertos |
+
+**Trabajo del 15–16 de junio que NO estaba documentado aquí** (reconstruido
+del git log; commits `eafd22e7..f30a4709`, PRs #526–528 "dual indexers
+search"): descargar torrent a biblioteca (jobs + refcount + scratch + SSE +
+rescan), pestaña admin "Indexadores" (Prowlarr/Torznab en DB), búsqueda
+general por texto y descubrimiento por carátulas TMDb → fuentes por imdbid,
+Prowlarr turnkey en compose (`docker-compose.torrent.yml`), 429 claro +
+aviso de códec, y **remux/reencode VOD de torrents a HLS**
+(`internal/torrentstream/vodtransmux*.go`, rutas `/torrent/play` y
+`/torrent/hls/{infohash}/…`). Todo mergeado en `main`.
+
+**Sesión 2026-09-10 — revisión general + arreglos:**
+- **Entorno Windows**: Go no estaba instalado (winget se quedó esperando
+  UAC) → instalado por zip en `~/sdk/go` (1.25.11, sin admin). `web/
+  node_modules` estaba desfasado del lockfile → `CI=true pnpm install
+  --frozen-lockfile` (sin TTY pnpm aborta el borrado de `node_modules`).
+  Ver `conventions.md` § "Desarrollo en Windows".
+- **Torrent (audit nuevo)**: T-1 SSRF con `allow_private_upstreams`
+  (`imaging.SafeGetWith` + `SafeGetOpts{AllowPrivate}` — relaja el rango,
+  no desactiva el guard), T-2 doble ffmpeg por `Prepare` concurrente
+  (placeholder + `ready`), T-3 goroutine de stderr filtrada, T-4 `Stop`
+  espera la salida + `watchExit` tira sesiones con ffmpeg muerto, T-5 SSE
+  de descargas solo a admins, T-6 touch del torrent al servir HLS, T-7
+  containment de rutas al copiar a la biblioteca, T-10 alias `bySrc`,
+  T-11 `Close`/`Shutdown` idempotentes. 12 tests nuevos.
+- **Prod Fase 3**: M18+M19 (`RequestLogger` con `handlers.ClientIP` y
+  `log_ips` honrado), M20 (`api.Recoverer` propio con slog + métrica
+  `panic`), M24 parcial (`streaming:` en `hubplay.example.yaml`).
+- **Federación**: F-10 (userinfo en URL de peer rechazado).
+- **Frontend**: directiva `eslint-disable` sin uso en `PageHeader.tsx`.
+- **Arranque nativo en Windows verificado** (binario + SQLite, sin Docker,
+  puerto 8097 porque el servicio instalado ocupa el 8096): wizard por API,
+  scan de `peliculas/` + `series/` (2 películas, 1 serie/9 episodios),
+  login y páginas en Chrome headless. Destapó **dos bugs de playback
+  exclusivos de instalación nativa** (en Docker no se ven porque `/cache`
+  es absoluto y el FS es Linux), ambos corregidos con test:
+  - **W-1** · La clave de sesión `user:item:profile:audio:sub` se usaba
+    como nombre de directorio → `:` es inválido en Windows → TODO
+    transcode/direct-stream fallaba con `mkdir … sintaxis … no correcta`.
+    Fix: `sessionDirName` (`:` → `_`) en `stream/transcode.go`.
+  - **W-2** · `cache_dir` relativo + `cmd.Dir = outputDir` ⇒ ffmpeg
+    resolvía la ruta de manifest/segmentos dentro del propio outputDir →
+    "Could not write header: No such file or directory". Fix: base dir
+    absoluto en `NewTranscoder` y en `iptv.NewTransmuxManager`.
+  - Tras los fixes: playlist 720p + 3 segmentos `video/mp2t` servidos.
+- **README.md creado** (no existía): instalación con Docker y sin Docker
+  (instalador Windows, `install.sh` Linux, tar.gz manual), desarrollo.
+- `handlers.ClientIP` quita el puerto en el fallback a `RemoteAddr`.
+
+**Hallazgos menores sin arreglar (esta sesión):**
+- `POST /setup/libraries` responde con nombres de campo Go (`ID`, `Name`,
+  `ContentType`…) en vez de snake_case como el resto de la API.
+- `/health` fuera de `/api/v1` cae al fallback de la SPA (devuelve HTML);
+  el probe real es `/api/v1/health` y `/health/live`.
+- Un `hubplay.exe` de una release antigua sigue instalado como servicio
+  (`C:\Program Files\HubPlay`, puerto 8096) en la máquina del usuario.
+
+**Próximos pasos sugeridos (en orden):**
+1. Commit + PR de esta sesión (`go test ./...` y vitest verdes).
+2. Torrent T-8/T-9 (de-dup por infohash, cancelación/timeout de descargas)
+   + tests del handler `Play`/`HLSPlaylist`/`HLSSegment`.
+3. Fase 3 restante: M21 (agregación de logs/alerting documentada), M23
+   (validación de config + overrides de env), cerrar M24.
+4. Playback P3 (PB-29/30 DNS-rebind vía `Control` del dialer cierra también
+   B2; PB-26; PB-33) y gaps de test 1-6.
+5. Fase 5 gobernanza: `SECURITY.md`, `CODEOWNERS` (README ✅ 2026-09-10).
+6. Snake_case en la respuesta de `POST /setup/libraries`; probar el
+   instalador Windows de la próxima release con W-1/W-2 (el servicio
+   instalado hoy es de una release anterior y tiene ambos bugs).
+
+---
+
+## 🔭 Estado anterior (2026-06-14, fin de sesión)
 
 **Salud:** MVP funcional, cerca de early-production.
 
@@ -86,9 +172,10 @@ con ✅/pendiente y fix propuesto).
 | Prioridad | Tema | Items |
 |---|---|---|
 | Media | **Playback P3** | Smoke E2E Playwright (play→seek→resume, UpNext, dub-switch, LiveTV zap, server caído), PB-19/26/29-31/33/36-39 + gaps de test del audit |
-| Media | **Fase 3 — observabilidad/config** (audit prod) | M18–M21, M23, M24 (IP de cliente en logs, panics en métricas, validación de config, completar `example.yaml`) |
+| Media | **Torrent** (audit 2026-09-10) | T-8 (de-dup descargas por infohash), T-9 (cancelación/timeout de descargas), tests de handler Play/HLS |
+| Media | **Fase 3 — observabilidad/config** (audit prod) | M21, M23, resto de M24 (alerting documentado, validación de config, completar `example.yaml`). ✅ M18/M19/M20 (2026-09-10) |
 | Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes) |
-| Baja | **Fase 5 — gobernanza** | README (no hay), `SECURITY.md`, `CODEOWNERS` |
+| Baja | **Fase 5 — gobernanza** | `SECURITY.md`, `CODEOWNERS` (README ✅ 2026-09-10) |
 | Baja | **Bajos sueltos** | B2 (DNS-rebind TOCTOU — parte se arregla con PB-29/30), B3 (refresh TTL 30d), M6 (backup periódico) |
 
 **Features de producto (gap vs Jellyfin/Plex, no son bugs):**
@@ -118,7 +205,10 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
   comentarios en español, regeneración sqlc.
 - `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback;
   P0/P1/P2 ✅, P3 abierta; PB-40..44 de reportes de usuario ✅).
-- `audit-2026-06-12-federation.md` — **NUEVO** audit del módulo P2P/
+- `audit-2026-09-10-torrent-vod.md` — **NUEVO** audit del módulo torrent
+  (streaming, remux VOD, descargas, fuentes). T-1..T-7/T-10/T-11 ✅;
+  quedan T-8, T-9 y tests del handler HLS.
+- `audit-2026-06-12-federation.md` — audit del módulo P2P/
   federación. Base cripto/auth sólida; abiertos F-1 (SSRF en redirects
   del cliente saliente) y F-2 (cuotas por peer prometidas y no
   implementadas → DoS de recursos locales) como 🟠, + 6 🟡 (exp sin

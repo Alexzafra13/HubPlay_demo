@@ -223,14 +223,22 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
   bases por `@sha256`.
 
 ### Observabilidad / Config
-- **M18 · `RequestLogger` loguea `r.RemoteAddr` crudo.** `internal/api/middleware.go:29`.
+- ✅ **M18 · `RequestLogger` loguea `r.RemoteAddr` crudo.** RESUELTO
+  (2026-09-10): loguea `handlers.ClientIP(r)`. Test `TestRequestLogger_LogIPs`.
+  `internal/api/middleware.go:29`.
   Ignora el client-IP resuelto por el middleware trusted-proxy; tras un
   reverse proxy cada línea registra la IP del proxy → inútil para
   auditoría/abuso. **Fix:** loguear `handlers.ClientIP(r)`.
-- **M19 · `logging.LogIPs` es un knob muerto.** `logging.go:11`, `config.go:306`,
+- ✅ **M19 · `logging.LogIPs` es un knob muerto.** RESUELTO (2026-09-10):
+  `InfraDeps.LogIPs` ← `cfg.Logging.LogIPs`; `log_ips:false` omite el campo
+  `ip` del request log. `logging.go:11`, `config.go:306`,
   nunca leído. `log_ips:false` no hace nada (privacidad/GDPR). **Fix:**
   honrarlo en `RequestLogger` o eliminarlo.
-- **M20 · Panics invisibles en métricas.** `router.go:194-199`. El
+- ✅ **M20 · Panics invisibles en métricas.** RESUELTO (2026-09-10):
+  `api.Recoverer` propio (`internal/api/recoverer.go`) — slog Error con
+  request_id + stack, `hubplay_http_errors_total{code="panic"}`, 500 JSON;
+  `http.ErrAbortHandler` se propaga. Tests `recoverer_test.go`,
+  `recoverer_metrics_test.go`. `router.go:194-199`. El
   `Recoverer` de chi recupera (no crashea — bien) pero loguea a stderr
   (no slog) y no incrementa `hubplay_http_errors_total`. **Fix:** recoverer
   propio que loguee vía slog con request_id e incremente un counter
@@ -249,7 +257,9 @@ o extender `ReplaceAttr` para detectar valores con forma de URL en claves
   `TrustedProxies`, valores de `RateLimit`; un `HUBPLAY_SERVER_PORT=80x`
   arranca en el puerto default sin avisar. **Fix:** validar CIDRs y
   overrides numéricos al cargar; warning/fail en valores no parseables.
-- **M24 · `example.yaml` omite media schema.** Faltan secciones `streaming`
+- 🟡 **M24 · `example.yaml` omite media schema.** PARCIAL (2026-09-10):
+  sección `streaming` (con `hardware_acceleration`) añadida y anotada;
+  queda revisar `rate_limit` completo y la nota pgloader. Faltan secciones `streaming`
   (caps de transcode, HW accel, timeouts), `iptv.transmux`, parte de
   `rate_limit`. Inconsistencia pgloader vs migrador interno. **Fix:**
   generar/mantener un example anotado completo desde el struct.

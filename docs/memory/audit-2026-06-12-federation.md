@@ -201,7 +201,9 @@ filtrar `ListContinueWatching` por status del peer.
   (mitigado en parte por el guard `GetPeerByServerUUID`). Ventana
   estrecha (error de DB justo entre dos writes). **Fix:** una tx, o
   marcar usado antes de insertar.
-- **F-10 · `validatePeerURL` acepta credenciales embebidas.**
+- ✅ **F-10 · `validatePeerURL` acepta credenciales embebidas.** RESUELTO
+  (2026-09-10): `u.User != nil` ⇒ `ErrPeerURLUnsafe`. Test
+  `TestValidatePeerURL_RejectsEmbeddedCredentials`.
   `url.go:42` no rechaza `http://user:pass@host` → riesgo de fuga de
   secretos en logs de error. **Fix:** `if u.User != nil { reject }`.
 - **F-11 · `advertised_url` confía en `X-Forwarded-Host`.**
@@ -251,5 +253,6 @@ filtrar `ListContinueWatching` por status del peer.
   override per-peer en DB (ver detalle arriba).
 - ⏳ **F-5, F-6, F-7, F-8** — correctness/operacional; F-6 se liga a F-2
   (el cap de concurrencia ya mitiga parte del leak de F-6).
-- ⏳ Bajos (F-9..F-13) + alinear el doc con lo implementado (rotation,
+- ✅ **F-10 (2026-09-10)** — credenciales embebidas rechazadas.
+- ⏳ Bajos (F-9, F-11..F-13) + alinear el doc con lo implementado (rotation,
   download siguen siendo Phase 2/7).
