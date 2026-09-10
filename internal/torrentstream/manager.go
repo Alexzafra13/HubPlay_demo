@@ -17,9 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +118,8 @@ type Manager struct {
 
 	reaperStop chan struct{}
 	reaperDone chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
 	now        func() time.Time // injectable for tests
 }
 
@@ -206,6 +206,11 @@ func (m *Manager) GetOrStart(ctx context.Context, uri string) (*Session, error) 
 	m.mu.Lock()
 	if s, ok := m.sessions[ih]; ok {
 		s.touch(m.now())
+		// Registra también este src como alias de la sesión: el mismo
+		// contenido puede llegar como magnet y como URL .torrent, y sin
+		// el alias cada GetActive(uri) fallaría y cada GetOrStart
+		// repetiría addTorrent + espera de metadata.
+		m.bySrc[uri] = s
 		m.mu.Unlock()
 		m.release(t) // la sesión existente ya tiene su propio holder
 		return s, nil
@@ -307,25 +312,6 @@ func (m *Manager) addTorrent(uri string) (*torrent.Torrent, error) {
 	return t, nil
 }
 
-// fetchTorrentFile downloads a .torrent over http(s) with NO SSRF guard
-// (used only when AllowPrivateUpstreams is set, for trusted operator hosts
-// like the bundled Prowlarr). Bounded by maxBytes + timeout.
-func fetchTorrentFile(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, error) {
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		return nil, fmt.Errorf("unsupported url scheme")
-	}
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(rawURL) //nolint:noctx // bounded by client.Timeout
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
-}
-
 func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
 	// Defensive: a magnet must never reach the .torrent HTTP fetch path
 	// (addTorrent already routes magnets to AddMagnet, but guard here too
@@ -337,24 +323,19 @@ func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
 		}
 		return t, nil
 	}
-	// By default a .torrent fetch is SSRF-guarded: imaging.SafeGet rejects
-	// URLs resolving to loopback / LAN / link-local / cloud-metadata and
+	// A .torrent fetch is SSRF-guarded: imaging.SafeGetWith rejects URLs
+	// resolving to loopback / LAN / link-local / cloud-metadata and
 	// re-validates every redirect hop, so an arbitrary URL can't make the
 	// server reach internal services.
 	//
 	// When the operator opts in (AllowPrivateUpstreams — e.g. the bundled
 	// Prowlarr lives on the docker network at a private IP and serves the
-	// .torrent via /{id}/download), we fetch with a plain bounded client so
-	// those trusted internal hosts are reachable.
-	var (
-		data []byte
-		err  error
-	)
-	if m.allowPrivate {
-		data, err = fetchTorrentFile(rawURL, maxTorrentFileBytes, 20*time.Second)
-	} else {
-		data, _, err = imaging.SafeGet(rawURL, maxTorrentFileBytes, 20*time.Second)
-	}
+	// .torrent via /{id}/download), loopback/RFC1918 become reachable, but
+	// link-local (169.254.169.254 metadata), unspecified and multicast stay
+	// blocked and redirects are still re-validated — the flag relaxes the
+	// range, it never disables the guard.
+	data, _, err := imaging.SafeGetWith(rawURL, maxTorrentFileBytes, 20*time.Second,
+		imaging.SafeGetOpts{AllowPrivate: m.allowPrivate})
 	if err != nil {
 		return nil, fmt.Errorf("torrentstream: fetch .torrent: %w", err)
 	}
@@ -369,16 +350,19 @@ func (m *Manager) addTorrentFromURL(rawURL string) (*torrent.Torrent, error) {
 	return t, nil
 }
 
-// Close stops the reaper and the torrent client.
+// Close stops the reaper and the torrent client. Idempotent: a second call
+// (lifecycle shutdown + defer en tests) devuelve el resultado de la primera
+// en vez de cerrar dos veces el canal del reaper.
 func (m *Manager) Close() error {
-	m.dlCancel() // stop any in-flight downloads
-	close(m.reaperStop)
-	<-m.reaperDone
-	errs := m.client.Close()
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	m.closeOnce.Do(func() {
+		m.dlCancel() // stop any in-flight downloads
+		close(m.reaperStop)
+		<-m.reaperDone
+		if errs := m.client.Close(); len(errs) > 0 {
+			m.closeErr = errs[0]
+		}
+	})
+	return m.closeErr
 }
 
 func (m *Manager) reapLoop() {

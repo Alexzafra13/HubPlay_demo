@@ -108,8 +108,19 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// the bus for the lifetime of the process.
 	var sseDrops atomic.Int64
 	unsubs := make([]func(), 0, len(types))
+	// Las descargas de torrent son admin-only en la API REST
+	// (GET /torrent/downloads): la lista revela qué se está bajando.
+	// El SSE debe respetar el mismo límite — un usuario normal no
+	// recibe esos eventos.
+	isAdmin := false
+	if claims := auth.GetClaims(r.Context()); claims != nil {
+		isAdmin = claims.Role == "admin"
+	}
 	for _, t := range types {
 		t := t
+		if t == event.TorrentDownload && !isAdmin {
+			continue
+		}
 		unsub := h.bus.Subscribe(t, func(e event.Event) {
 			select {
 			case eventCh <- e:

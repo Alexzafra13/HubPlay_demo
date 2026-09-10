@@ -28,7 +28,9 @@ func IsValidSegmentName(name string) bool {
 // newVODStderr returns a writer that forwards ffmpeg's stderr lines to the
 // logger at debug level, tagged with the session key. ffmpeg is chatty; we
 // keep it out of warn/error so a normal transcode doesn't spam the log.
-func newVODStderr(logger *slog.Logger, key string) io.Writer {
+// The caller MUST Close the returned writer once the process has exited so
+// the scanner goroutine terminates.
+func newVODStderr(logger *slog.Logger, key string) *io.PipeWriter {
 	pr, pw := io.Pipe()
 	go func() {
 		sc := bufio.NewScanner(pr)

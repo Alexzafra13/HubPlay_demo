@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hubplay/internal/probe"
@@ -54,9 +55,10 @@ type VODTransmux struct {
 	readers  map[string]Playable    // infohash → reader source (for the loopback)
 	sessions map[string]*vodSession // infohash → running remux
 
-	now        func() time.Time
-	reaperStop chan struct{}
-	reaperDone chan struct{}
+	now          func() time.Time
+	reaperStop   chan struct{}
+	reaperDone   chan struct{}
+	shutdownOnce sync.Once
 }
 
 // Playable is the slice of *Session the transmux needs. Exported so the HTTP
@@ -70,16 +72,31 @@ type Playable interface {
 }
 
 // transcodeStarter runs ffmpeg with the given argv (the manager builds them
-// for remux or reencode) and returns a stop func. The default implementation
-// execs ffmpeg; tests inject a fake.
-type transcodeStarter func(ctx context.Context, args []string, workDir string) (stop func(), err error)
+// for remux or reencode) and returns a stop func plus a wait func. stop kills
+// the process and blocks (bounded) until it has exited so the work dir can be
+// removed safely; wait blocks until the process exits and returns its error
+// (nil on a clean EOF). The default implementation execs ffmpeg; tests
+// inject a fake.
+type transcodeStarter func(ctx context.Context, args []string, workDir string) (stop func(), wait func() error, err error)
 
-// vodSession is one running remux.
+// vodSession is one remux/reencode session. It is registered in
+// VODTransmux.sessions BEFORE the probe runs (as a placeholder) so that two
+// concurrent Prepare calls for the same infohash share one transcode instead
+// of spawning two ffmpegs into the same work dir; `ready` closes once the
+// startup decision is final (result/err populated).
 type vodSession struct {
 	infoHash   string
 	workDir    string
 	stop       func()
 	lastAccess atomicTime
+
+	ready  chan struct{} // closed when result/err are final
+	result PlayResult
+	err    error
+
+	// stopping is set by Stop before killing ffmpeg so the exit watcher can
+	// tell an operator/reaper kill apart from a crash.
+	stopping atomic.Bool
 }
 
 // PlayResult tells the handler how to deliver a source.
@@ -205,20 +222,41 @@ func (t *touchReader) Read(b []byte) (int, error) {
 func (m *VODTransmux) Prepare(ctx context.Context, sess Playable) (PlayResult, error) {
 	ih := strings.ToLower(sess.InfoHash())
 
-	// Already transcoding this content → reuse the running HLS session.
+	// Already transcoding (or deciding) this content → join that session.
+	// Registering the placeholder under the lock is what guarantees a single
+	// ffmpeg per infohash: a second caller that arrives mid-probe waits on
+	// `ready` instead of probing + spawning again into the same work dir.
 	m.mu.Lock()
 	if s, ok := m.sessions[ih]; ok {
-		s.lastAccess.set(m.now())
 		m.mu.Unlock()
-		return PlayResult{Mode: PlayRemux, HLS: true, InfoHash: ih}, nil
+		return m.awaitSession(ctx, s)
 	}
+	s := &vodSession{infoHash: ih, ready: make(chan struct{})}
+	s.lastAccess.set(m.now())
+	m.sessions[ih] = s
 	m.readers[ih] = sess
 	m.mu.Unlock()
 
+	// finish publishes the outcome to any waiter. keep=false drops the
+	// placeholder (direct play, declined reencode, error): nothing keeps
+	// running for this infohash.
+	finish := func(res PlayResult, err error, keep bool) (PlayResult, error) {
+		if !keep {
+			m.mu.Lock()
+			if m.sessions[ih] == s {
+				delete(m.sessions, ih)
+			}
+			delete(m.readers, ih)
+			m.mu.Unlock()
+		}
+		s.result, s.err = res, err
+		close(s.ready)
+		return res, err
+	}
+
 	info, err := m.probe(ctx, ih)
 	if err != nil {
-		m.unregisterReader(ih)
-		return PlayResult{}, fmt.Errorf("torrentstream: vod probe: %w", err)
+		return finish(PlayResult{}, fmt.Errorf("torrentstream: vod probe: %w", err), false)
 	}
 	mode := DecidePlayMode(info)
 
@@ -226,22 +264,37 @@ func (m *VODTransmux) Prepare(ctx context.Context, sess Playable) (PlayResult, e
 	// hosts, so an operator can disable it and have those sources reported as
 	// unsupported instead.
 	if mode == PlayReencode && !m.allowReencode {
-		m.unregisterReader(ih)
-		return PlayResult{Mode: PlayReencode, InfoHash: ih}, nil
+		return finish(PlayResult{Mode: PlayReencode, InfoHash: ih}, nil, false)
 	}
 
 	switch mode {
 	case PlayRemux, PlayReencode:
-		if err := m.startTranscode(ctx, ih, mode, info); err != nil {
-			m.unregisterReader(ih)
-			return PlayResult{}, err
+		if err := m.startTranscode(ctx, s, mode, info); err != nil {
+			return finish(PlayResult{}, err, false)
 		}
-		return PlayResult{Mode: mode, HLS: true, InfoHash: ih}, nil
+		return finish(PlayResult{Mode: mode, HLS: true, InfoHash: ih}, nil, true)
 	default:
 		// Direct play needs no running transcoder.
-		m.unregisterReader(ih)
-		return PlayResult{Mode: mode, InfoHash: ih}, nil
+		return finish(PlayResult{Mode: mode, InfoHash: ih}, nil, false)
 	}
+}
+
+// awaitSession blocks until the session's startup decision is final and
+// returns it. A session that ended up as HLS is touched so the join counts
+// as activity for the reaper.
+func (m *VODTransmux) awaitSession(ctx context.Context, s *vodSession) (PlayResult, error) {
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return PlayResult{}, ctx.Err()
+	}
+	if s.err != nil {
+		return PlayResult{}, s.err
+	}
+	if s.result.HLS {
+		s.lastAccess.set(m.now())
+	}
+	return s.result, nil
 }
 
 func (m *VODTransmux) probe(ctx context.Context, ih string) (MediaInfo, error) {
@@ -271,8 +324,13 @@ func mediaInfoFromProbe(res *probe.Result) MediaInfo {
 	return mi
 }
 
-func (m *VODTransmux) startTranscode(ctx context.Context, ih string, mode PlayMode, info MediaInfo) error {
+func (m *VODTransmux) startTranscode(ctx context.Context, s *vodSession, mode PlayMode, info MediaInfo) error {
+	ih := s.infoHash
 	workDir := filepath.Join(m.workRoot, ih)
+	// A previous session for this infohash may have left files behind (e.g.
+	// a Windows "file in use" during cleanup); start from a clean dir so a
+	// stale playlist from the old run can't satisfy waitFirstSegment.
+	_ = os.RemoveAll(workDir)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("torrentstream: vod session dir: %w", err)
 	}
@@ -285,17 +343,18 @@ func (m *VODTransmux) startTranscode(ctx context.Context, ih string, mode PlayMo
 	}
 	// Detached context: the transcode outlives the request that triggered it
 	// (other viewers join the same HLS output); the reaper stops it on idle.
-	stop, err := m.start(context.WithoutCancel(ctx), args, workDir)
+	stop, wait, err := m.start(context.WithoutCancel(ctx), args, workDir)
 	if err != nil {
 		_ = os.RemoveAll(workDir)
 		return fmt.Errorf("torrentstream: vod start: %w", err)
 	}
-
-	s := &vodSession{infoHash: ih, workDir: workDir, stop: stop}
-	s.lastAccess.set(m.now())
+	// The placeholder was registered by Prepare; fill in the live bits under
+	// the lock so Stop/reaper see a consistent session.
 	m.mu.Lock()
-	m.sessions[ih] = s
+	s.workDir = workDir
+	s.stop = stop
 	m.mu.Unlock()
+	go m.watchExit(s, wait)
 
 	// Wait for the first segment so the handler can return a playable
 	// playlist (bounded; the caller's ctx also applies).
@@ -304,6 +363,26 @@ func (m *VODTransmux) startTranscode(ctx context.Context, ih string, mode PlayMo
 		return err
 	}
 	return nil
+}
+
+// watchExit tears the session down if ffmpeg dies on its own with an error.
+// A clean exit (whole file transcoded) keeps the session: the playlist and
+// segments on disk stay servable until the idle reaper collects them. A
+// kill requested via Stop is not a crash (stopping flag).
+func (m *VODTransmux) watchExit(s *vodSession, wait func() error) {
+	err := wait()
+	if err == nil || s.stopping.Load() {
+		return
+	}
+	m.mu.Lock()
+	live := m.sessions[s.infoHash] == s
+	m.mu.Unlock()
+	if !live {
+		return
+	}
+	m.logger.Warn("torrentstream: vod transcoder exited with error; dropping session",
+		"infohash", s.infoHash, "error", err)
+	m.Stop(s.infoHash)
 }
 
 // waitFirstSegment polls until ffmpeg has written at least one segment and the
@@ -333,12 +412,30 @@ func (m *VODTransmux) waitFirstSegment(ctx context.Context, workDir string) erro
 func (m *VODTransmux) PlaylistPath(infohash string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s, ok := m.sessions[strings.ToLower(infohash)]
+	s, ok := m.liveSessionLocked(infohash)
 	if !ok {
 		return "", false
 	}
-	s.lastAccess.set(m.now())
 	return filepath.Join(s.workDir, "index.m3u8"), true
+}
+
+// liveSessionLocked returns the session for infohash if its transcoder is
+// running (startup finished successfully) and touches both it and the
+// underlying torrent session. Touching the torrent reader matters: the
+// torrent Manager's idle reaper only sees reads, and a viewer playing
+// already-written segments generates none — without this the torrent could
+// be dropped under a live transcode. Caller holds m.mu.
+func (m *VODTransmux) liveSessionLocked(infohash string) (*vodSession, bool) {
+	ih := strings.ToLower(infohash)
+	s, ok := m.sessions[ih]
+	if !ok || s.workDir == "" {
+		return nil, false
+	}
+	s.lastAccess.set(m.now())
+	if p := m.readers[ih]; p != nil {
+		p.Touch()
+	}
+	return s, true
 }
 
 // SegmentPath returns the on-disk path of a validated segment for an active
@@ -349,16 +446,16 @@ func (m *VODTransmux) SegmentPath(infohash, segment string) (string, bool) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s, ok := m.sessions[strings.ToLower(infohash)]
+	s, ok := m.liveSessionLocked(infohash)
 	if !ok {
 		return "", false
 	}
-	s.lastAccess.set(m.now())
 	return filepath.Join(s.workDir, segment), true
 }
 
-// Stop tears down a remux session: kills the transcoder, drops the loopback
-// reader and removes the work dir.
+// Stop tears down a remux session: kills the transcoder (waiting for it to
+// exit so the files are no longer held open), drops the loopback reader and
+// removes the work dir.
 func (m *VODTransmux) Stop(infohash string) {
 	ih := strings.ToLower(infohash)
 	m.mu.Lock()
@@ -369,38 +466,38 @@ func (m *VODTransmux) Stop(infohash string) {
 	if s == nil {
 		return
 	}
+	s.stopping.Store(true)
 	if s.stop != nil {
 		s.stop()
+	}
+	if s.workDir == "" {
+		return // placeholder that never started a transcoder
 	}
 	if err := os.RemoveAll(s.workDir); err != nil {
 		m.logger.Warn("torrentstream: vod cleanup failed", "infohash", ih, "error", err)
 	}
 }
 
-func (m *VODTransmux) unregisterReader(ih string) {
-	m.mu.Lock()
-	delete(m.readers, ih)
-	m.mu.Unlock()
-}
-
-// Shutdown stops the reaper, all sessions and the loopback server.
+// Shutdown stops the reaper, all sessions and the loopback server. Idempotent.
 func (m *VODTransmux) Shutdown() {
-	close(m.reaperStop)
-	<-m.reaperDone
-	m.mu.Lock()
-	keys := make([]string, 0, len(m.sessions))
-	for ih := range m.sessions {
-		keys = append(keys, ih)
-	}
-	m.mu.Unlock()
-	for _, ih := range keys {
-		m.Stop(ih)
-	}
-	if m.srv != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = m.srv.Shutdown(ctx)
-	}
+	m.shutdownOnce.Do(func() {
+		close(m.reaperStop)
+		<-m.reaperDone
+		m.mu.Lock()
+		keys := make([]string, 0, len(m.sessions))
+		for ih := range m.sessions {
+			keys = append(keys, ih)
+		}
+		m.mu.Unlock()
+		for _, ih := range keys {
+			m.Stop(ih)
+		}
+		if m.srv != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = m.srv.Shutdown(ctx)
+		}
+	})
 }
 
 func (m *VODTransmux) reapLoop() {
@@ -434,18 +531,41 @@ func (m *VODTransmux) reapIdle(now time.Time) {
 
 // startFFmpeg is the default transcodeStarter: it launches ffmpeg with the
 // given argv and returns a stop func that kills it.
-func (m *VODTransmux) startFFmpeg(ctx context.Context, args []string, workDir string) (func(), error) {
+func (m *VODTransmux) startFFmpeg(ctx context.Context, args []string, workDir string) (func(), func() error, error) {
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.Stderr = newVODStderr(m.logger, filepath.Base(workDir))
+	stderr := newVODStderr(m.logger, filepath.Base(workDir))
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		_ = stderr.Close()
+		return nil, nil, err
 	}
-	go func() { _ = cmd.Wait() }()
-	return func() {
+	exited := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		// Closing the pipe writer lets the stderr scanner goroutine finish;
+		// without it one goroutine per transcode stays blocked in Read.
+		_ = stderr.Close()
+		close(exited)
+	}()
+	stop := func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-	}, nil
+		// Kill is asynchronous: wait (bounded) so the caller can remove the
+		// work dir without racing a still-writing ffmpeg (Windows would
+		// fail with "file in use"; Linux could leak a late .tmp segment).
+		select {
+		case <-exited:
+		case <-time.After(5 * time.Second):
+			m.logger.Warn("torrentstream: vod ffmpeg did not exit after kill", "workDir", workDir)
+		}
+	}
+	wait := func() error {
+		<-exited
+		return waitErr
+	}
+	return stop, wait, nil
 }
 
 func fileExists(p string) bool {

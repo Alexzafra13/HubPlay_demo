@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,10 +55,17 @@ func newTestVOD(t *testing.T, p probe.Prober) *VODTransmux {
 // fakeStarter writes a playlist + one segment so waitFirstSegment succeeds,
 // and records whether stop was called.
 func fakeStarter(stopped *atomic.Bool) transcodeStarter {
-	return func(_ context.Context, _ []string, workDir string) (func(), error) {
+	return func(_ context.Context, _ []string, workDir string) (func(), func() error, error) {
 		_ = os.WriteFile(filepath.Join(workDir, "index.m3u8"), []byte("#EXTM3U\n"), 0o644)
 		_ = os.WriteFile(filepath.Join(workDir, "seg-00000.ts"), []byte("ts"), 0o644)
-		return func() { stopped.Store(true) }, nil
+		exited := make(chan struct{})
+		var once sync.Once
+		stop := func() {
+			stopped.Store(true)
+			once.Do(func() { close(exited) })
+		}
+		wait := func() error { <-exited; return nil }
+		return stop, wait, nil
 	}
 }
 

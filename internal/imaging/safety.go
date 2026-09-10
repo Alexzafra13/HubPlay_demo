@@ -106,11 +106,26 @@ var ErrUnsafeURL = errors.New("imaging: unsafe URL")
 // pista, no veredicto) y cualquier error. Los callers deben pasar
 // los bytes por SniffContentType para re-validar.
 func SafeGet(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, string, error) {
+	return SafeGetWith(rawURL, maxBytes, timeout, SafeGetOpts{})
+}
+
+// SafeGetOpts relaja el guard SSRF de SafeGetWith de forma explícita.
+type SafeGetOpts struct {
+	// AllowPrivate permite destinos en loopback, RFC1918 y unique-local
+	// (opt-in del operador para servicios de su LAN/docker, p.ej. un
+	// Prowlarr empaquetado). Link-local (169.254/16 → cloud metadata),
+	// unspecified y multicast SIGUEN bloqueados, y cada redirect se
+	// re-valida igual: relajar el rango no desactiva el guard.
+	AllowPrivate bool
+}
+
+// SafeGetWith es SafeGet con opciones. Ver SafeGet para el contrato.
+func SafeGetWith(rawURL string, maxBytes int64, timeout time.Duration, opts SafeGetOpts) ([]byte, string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: parse: %v", ErrUnsafeURL, err)
 	}
-	if err := validateOutboundURL(u); err != nil {
+	if err := validateOutboundURLWith(u, opts); err != nil {
 		return nil, "", err
 	}
 
@@ -125,7 +140,7 @@ func SafeGet(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, stri
 			if len(via) >= 10 {
 				return errors.New("imaging: stopped after 10 redirects")
 			}
-			return validateOutboundURL(req.URL)
+			return validateOutboundURLWith(req.URL, opts)
 		},
 	}
 	resp, err := client.Get(rawURL) //nolint:gosec // target URL vetted above (incluye redirects)
@@ -148,6 +163,10 @@ func SafeGet(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, stri
 // validación inicial y la del CheckRedirect compartan exactamente
 // la misma lógica.
 func validateOutboundURL(u *url.URL) error {
+	return validateOutboundURLWith(u, SafeGetOpts{})
+}
+
+func validateOutboundURLWith(u *url.URL, opts SafeGetOpts) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("%w: scheme %q", ErrUnsafeURL, u.Scheme)
 	}
@@ -155,16 +174,36 @@ func validateOutboundURL(u *url.URL) error {
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrUnsafeURL)
 	}
+	blocked := BlockedIP
+	if opts.AllowPrivate {
+		blocked = BlockedIPAllowPrivate
+	}
+	// IP literal: se comprueba directamente sin DNS (un IPv6 literal va
+	// entre corchetes en la URL y Hostname() los quita).
+	if ip := net.ParseIP(host); ip != nil {
+		if blocked(ip) {
+			return fmt.Errorf("%w: %s", ErrUnsafeURL, ip)
+		}
+		return nil
+	}
 	addrs, err := net.LookupIP(host)
 	if err != nil {
 		return fmt.Errorf("resolve %s: %w", host, err)
 	}
 	for _, ip := range addrs {
-		if BlockedIP(ip) {
+		if blocked(ip) {
 			return fmt.Errorf("%w: %s resolves to %s", ErrUnsafeURL, host, ip)
 		}
 	}
 	return nil
+}
+
+// BlockedIPAllowPrivate es el guard relajado de SafeGetOpts.AllowPrivate:
+// deja pasar loopback/RFC1918/unique-local pero sigue bloqueando link-local
+// (169.254.169.254 = metadata de cloud), unspecified y multicast.
+func BlockedIPAllowPrivate(ip net.IP) bool {
+	return ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast() || ip.IsInterfaceLocalMulticast()
 }
 
 // BlockedIP reports whether ip is in a range that clients MUST NOT reach

@@ -235,11 +235,34 @@ complete:
 // usually different mounts.
 func copyFiles(dataDir string, paths []string, destDir string) error {
 	for _, rel := range paths {
-		if err := copyFile(filepath.Join(dataDir, rel), filepath.Join(destDir, rel)); err != nil {
+		// Las rutas vienen del metainfo del torrent (no del operador):
+		// un ".." o una ruta absoluta no puede sacar la copia de destDir
+		// ni la lectura de dataDir. anacrolix ya rechaza escapes en el
+		// scratch, pero la escritura en la biblioteca es NUESTRA frontera.
+		src, err := containedPath(dataDir, rel)
+		if err != nil {
+			return err
+		}
+		dst, err := containedPath(destDir, rel)
+		if err != nil {
+			return err
+		}
+		if err := copyFile(src, dst); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// containedPath resuelve root/rel y garantiza que el resultado queda
+// estrictamente dentro de root (ni root mismo ni fuera de él).
+func containedPath(root, rel string) (string, error) {
+	cleanRoot := filepath.Clean(root)
+	p := filepath.Clean(filepath.Join(cleanRoot, rel))
+	if p == cleanRoot || !strings.HasPrefix(p, cleanRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("torrentstream: path %q escapes %q", rel, root)
+	}
+	return p, nil
 }
 
 func copyFile(src, dst string) error {
