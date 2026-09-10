@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -23,6 +24,11 @@ import (
 func ClientIP(r *http.Request) string {
 	if ip := middleware.GetClientIP(r.Context()); ip != "" {
 		return ip
+	}
+	// Fallback: RemoteAddr lleva puerto ("1.2.3.4:5678"); para logs,
+	// audit y rate-limit interesa solo el host.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
 	return r.RemoteAddr
 }

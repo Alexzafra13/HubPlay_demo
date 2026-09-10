@@ -87,6 +87,25 @@ upload:
   max_bytes_per_upload: 53687091200  # 50 GiB. 0 = sin tope (no recomendado).
   min_duration_ms: 1000              # rechaza < 1s, defensa anti-payload trivial.
 
+streaming:
+  # Cadena de playback (direct-play / direct-stream / transcode a HLS).
+  segment_duration: 6                # segundos por segmento HLS.
+  # max_transcode_sessions / max_transcode_sessions_per_user /
+  # transcode_preset: déjalos sin poner (0 / "") y el auto-tuner los
+  # rellena en cada arranque según el hardware detectado. Si los fijas
+  # aquí (o desde el panel), los valores explícitos se respetan.
+  # max_transcode_sessions: 4        # cap global de transcodes simultáneos.
+  # max_transcode_sessions_per_user: 2
+  # transcode_preset: "veryfast"     # veryfast | fast | medium (x264).
+  default_audio_bitrate: "192k"
+  cache_dir: ""                      # "" ⇒ <data_dir>/transcode.
+  idle_timeout: "90s"                # sin peticiones de segmento ⇒ se reapea.
+  transcode_timeout: "4h"            # duración máxima de un transcode.
+  hardware_acceleration:
+    enabled: false                   # true ⇒ intenta el encoder HW preferido.
+    preferred: "auto"                # auto | vaapi | qsv | nvenc | videotoolbox
+    device: ""                       # render node DRM (VAAPI/QSV); "" ⇒ /dev/dri/renderD128.
+
 iptv:
   # allow_private_upstreams: por defecto false. El guard SSRF rechaza
   # upstreams IPTV (proxy y transmux a ffmpeg) que resuelvan a loopback,

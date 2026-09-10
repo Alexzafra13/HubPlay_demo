@@ -48,6 +48,10 @@ func TestSaveDatabaseConfig_AnclaSQLiteAlDirDelConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "hubplay.yaml")
 
+	// Ruta absoluta válida en la plataforma del test: "/var/lib/…" no es
+	// absoluta en Windows (filepath.IsAbs exige letra de unidad).
+	absDBPath := filepath.Join(filepath.VolumeName(dir)+string(filepath.Separator), "var", "lib", "hubplay", "x.db")
+
 	cases := []struct {
 		name string
 		in   string
@@ -56,7 +60,7 @@ func TestSaveDatabaseConfig_AnclaSQLiteAlDirDelConfig(t *testing.T) {
 		{"vacío", "", filepath.Join(dir, "hubplay.db")},
 		{"relativo simple", "hubplay.db", filepath.Join(dir, "hubplay.db")},
 		{"relativo con dir", "data/foo.db", filepath.Join(dir, "foo.db")},
-		{"absoluto se respeta", "/var/lib/hubplay/x.db", "/var/lib/hubplay/x.db"},
+		{"absoluto se respeta", absDBPath, absDBPath},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

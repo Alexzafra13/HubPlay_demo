@@ -1,8 +1,6 @@
-// HMR caveat: this file exports a component AND a type consumed by
-// other modules. Splitting them into a separate file would gain
-// Fast Refresh but cost a per-page edit shape that's worse than
-// the (mild) HMR limitation.
-/* eslint-disable react-refresh/only-export-components */
+// This file exports a component AND a type consumed by other modules.
+// Type-only exports don't affect Fast Refresh, so no eslint-disable is
+// needed for react-refresh/only-export-components.
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { ChevronRight } from "lucide-react";

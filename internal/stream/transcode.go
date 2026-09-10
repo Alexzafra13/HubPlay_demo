@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,8 +110,17 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 	if libx264Preset == "" {
 		libx264Preset = "veryfast"
 	}
+	// BaseDir absoluto: los args de ffmpeg llevan la ruta completa de
+	// manifest y segmentos y el proceso arranca con cmd.Dir = outputDir. Con
+	// un cache_dir relativo (p.ej. "./cache") esa ruta se resolvía DENTRO
+	// del outputDir y ffmpeg moría con "Could not write header: No such
+	// file or directory". En Docker no se veía porque /cache es absoluto.
+	baseDir := cfg.BaseDir
+	if abs, err := filepath.Abs(baseDir); err == nil {
+		baseDir = abs
+	}
 	return &Transcoder{
-		baseDir:          cfg.BaseDir,
+		baseDir:          baseDir,
 		ffmpeg:           ffmpegPath,
 		transcodeTimeout: transcodeTimeout,
 		hwAccel:          cfg.HWAccel,
@@ -119,6 +129,15 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 		libx264Preset:    libx264Preset,
 		logger:           cfg.Logger.With("module", "transcoder"),
 	}
+}
+
+// sessionDirName convierte la clave de sesión (user:item:profile:audio:sub)
+// en un nombre de directorio válido en todos los sistemas: ':' no está
+// permitido en nombres de fichero en Windows (ERROR_INVALID_NAME), y con la
+// clave cruda todo transcode / direct-stream fallaba en el instalador
+// nativo. La clave en memoria no cambia; solo el nombre en disco.
+func sessionDirName(sessionID string) string {
+	return strings.ReplaceAll(sessionID, ":", "_")
 }
 
 // Start arranca una sesión HLS. El caller llena los campos caller-side
@@ -130,7 +149,7 @@ func NewTranscoder(cfg TranscoderConfig) *Transcoder {
 // garantiza vía singleflight que no haya dos spawns concurrentes para la
 // misma key.
 func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
-	outputDir := filepath.Join(t.baseDir, sessionID)
+	outputDir := filepath.Join(t.baseDir, sessionDirName(sessionID))
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating output dir: %w", err)
 	}
@@ -213,7 +232,7 @@ func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Ses
 // del done) antes de llamar a RestartAt — el Transcoder no lo hace por
 // él.
 func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
-	outputDir := filepath.Join(t.baseDir, sessionID)
+	outputDir := filepath.Join(t.baseDir, sessionDirName(sessionID))
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("ensuring output dir: %w", err)
 	}

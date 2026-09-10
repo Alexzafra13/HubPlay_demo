@@ -206,8 +206,12 @@ func applyGlobalMiddleware(r chi.Router, deps Dependencies) {
 	// que son quienes leen XFP.
 	r.Use(trustForwardedProto(normalizeCIDRs(deps.Server.TrustedProxies)))
 	r.Use(middleware.RequestID)
-	r.Use(RequestLogger(deps.Infra.Logger))
-	r.Use(middleware.Recoverer)
+	r.Use(RequestLogger(deps.Infra.Logger, deps.Infra.LogIPs))
+	// Recoverer propio (M20): loguea el panic vía slog con request_id y
+	// stack, e incrementa hubplay_http_errors_total{code="panic"} para
+	// que sea visible en métricas. chi's middleware.Recoverer escribía a
+	// stderr fuera del logger estructurado y sin métrica.
+	r.Use(Recoverer(deps.Infra.Logger, deps.Infra.Metrics))
 	r.Use(SecurityHeaders())
 	if deps.Infra.Metrics != nil {
 		r.Use(deps.Infra.Metrics.MetricsMiddleware)

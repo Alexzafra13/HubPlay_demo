@@ -79,6 +79,12 @@ func validatePeerURL(rawURL string) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("%w: scheme %q (must be http or https)", domain.ErrPeerURLUnsafe, u.Scheme)
 	}
+	// Credenciales embebidas (`http://user:pass@host`) no tienen sentido
+	// en una URL de peer (la auth es JWT firmado) y acabarían en logs de
+	// error y en la tabla de peers (F-10).
+	if u.User != nil {
+		return fmt.Errorf("%w: embedded credentials are not allowed", domain.ErrPeerURLUnsafe)
+	}
 	host := u.Hostname()
 	if host == "" {
 		return fmt.Errorf("%w: missing host", domain.ErrPeerURLUnsafe)

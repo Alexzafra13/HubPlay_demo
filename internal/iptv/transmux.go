@@ -346,6 +346,13 @@ func NewTransmuxManager(cfg TransmuxManagerConfig, logger *slog.Logger) *Transmu
 		// can rely on this fallback.
 		cfg.CacheDir = filepath.Join(os.TempDir(), "hubplay-iptv-hls")
 	}
+	// Absoluto: ffmpeg arranca con cmd.Dir = workDir y recibe la ruta
+	// completa de playlist/segmentos; con un cache_dir relativo (./cache)
+	// esa ruta se resolvía dentro del propio workDir y el header nunca se
+	// escribía (mismo fallo que el transcoder VOD en instalaciones nativas).
+	if abs, err := filepath.Abs(cfg.CacheDir); err == nil {
+		cfg.CacheDir = abs
+	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = defaultTransmuxUserAgent
 	}

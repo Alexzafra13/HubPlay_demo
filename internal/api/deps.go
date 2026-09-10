@@ -42,7 +42,10 @@ import (
 // todos son opcionales — los handlers caen a no-op o devuelven 503
 // cuando una pieza no está cableada.
 type InfraDeps struct {
-	Logger        *slog.Logger
+	Logger *slog.Logger
+	// LogIPs controla si el RequestLogger incluye la IP del cliente
+	// (`logging.log_ips`). false ⇒ se omite el campo (privacidad).
+	LogIPs        bool
 	Metrics       *observability.Metrics
 	EventBus      *event.Bus
 	Audit         handlers.AuditEmitter

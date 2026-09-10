@@ -493,6 +493,7 @@ func run(configPath string) error {
 	router := api.NewRouter(api.Dependencies{
 		Infra: api.InfraDeps{
 			Logger:      logger,
+			LogIPs:      cfg.Logging.LogIPs,
 			Metrics:     metrics,
 			EventBus:    eventBus,
 			Audit:       auditService,
