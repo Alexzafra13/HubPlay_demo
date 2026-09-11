@@ -780,7 +780,7 @@ func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*librarymo
 					}
 					if m.GenresJSON != "" {
 						var genres []string
-						if err := json.Unmarshal([]byte(m.GenresJSON), &genres); err == nil {
+						if err := json.Unmarshal([]byte(m.GenresJSON), &genres); err == nil && len(genres) > 0 {
 							data[i]["genres"] = genres
 						}
 					}
