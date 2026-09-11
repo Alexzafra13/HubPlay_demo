@@ -41,3 +41,7 @@ _backups/
 
 # sqlc drift test scratch (internal/db/sqlc_drift_test.go)
 .sqlc-drift-*
+
+# Claude Code: worktrees locales y config de lanzamiento
+.claude/worktrees/
+.claude/launch.json
