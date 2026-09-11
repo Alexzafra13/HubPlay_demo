@@ -14,6 +14,9 @@ services:
     container_name: hubplay
     ports:
       - "${HUBPLAY_HOST_PORT:-8097}:8096"
+      # Descubrimiento LAN (app de TV): broadcast UDP; a diferencia de mDNS
+      # atraviesa el bridge de Docker. Quítalo si no quieres autodetección.
+      - "41860:41860/udp"
     volumes:
       - ./config:/config
       - ./cache:/cache
@@ -23,6 +26,9 @@ services:
       - ${HUBPLAY_MEDIA_SERIES:-./series}:/media/series:ro
     environment:
       - TZ=${TZ:-Europe/Madrid}
+      # Puerto HTTP que la app de TV debe usar para llegar aquí desde la
+      # LAN: el del host, no el interno del contenedor.
+      - HUBPLAY_DISCOVERY_ADVERTISE_PORT=${HUBPLAY_HOST_PORT:-8097}
       # Bundled Postgres DSN — points at the `db` service below. The
       # binary uses this to offer a one-click "Switch to PostgreSQL"
       # toggle in the admin panel + setup wizard without making the

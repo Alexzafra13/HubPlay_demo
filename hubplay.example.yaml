@@ -192,3 +192,18 @@ mdns:
   # abierto entre el server y los clientes.
   enabled: true
   hostname: "hubplay"  # accederás en http://hubplay.local:8096
+
+discovery:
+  # Descubrimiento del servidor desde la app de TV/móvil por broadcast
+  # UDP. Complementa a mDNS: el multicast no sale de un contenedor Docker
+  # con `ports:`, el broadcast a un puerto publicado sí (docker-compose ya
+  # publica 41860/udp).
+  enabled: true
+  port: 41860
+  # Puerto HTTP alcanzable desde la LAN. Con Docker, el del host (8097 por
+  # defecto; docker-compose lo inyecta con HUBPLAY_DISCOVERY_ADVERTISE_PORT).
+  # 0 = el mismo que server.port (instalación nativa).
+  advertise_port: 0
+  # URL completa a anunciar en vez de http://<ip>:<puerto>, para servidores
+  # detrás de un proxy TLS cuyo puerto HTTP no llega a la LAN.
+  advertise_url: ""

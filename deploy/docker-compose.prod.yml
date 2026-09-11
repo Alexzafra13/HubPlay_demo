@@ -11,6 +11,9 @@ services:
     container_name: hubplay
     ports:
       - "127.0.0.1:8096:8096"   # Solo localhost — nginx hace de proxy
+      # Descubrimiento LAN (app de TV): broadcast UDP; a diferencia de mDNS
+      # atraviesa el bridge de Docker. La app usará la URL anunciada abajo.
+      - "41860:41860/udp"
     volumes:
       - hubplay-config:/config
       - hubplay-cache:/cache
@@ -23,6 +26,10 @@ services:
       - HUBPLAY_SERVER_BIND=0.0.0.0
       - HUBPLAY_SERVER_PORT=8096
       - HUBPLAY_SERVER_TRUSTED_PROXIES=127.0.0.1
+      # URL que la app de TV usará al encontrar este servidor en la LAN.
+      # El puerto 8096 solo escucha en localhost, así que anunciamos la
+      # URL pública (nginx + TLS). Ajusta el dominio.
+      - HUBPLAY_DISCOVERY_ADVERTISE_URL=https://hubplay.duckdns.org
       - HUBPLAY_LOGGING_LEVEL=info
       - HUBPLAY_LOGGING_FORMAT=json
       # Bundled Postgres DSN — the admin panel surfaces it as a

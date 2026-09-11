@@ -193,6 +193,7 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlers.RespondJSON(w, status, map[string]any{
+		"product":         "hubplay", // marca para el descubrimiento LAN de la app
 		"status":          overall,
 		"version":         h.version,
 		"uptime_seconds":  int(uptime.Seconds()),

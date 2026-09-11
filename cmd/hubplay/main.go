@@ -21,6 +21,7 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
+	"hubplay/internal/discovery"
 	"hubplay/internal/event"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/iptv"
@@ -470,6 +471,20 @@ func run(configPath string) error {
 		Version:  version,
 	}, logger); err != nil {
 		logger.Warn("mdns disabled", "error", err)
+	}
+
+	// Descubrimiento LAN por broadcast UDP (app de TV). A diferencia de
+	// mDNS funciona a través del mapeo de puertos de Docker. Tampoco es
+	// fatal: sin él el usuario teclea la URL.
+	if _, err := discovery.Start(ctx, discovery.Config{
+		Enabled:       cfg.Discovery.Enabled,
+		Port:          cfg.Discovery.Port,
+		HTTPPort:      cfg.Server.Port,
+		AdvertisePort: cfg.Discovery.AdvertisePort,
+		AdvertiseURL:  cfg.Discovery.AdvertiseURL,
+		Version:       version,
+	}, logger); err != nil {
+		logger.Warn("lan discovery disabled", "error", err)
 	}
 
 	// CORS registry (PR4 feature CORS-dynamic): combina statics del

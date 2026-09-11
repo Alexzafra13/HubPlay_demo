@@ -90,6 +90,29 @@ aviso de códec, y **remux/reencode VOD de torrents a HLS**
    instalador Windows de la próxima release con W-1/W-2 (el servicio
    instalado hoy es de una release anterior y tiene ambos bugs).
 
+**Sesión 2026-09-11 — descubrimiento LAN para la app de TV:**
+- **Diagnóstico**: la app de TV no encontraba el servidor de casa
+  (192.168.1.100, Docker con `ports: 8097:8096`). mDNS (`internal/mdns`)
+  es multicast y no sale del bridge de Docker; además anunciaría el
+  puerto interno 8096, no el 8097 del host.
+- **`internal/discovery`** (nuevo): respondedor UDP en `41860`. Sondeo
+  `HUBPLAY-DISCOVER/1` → JSON `{product, name, version, port, url?}`.
+  El broadcast sí llega a un puerto publicado (docker-proxy). Config
+  `discovery:` (enabled/port/advertise_port/advertise_url) + env
+  `HUBPLAY_DISCOVERY_ADVERTISE_PORT|_URL|_ENABLED`. Los tres compose
+  publican `41860/udp`; los de raíz inyectan el puerto del host
+  (`HUBPLAY_HOST_PORT`), el de `deploy/` anuncia la URL pública porque
+  el 8096 solo escucha en localhost. Tests con puerto efímero (el
+  41860 puede estar ocupado por un server de desarrollo local).
+- `/api/v1/health` lleva `"product":"hubplay"` para que el barrido de
+  subred de la app (fallback para servidores sin respondedor) lo
+  reconozca; la app acepta también el cuerpo antiguo.
+- Verificado en la LAN real: `node` enviando el broadcast recibe la
+  respuesta del server local (puerto 8097 anunciado) y la Mi TV lista
+  el server local (UDP) y el de producción (barrido, aún sin el nuevo
+  binario). **Producción sigue con la imagen antigua**: al desplegar
+  esta versión el descubrimiento pasa a ser inmediato.
+
 ---
 
 ## 🔭 Estado anterior (2026-06-14, fin de sesión)

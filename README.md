@@ -32,6 +32,14 @@ Abre `http://localhost:8097` y completa el asistente de primer arranque
   `docker compose -f docker-compose.torrent.yml up -d`.
 - Producción detrás de nginx con TLS: `deploy/docker-compose.prod.yml` +
   `deploy/setup-server.sh`.
+- **Descubrimiento en la red local** (app de TV): además de mDNS, el
+  servidor responde a un sondeo UDP en el puerto `41860` (publicado en los
+  compose). Con Docker es lo que hace que la app encuentre el servidor sin
+  teclear nada: el multicast mDNS no sale del contenedor, el broadcast sí.
+  `HUBPLAY_DISCOVERY_ADVERTISE_PORT` (el puerto del host, ya cableado a
+  `HUBPLAY_HOST_PORT`) o `HUBPLAY_DISCOVERY_ADVERTISE_URL` (URL pública
+  si el HTTP solo escucha en localhost tras un proxy TLS). Sección
+  `discovery:` en `hubplay.example.yaml`.
 
 ## Instalación sin Docker (binario nativo)
 

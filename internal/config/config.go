@@ -31,6 +31,7 @@ type Config struct {
 	Retention      RetentionConfig     `yaml:"retention"`
 	Upload         UploadConfig        `yaml:"upload"`
 	MDNS           MDNSConfig          `yaml:"mdns"`
+	Discovery      DiscoveryConfig     `yaml:"discovery"`
 	SetupCompleted bool                `yaml:"setup_completed"`
 }
 
@@ -40,6 +41,25 @@ type Config struct {
 type MDNSConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	Hostname string `yaml:"hostname"`
+}
+
+// DiscoveryConfig: descubrimiento por sondeo UDP (broadcast) para la app
+// de TV/móvil. Complementa a mDNS porque el multicast no atraviesa el
+// bridge de Docker; un broadcast a un puerto publicado sí. Ver
+// internal/discovery.
+type DiscoveryConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Port UDP de escucha. Default 41860.
+	Port int `yaml:"port"`
+	// AdvertisePort es el puerto HTTP que los clientes de la LAN deben
+	// usar. Con Docker es el del HOST (`ports: "8097:8096"` → 8097): el
+	// contenedor no lo conoce, así que docker-compose lo inyecta vía
+	// HUBPLAY_DISCOVERY_ADVERTISE_PORT. 0 → server.port.
+	AdvertisePort int `yaml:"advertise_port"`
+	// AdvertiseURL: URL completa a anunciar en vez de http://<ip>:<port>.
+	// Para servidores detrás de un proxy TLS cuyo puerto HTTP no está
+	// expuesto a la LAN (p.ej. "https://hubplay.example.org").
+	AdvertiseURL string `yaml:"advertise_url"`
 }
 
 // UploadConfig: knobs runtime para subidas de media (PR2 feature upload).
@@ -521,6 +541,10 @@ func defaults() *Config {
 			MaxBytesPerUpload: 50 * 1024 * 1024 * 1024, // 50 GiB
 			MinDurationMs:     1000,
 		},
+		Discovery: DiscoveryConfig{
+			Enabled: true,
+			Port:    41860,
+		},
 		MDNS: MDNSConfig{
 			Enabled:  true,
 			Hostname: "hubplay",
@@ -558,6 +582,19 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("HUBPLAY_SERVER_BIND"); v != "" {
 		cfg.Server.Bind = v
+	}
+	if v := os.Getenv("HUBPLAY_DISCOVERY_ADVERTISE_PORT"); v != "" {
+		// Puerto HTTP alcanzable desde la LAN (el del host con Docker).
+		// docker-compose lo rellena con HUBPLAY_HOST_PORT.
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Discovery.AdvertisePort = p
+		}
+	}
+	if v := os.Getenv("HUBPLAY_DISCOVERY_ADVERTISE_URL"); v != "" {
+		cfg.Discovery.AdvertiseURL = v
+	}
+	if v := os.Getenv("HUBPLAY_DISCOVERY_ENABLED"); v != "" {
+		cfg.Discovery.Enabled = v == "true" || v == "1"
 	}
 	if v := os.Getenv("HUBPLAY_DATABASE_DRIVER"); v != "" {
 		cfg.Database.Driver = v
