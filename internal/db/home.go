@@ -199,9 +199,18 @@ SELECT
 FROM channels c
 JOIN libraries l ON l.id = c.library_id
 LEFT JOIN epg_programs ep
-	ON ep.channel_id = c.id
-	AND ep.start_time <= ?
-	AND ep.end_time   > ?
+	ON ep.id = (
+		-- Como mucho UN programa por canal. Las guías con entradas
+		-- solapadas (dos programas "en emisión" a la vez) duplicaban el
+		-- canal en el rail y la app de TV, que usa el id como key,
+		-- abortaba. Nos quedamos con el que empezó más tarde.
+		SELECT p.id FROM epg_programs p
+		WHERE p.channel_id = c.id
+		  AND p.start_time <= ?
+		  AND p.end_time   > ?
+		ORDER BY p.start_time DESC, p.id ASC
+		LIMIT 1
+	)
 LEFT JOIN user_channel_favorites cf
 	ON cf.channel_id = c.id AND cf.user_id = ?
 WHERE c.is_active
