@@ -8,8 +8,8 @@ func TestStrongImageETag(t *testing.T) {
 		id, w, want string
 	}{
 		{"abc-123", "", `"abc-123"`},
-		{"abc-123", "320", `"abc-123:w320"`},
-		{"d4f8-uuid", "1280", `"d4f8-uuid:w1280"`},
+		{"abc-123", "320", `"abc-123:w320` + thumbVariant + `"`},
+		{"d4f8-uuid", "1280", `"d4f8-uuid:w1280` + thumbVariant + `"`},
 	}
 	for _, tt := range tests {
 		got := strongImageETag(tt.id, tt.w)

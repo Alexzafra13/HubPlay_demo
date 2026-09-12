@@ -506,7 +506,7 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 		maxWidth, err := strconv.Atoi(wParam)
 		if err == nil && maxWidth > 0 && maxWidth < 4096 {
 			thumbDir := filepath.Join(h.imageDir, ".thumbnails")
-			thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_w%d%s", imageID, maxWidth, filepath.Ext(localPath)))
+			thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_w%d%s%s", imageID, maxWidth, thumbVariant, filepath.Ext(localPath)))
 			if !h.isUnderImageDir(thumbPath) {
 				// imageID was UUID-valid so this should not happen, but be safe.
 				// Debug por la misma razón que el pathmap check de arriba (hot-path).
@@ -534,13 +534,22 @@ func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, im
 	http.ServeFile(w, r, localPath)
 }
 
+// thumbVariant versiona las miniaturas generadas por ?w=N. Va en el
+// nombre del fichero cacheado y en el ETag: al cambiar el resampler
+// (vecino más cercano → Catmull-Rom, 2026-09) las miniaturas viejas de
+// `.thumbnails/` quedan huérfanas en vez de servirse, y los clientes con
+// `If-None-Match` del ETag anterior reciben 200 con bytes nuevos en vez
+// de un 304 que perpetuaría la versión pixelada. Súbelo si vuelve a
+// cambiar la forma de generar la miniatura.
+const thumbVariant = "_r2"
+
 // strongImageETag returns the quoted ETag for an image variant.
-// Content-addressed so id+w is enough — no mtime dance.
+// Content-addressed so id+w (+ thumbVariant) is enough — no mtime dance.
 func strongImageETag(imageID, wParam string) string {
 	if wParam == "" {
 		return `"` + imageID + `"`
 	}
-	return `"` + imageID + ":w" + wParam + `"`
+	return `"` + imageID + ":w" + wParam + thumbVariant + `"`
 }
 
 // etagMatches handles `If-None-Match` semantics: a single quoted

@@ -162,7 +162,7 @@ func TestGenerateThumbnail_SourceNotFound(t *testing.T) {
 	}
 }
 
-func TestNearestNeighborResize(t *testing.T) {
+func TestResample_PreservesFlatColor(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
 	for y := 0; y < 50; y++ {
 		for x := 0; x < 100; x++ {
@@ -170,7 +170,7 @@ func TestNearestNeighborResize(t *testing.T) {
 		}
 	}
 
-	dst := nearestNeighborResize(src, 10, 5)
+	dst := resample(src, 10, 5)
 	bounds := dst.Bounds()
 
 	if bounds.Dx() != 10 || bounds.Dy() != 5 {
@@ -181,5 +181,28 @@ func TestNearestNeighborResize(t *testing.T) {
 	r, g, b, _ := dst.At(5, 2).RGBA()
 	if r>>8 != 255 || g>>8 != 0 || b>>8 != 0 {
 		t.Errorf("expected red pixel, got (%d,%d,%d)", r>>8, g>>8, b>>8)
+	}
+}
+
+// Un tablero de ajedrez de 1 px reducido a la mitad debe salir gris: el
+// filtro promedia los píxeles fuente. Con vecino más cercano (el bug
+// que se veía como "pixelado" en la TV) saldría blanco o negro puro.
+func TestResample_DownscaleAveragesPixels(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 200, 200))
+	for y := 0; y < 200; y++ {
+		for x := 0; x < 200; x++ {
+			v := uint8(0)
+			if (x+y)%2 == 0 {
+				v = 255
+			}
+			src.Set(x, y, color.RGBA{R: v, G: v, B: v, A: 255})
+		}
+	}
+
+	dst := resample(src, 100, 100)
+	r, _, _, _ := dst.At(50, 50).RGBA()
+	got := r >> 8
+	if got < 96 || got > 160 {
+		t.Errorf("expected a mid grey after downscale, got %d", got)
 	}
 }

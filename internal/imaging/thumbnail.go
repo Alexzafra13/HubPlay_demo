@@ -8,10 +8,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	xdraw "golang.org/x/image/draw"
 )
 
-// GenerateThumbnail: resize a maxWidth (aspect-ratio preservado, vecino más
-// cercano) y escribe a dstPath. Sólo JPEG y PNG (std-lib).
+// ThumbnailQuality es la calidad JPEG de las miniaturas generadas por
+// ?w=N. 85 en vez de 80: los backdrops a pantalla completa en TV enseñan
+// el blocking de JPEG en degradados (cielos, fundidos a negro) y el coste
+// en bytes es ~15 %.
+const ThumbnailQuality = 85
+
+// GenerateThumbnail: resize a maxWidth (aspect-ratio preservado, filtro
+// Catmull-Rom) y escribe a dstPath. Sólo JPEG y PNG (std-lib + x/image).
+//
+// Antes se usaba vecino más cercano: un backdrop "original" de TMDb
+// (3840 px) reducido a 1280 px salía con aliasing visible ("pixelado")
+// en la TV. Catmull-Rom es un resampler bicúbico que promedia los píxeles
+// fuente: nítido sin escalera. Cuesta ~100-300 ms por backdrop 4K en un
+// x86 modesto, pero se paga una vez por (imagen, ancho) — el handler
+// cachea el resultado en disco.
 func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 	src, err := os.Open(srcPath)
 	if err != nil {
@@ -39,7 +54,7 @@ func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 		dstH = 1
 	}
 
-	resized := nearestNeighborResize(img, dstW, dstH)
+	resized := resample(img, dstW, dstH)
 
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return fmt.Errorf("create thumbnail dir: %w", err)
@@ -58,7 +73,7 @@ func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 		}
 	default:
 		// Default JPEG para todo lo demás (incluido jpeg).
-		if err := jpeg.Encode(out, resized, &jpeg.Options{Quality: 80}); err != nil {
+		if err := jpeg.Encode(out, resized, &jpeg.Options{Quality: ThumbnailQuality}); err != nil {
 			return fmt.Errorf("encode jpeg thumbnail: %w", err)
 		}
 	}
@@ -66,19 +81,12 @@ func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 	return nil
 }
 
-func nearestNeighborResize(src image.Image, dstW, dstH int) image.Image {
-	bounds := src.Bounds()
-	srcW := bounds.Dx()
-	srcH := bounds.Dy()
-
+// resample escala src a dstW×dstH con el kernel Catmull-Rom de x/image
+// (bicúbico, buen equilibrio nitidez/suavidad tanto reduciendo como
+// ampliando). Devuelve siempre un *image.RGBA nuevo.
+func resample(src image.Image, dstW, dstH int) image.Image {
 	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
-	for y := 0; y < dstH; y++ {
-		srcY := bounds.Min.Y + y*srcH/dstH
-		for x := 0; x < dstW; x++ {
-			srcX := bounds.Min.X + x*srcW/dstW
-			dst.Set(x, y, src.At(srcX, srcY))
-		}
-	}
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Over, nil)
 	return dst
 }
 

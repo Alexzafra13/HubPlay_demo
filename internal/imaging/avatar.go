@@ -19,8 +19,8 @@ import (
 //     extra (no usamos webp encoder para no añadir cgo).
 //   - Recorte centrado: la mayoría de fotos de perfil están centradas
 //     en el sujeto; eso evita decisiones de UX (sin crop UI por ahora).
-//   - Reutilizamos el resize nearest-neighbor de thumbnail.go: a 256px
-//     la pérdida es invisible y nos ahorra una dependencia.
+//   - Reutilizamos el resample Catmull-Rom de thumbnail.go (x/image ya
+//     es dependencia por el decoder WebP).
 //
 // Decompression-bomb guard: el caller debería llamar EnforceMaxPixels
 // sobre los bytes crudos antes de pasarlos aquí, igual que hace el
@@ -36,7 +36,7 @@ func GenerateAvatar(src []byte, size int) ([]byte, error) {
 	}
 
 	cropped := centerCropSquare(img)
-	resized := nearestNeighborResize(cropped, size, size)
+	resized := resample(cropped, size, size)
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, resized, &jpeg.Options{Quality: 85}); err != nil {
