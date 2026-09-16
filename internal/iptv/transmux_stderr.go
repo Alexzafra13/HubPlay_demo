@@ -10,7 +10,15 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 )
+
+// stderrDrainGrace bounds how long processWatcher waits, after ffmpeg
+// has exited, for the stderr consumer to hit EOF. Normally that is
+// immediate (the kernel closed ffmpeg's write end on exit); the bound
+// only matters if a grandchild inherited the fd and keeps it open.
+// Var (not const) so tests can shrink it.
+var stderrDrainGrace = 2 * time.Second
 
 // ffmpegStderrTailLines is how many stderr lines we keep per session.
 // Sized to capture the cluster of warnings + the actual fatal line
@@ -86,6 +94,22 @@ func (r *stderrRing) wait() {
 		return
 	}
 	<-r.done
+}
+
+// waitTimeout is wait with an upper bound. Reports whether consume
+// returned before the deadline.
+func (r *stderrRing) waitTimeout(d time.Duration) bool {
+	if r == nil || r.done == nil {
+		return true
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-r.done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (r *stderrRing) push(line string) {

@@ -158,14 +158,10 @@ func SafeGetWith(rawURL string, maxBytes int64, timeout time.Duration, opts Safe
 	return data, resp.Header.Get("Content-Type"), nil
 }
 
-// validateOutboundURL aplica el guard SSRF a una sola URL: esquema
-// permitido + host resoluble a IPs públicas. Extraído para que la
-// validación inicial y la del CheckRedirect compartan exactamente
-// la misma lógica.
-func validateOutboundURL(u *url.URL) error {
-	return validateOutboundURLWith(u, SafeGetOpts{})
-}
-
+// validateOutboundURLWith aplica el guard SSRF a una sola URL: esquema
+// permitido + host resoluble a IPs públicas (o privadas si opts lo
+// permite). Extraído para que la validación inicial y la del
+// CheckRedirect compartan exactamente la misma lógica.
 func validateOutboundURLWith(u *url.URL, opts SafeGetOpts) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("%w: scheme %q", ErrUnsafeURL, u.Scheme)

@@ -288,6 +288,11 @@ type TransmuxSession struct {
 	// not just "exit status 8".
 	stderrTail *stderrRing
 
+	// stderrPipe is the parent's read end of the stderr pipe. Owned by
+	// the session (not by exec.Cmd) so Wait() can't close it under the
+	// consumer's feet; processWatcher closes it once the tail is drained.
+	stderrPipe *os.File
+
 	// lastTouchUnixNano is read by the reaper without holding the
 	// manager lock. Stored as int64 so atomic reads/writes are cheap
 	// on the hot path (every segment request bumps it).
@@ -638,7 +643,16 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 	// is opaque — operators have to docker exec ffmpeg by hand to
 	// reproduce. The ring is intentionally small (~64 lines): ffmpeg's
 	// fatal message is always within the last few lines before exit.
-	stderrPipe, err := cmd.StderrPipe()
+	//
+	// Tubería propia (os.Pipe) en vez de cmd.StderrPipe(): Wait()
+	// cierra el extremo de lectura de los pipes que abre exec en
+	// cuanto el proceso termina, ANTES de que nuestra goroutine
+	// consumidora haya leído lo que quedaba en el buffer del kernel.
+	// Un ffmpeg que imprime el error de códec y sale acto seguido
+	// perdía esa línea bajo carga (tail vacío → sin promoción a
+	// reencode). Con un *os.File en cmd.Stderr exec no lo toca: el
+	// consumidor lee hasta EOF a su ritmo y processWatcher espera.
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
 		cancel()
 		_ = os.RemoveAll(workDir)
@@ -648,6 +662,7 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		)
 		return nil, fmt.Errorf("iptv-transmux: stderr pipe: %w", err)
 	}
+	cmd.Stderr = stderrW
 
 	session := &TransmuxSession{
 		ChannelID:   channelID,
@@ -659,13 +674,15 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		done:        make(chan struct{}),
 		ready:       make(chan struct{}),
 		stderrTail:  newStderrRing(ffmpegStderrTailLines),
+		stderrPipe:  stderrR,
 		mode:        mode,
 	}
 	session.lastTouchUnixNano.Store(startedAt.UnixNano())
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		_ = stderrPipe.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
 		_ = os.RemoveAll(workDir)
 		m.logger.Warn("transmux spawn failed: ffmpeg start",
 			"channel", channelID,
@@ -677,10 +694,16 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		return nil, fmt.Errorf("iptv-transmux: start ffmpeg: %w", err)
 	}
 
-	// Drain stderr in a goroutine. The reader exits when the pipe is
-	// closed (which happens automatically when ffmpeg exits), so we
-	// don't need explicit teardown.
-	go session.stderrTail.consume(stderrPipe)
+	// El hijo ya tiene su copia del extremo de escritura; la del padre
+	// debe cerrarse YA o el pipe nunca llega a EOF y el consumidor se
+	// quedaría bloqueado tras la salida de ffmpeg.
+	_ = stderrW.Close()
+
+	// Drain stderr in a goroutine. The reader exits when the pipe
+	// reaches EOF (the kernel closes ffmpeg's write end when it
+	// exits); processWatcher closes the read end as a last resort if
+	// something inherited the fd and keeps it open (see stderrDrainGrace).
+	go session.stderrTail.consume(stderrR)
 
 	m.sessions[channelID] = session
 	m.notifyChange()
@@ -720,6 +743,18 @@ func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 	// miss the fatal line ffmpeg prints right before exit, which is
 	// exactly the line we need for the breaker log AND for the
 	// codec-fallback classifier (looksLikeCodecError below).
+	//
+	// ffmpeg ya ha salido, así que el kernel ha cerrado su extremo de
+	// escritura y el consumidor verá EOF en cuanto vacíe el buffer.
+	// La espera va acotada por si algún proceso hijo de ffmpeg heredó
+	// el fd y lo mantiene abierto: en ese caso cerramos nosotros el
+	// extremo de lectura (desbloquea al consumidor) y seguimos con la
+	// cola parcial en vez de dejar la sesión sin evictar.
+	if !s.stderrTail.waitTimeout(stderrDrainGrace) {
+		log.Warn("transmux stderr drain timed out; tail may be incomplete",
+			"grace", stderrDrainGrace)
+	}
+	_ = s.stderrPipe.Close()
 	s.stderrTail.wait()
 	stderrTail := s.stderrTail.String()
 	wasReady := isReady(s)

@@ -1365,7 +1365,7 @@ Notas empíricas de levantar el entorno en la máquina Windows del proyecto:
   UAC si no hay consola interactiva. Alternativa sin admin: descargar el
   zip de `go.dev/dl` y descomprimirlo en `~/sdk/go`; añadir `~/sdk/go/bin`
   al PATH (`export PATH="$HOME/sdk/go/bin:$PATH"` en Git Bash).
-  `GOTOOLCHAIN=auto` respeta el `go 1.25.11` del `go.mod`.
+  `GOTOOLCHAIN=auto` respeta el `go 1.25.13` del `go.mod`.
 - **pnpm sin TTY** (Claude Code, CI local): si `node_modules` está desfasado
   del lockfile, `pnpm install` intenta recrearlo y aborta con
   `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`. Usar `CI=true pnpm install
