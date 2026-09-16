@@ -76,6 +76,17 @@ type HealthHandler struct {
 	dbPath string
 	// memStats throttles the stop-the-world ReadMemStats for /health.
 	memStats memStatsCache
+	// serverID identifica la instalación (ver WithServerID); "" = no se expone.
+	serverID string
+}
+
+// WithServerID hace que /health incluya `server_id`, el identificador
+// estable de la instalación que también anuncian mDNS y el respondedor
+// UDP. La app de TV lo usa para no listar dos veces un servidor que
+// contesta por dos IPs.
+func (h *HealthHandler) WithServerID(id string) *HealthHandler {
+	h.serverID = id
+	return h
 }
 
 // NewHealthHandler consume db.HealthChecker en lugar de `*sql.DB`. El
@@ -192,7 +203,7 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		overall = "unavailable"
 	}
 
-	handlers.RespondJSON(w, status, map[string]any{
+	body := map[string]any{
 		"product":         "hubplay", // marca para el descubrimiento LAN de la app
 		"status":          overall,
 		"version":         h.version,
@@ -203,7 +214,11 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		"goroutines":      runtime.NumGoroutine(),
 		"memory_alloc_mb": allocMB,
 		"memory_sys_mb":   sysMB,
-	})
+	}
+	if h.serverID != "" {
+		body["server_id"] = h.serverID
+	}
+	handlers.RespondJSON(w, status, body)
 }
 
 // freeDiskBytes reports the bytes available to a non-root caller on

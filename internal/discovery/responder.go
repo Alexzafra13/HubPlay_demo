@@ -65,6 +65,10 @@ type Config struct {
 	Name string
 	// Version del binario, informativa.
 	Version string
+	// ServerID identifica la instalación: el mismo servidor contesta al
+	// broadcast desde cada interfaz que lo recibe (Wi-Fi + cable, Docker
+	// + host) y la app lo usa para listarlo una sola vez. Vacío = se omite.
+	ServerID string
 }
 
 // Reply es el cuerpo JSON que devolvemos a cada sondeo.
@@ -74,6 +78,7 @@ type Reply struct {
 	Version string `json:"version,omitempty"`
 	Port    int    `json:"port"`
 	URL     string `json:"url,omitempty"`
+	ID      string `json:"id,omitempty"`
 }
 
 // Responder es el listener UDP en marcha.
@@ -113,6 +118,7 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger) (*Responder, er
 		Version: cfg.Version,
 		Port:    advertise,
 		URL:     cfg.AdvertiseURL,
+		ID:      cfg.ServerID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("discovery: marshal reply: %w", err)

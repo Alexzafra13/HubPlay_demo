@@ -115,6 +115,36 @@ aviso de códec, y **remux/reencode VOD de torrents a HLS**
 
 ---
 
+## 📺 Sesión 2026-09-16 — subtítulos para la app de TV
+
+- `GET /items/{id}` ya emite `is_forced` en `media_streams` (la spec
+  OpenAPI lo declaraba, el handler no lo mandaba).
+- **Caché de subtítulos extraídos** (`StreamHandler.WithSubtitleCache`,
+  `~/.hubplay/cache/subtitles`, hermano del de transcode): ffmpeg lee el
+  fichero entero para sacar una pista (medido: 42 s en frío en un MKV
+  grande, 3,6 s con caché de disco del SO), así que al primer fallo se
+  extraen TODAS las pistas de texto del fichero en una pasada
+  (`stream.ExtractSubtitlesVTT`, sin PGS/DVD) y se sirven del disco. Clave
+  = sha1(ruta|tamaño|mtime). Mutex por fichero para peticiones
+  concurrentes. Sin config (tests) no hay caché y se extrae como antes.
+  Test: `TestStreamHandler_SubtitleTrack_CachesEveryTextTrackOnFirstMiss`.
+- La app de TV pide la primera pista de texto nada más arrancar el vídeo
+  (warm-up) y usa un timeout de 180 s: antes reintentaba cada 30 s y cada
+  reintento mataba el ffmpeg anterior, sin acabar nunca.
+- **Entorno**: con el Go 1.27 que hay en el PATH, `go build ./...` falla
+  en `anacrolix/torrent` (`undefined: http2.GoAwayError`): el transport
+  http2 de `x/net v0.54` lleva `//go:build !(go1.27 && !http2legacy)`.
+  Compilar SIEMPRE con el 1.25.11 de `~/sdk/go`
+  (`export PATH="$HOME/sdk/go/bin:$PATH"`), como dice `conventions.md`.
+- **Identidad de instalación para el descubrimiento LAN**
+  (`cmd/hubplay/server_id.go`): `server.instance_id` en app_settings (16
+  hex, generado una vez). Se anuncia en mDNS (TXT `id=`), en la respuesta
+  UDP (`id`) y en `/api/v1/health` (`server_id`, vía
+  `HealthHandler.WithServerID` y `ServerDeps.InstanceID`). La app de TV lo
+  usa para no listar dos veces un servidor que contesta por dos IPs.
+- Pendiente: desplegar en el servidor de la TV (`192.168.1.100:8097`,
+  aún sin la caché ni el id). `GET /items/search?q=Toc,%20toc` devuelve 500.
+
 ## 🔭 Estado anterior (2026-06-14, fin de sesión)
 
 **Salud:** MVP funcional, cerca de early-production.

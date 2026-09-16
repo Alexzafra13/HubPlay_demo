@@ -2690,6 +2690,11 @@ components:
             status: { type: string, enum: [ok] }
             version: { type: string }
             uptime_seconds: { type: integer }
+            # Identificador estable de la instalación (app_settings
+            # `server.instance_id`); la app de TV lo usa para no listar dos
+            # veces un servidor que contesta por dos IPs. Ausente si no se
+            # pudo generar.
+            server_id: { type: string }
 
     AuthTokenEnvelope:
       type: object

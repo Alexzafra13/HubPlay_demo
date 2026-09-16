@@ -102,7 +102,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	healthHandler := system.NewHealthHandler(
 		deps.Admin.DB, streamSvc, deps.Infra.Version, deps.Server.DatabasePath,
-	)
+	).WithServerID(deps.Server.InstanceID)
 
 	// Device auth handler: construido aquí porque vive en dos mounts
 	// distintos — start/poll/events públicos (mountAuthPublic) y

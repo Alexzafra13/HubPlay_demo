@@ -68,8 +68,12 @@ type InfraDeps struct {
 // primitivos materializados (DataDir, ServerBaseURL, etc.) que main.go
 // pasa explícitos.
 type ServerDeps struct {
-	Config           *config.Config
-	ConfigPath       string
+	Config     *config.Config
+	ConfigPath string
+	// InstanceID identifica esta instalación (app_settings
+	// `server.instance_id`); /health lo expone para que la app de TV
+	// reconozca el mismo servidor por dos IPs. Vacío = no se expone.
+	InstanceID       string
 	AuthConfig       config.AuthConfig
 	DataDir          string
 	DatabasePath     string

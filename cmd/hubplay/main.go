@@ -464,11 +464,15 @@ func run(configPath string) error {
 	// mDNS: anuncia el server en la LAN como "<hostname>.local". Errores
 	// no son fatales — firewall bloqueando UDP/5353 o falta de soporte
 	// multicast no debe impedir el arranque del server.
+	// Identidad estable de la instalación: la app de TV la usa para no
+	// listar dos veces un servidor que contesta por dos IPs.
+	serverID := loadOrCreateServerID(ctx, repos.Settings, logger)
 	if _, err := mdns.Start(ctx, mdns.Config{
 		Enabled:  cfg.MDNS.Enabled,
 		Hostname: cfg.MDNS.Hostname,
 		Port:     cfg.Server.Port,
 		Version:  version,
+		ServerID: serverID,
 	}, logger); err != nil {
 		logger.Warn("mdns disabled", "error", err)
 	}
@@ -483,6 +487,7 @@ func run(configPath string) error {
 		AdvertisePort: cfg.Discovery.AdvertisePort,
 		AdvertiseURL:  cfg.Discovery.AdvertiseURL,
 		Version:       version,
+		ServerID:      serverID,
 	}, logger); err != nil {
 		logger.Warn("lan discovery disabled", "error", err)
 	}
@@ -529,6 +534,7 @@ func run(configPath string) error {
 		Server: api.ServerDeps{
 			Config:           cfg,
 			ConfigPath:       configPath,
+			InstanceID:       serverID,
 			AuthConfig:       cfg.Auth,
 			DataDir:          filepath.Dir(cfg.Database.Path),
 			DatabasePath:     cfg.Database.Path,

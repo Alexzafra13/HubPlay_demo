@@ -32,6 +32,10 @@ type Config struct {
 	// Version inyectada en el TXT record para que clientes puedan
 	// filtrar por versión sin tener que llamar al servidor.
 	Version string
+	// ServerID (TXT `id=`) identifica la instalación: la app de TV
+	// descarta anuncios repetidos del mismo servidor por otra IP. Vacío
+	// = no se anuncia.
+	ServerID string
 }
 
 type Announcer struct {
@@ -58,6 +62,9 @@ func Start(ctx context.Context, cfg Config, logger *slog.Logger) (*Announcer, er
 	txt := []string{
 		"path=/",
 		"version=" + cfg.Version,
+	}
+	if cfg.ServerID != "" {
+		txt = append(txt, "id="+cfg.ServerID)
 	}
 	// RegisterProxy fuerza el hostname (en vez de usar el del SO).
 	srv, err := zeroconf.RegisterProxy(
