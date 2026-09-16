@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -609,6 +613,75 @@ func TestStreamHandler_SubtitleTrack_FileUnavailable(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+// Con caché: la primera petición extrae todas las pistas de texto del
+// fichero en una pasada (sin las de imagen) y la segunda, aunque sea de
+// otra pista, se sirve del disco sin volver a llamar a ffmpeg.
+func TestStreamHandler_SubtitleTrack_CachesEveryTextTrackOnFirstMiss(t *testing.T) {
+	env := newStreamTestEnv(t)
+	src := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(src, []byte("not really a video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Path: src, IsAvailable: true}
+	env.streams.byItem["item-1"] = []*librarymodel.MediaStream{
+		{StreamIndex: 0, StreamType: "video", Codec: "h264"},
+		{StreamIndex: 3, StreamType: "subtitle", Codec: "subrip"},
+		{StreamIndex: 4, StreamType: "subtitle", Codec: "hdmv_pgs_subtitle"},
+		{StreamIndex: 5, StreamType: "subtitle", Codec: "ass"},
+	}
+
+	var calls int
+	var requested []int
+	env.handler.WithSubtitleCache(t.TempDir())
+	env.handler.extractSubtitles = func(_ context.Context, path string, outputs map[int]string) error {
+		calls++
+		if path != src {
+			t.Errorf("extract path = %q, want %q", path, src)
+		}
+		for idx, out := range outputs {
+			requested = append(requested, idx)
+			if err := os.WriteFile(out, []byte(fmt.Sprintf("WEBVTT track %d", idx)), 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	get := func(track int) string {
+		t.Helper()
+		resp, err := http.Get(fmt.Sprintf("%s/api/v1/stream/item-1/subtitles/%d", env.server.URL, track))
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("track %d: status %d body %s", track, resp.StatusCode, body)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "text/vtt" {
+			t.Fatalf("track %d: content-type %q", track, ct)
+		}
+		return string(body)
+	}
+
+	if got := get(3); got != "WEBVTT track 3" {
+		t.Fatalf("first fetch body = %q", got)
+	}
+	if got := get(5); got != "WEBVTT track 5" {
+		t.Fatalf("cached fetch body = %q", got)
+	}
+	if got := get(3); got != "WEBVTT track 3" {
+		t.Fatalf("repeat fetch body = %q", got)
+	}
+	if calls != 1 {
+		t.Fatalf("ffmpeg passes = %d, want 1", calls)
+	}
+	sort.Ints(requested)
+	if want := []int{3, 5}; !reflect.DeepEqual(requested, want) {
+		t.Fatalf("extracted tracks = %v, want %v (image subs must be skipped)", requested, want)
 	}
 }
 

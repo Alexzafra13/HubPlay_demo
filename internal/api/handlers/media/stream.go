@@ -2,6 +2,8 @@ package media
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"hubplay/internal/api/handlers"
@@ -36,6 +39,36 @@ type StreamHandler struct {
 	settings       settingsReader
 	baseURLDefault string
 	logger         *slog.Logger
+
+	// subtitleCacheDir guarda los WebVTT extraídos (vacío = sin caché,
+	// se extrae en cada petición). Ver WithSubtitleCache.
+	subtitleCacheDir string
+	// extractSubtitles es stream.ExtractSubtitlesVTT salvo en tests.
+	extractSubtitles func(ctx context.Context, inputPath string, outputs map[int]string) error
+	// subtitleLocks serializa la extracción por fichero de origen: la
+	// segunda petición concurrente espera y encuentra la caché llena.
+	subtitleLocks sync.Map
+}
+
+// WithSubtitleCache activa la caché en disco de subtítulos extraídos en
+// `dir` (se crea si no existe). Con caché, el primer fallo de un fichero
+// extrae TODAS sus pistas de texto en una pasada de ffmpeg — leer un
+// MKV de 10 GB cuesta ~40 s en frío, mejor una vez que una por pista — y
+// las siguientes peticiones salen del disco. La clave incluye tamaño y
+// mtime del fichero, así que un re-mux invalida sola la entrada.
+func (h *StreamHandler) WithSubtitleCache(dir string) *StreamHandler {
+	if dir == "" {
+		return h
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		h.logger.Warn("subtitle cache disabled: cannot create dir", "dir", dir, "error", err)
+		return h
+	}
+	h.subtitleCacheDir = dir
+	if h.extractSubtitles == nil {
+		h.extractSubtitles = stream.ExtractSubtitlesVTT
+	}
+	return h
 }
 
 // NewStreamHandler creates a new stream handler.
@@ -841,14 +874,79 @@ func (h *StreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vttData, err := stream.ExtractSubtitleVTT(r.Context(), item.Path, trackIndex)
+	vttData, err := h.subtitleVTT(r.Context(), item, trackIndex)
 	if err != nil {
 		h.logger.Error("subtitle extraction failed", "error", err)
 		handlers.RespondError(w, r, http.StatusInternalServerError, "SUBTITLE_ERROR", "failed to extract subtitle")
 		return
 	}
+	defer vttData.Close()
 
 	w.Header().Set("Content-Type", "text/vtt")
 	w.Header().Set("Cache-Control", handlers.CacheControlDailyOpaque)
 	_, _ = io.Copy(w, vttData)
+}
+
+// subtitleVTT devuelve el WebVTT de la pista `trackIndex` del item: de
+// la caché si está, y si no lo extrae (todas las pistas de texto del
+// fichero de golpe cuando hay caché, solo la pedida cuando no).
+func (h *StreamHandler) subtitleVTT(ctx context.Context, item *librarymodel.Item, trackIndex int) (io.ReadCloser, error) {
+	if h.subtitleCacheDir == "" {
+		data, err := stream.ExtractSubtitleVTT(ctx, item.Path, trackIndex)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(data), nil
+	}
+
+	info, err := os.Stat(item.Path)
+	if err != nil {
+		return nil, err
+	}
+	key := subtitleCacheKey(item.Path, info)
+	cached := h.subtitleCachePath(key, trackIndex)
+	if f, err := os.Open(cached); err == nil {
+		return f, nil
+	}
+
+	lock, _ := h.subtitleLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	if f, err := os.Open(cached); err == nil {
+		return f, nil
+	}
+
+	outputs := map[int]string{trackIndex: cached}
+	if streams, err := h.streams.ListByItem(ctx, item.ID); err == nil {
+		for _, s := range streams {
+			if s.StreamType == "subtitle" && !stream.IsImageSubtitleCodec(s.Codec) {
+				outputs[s.StreamIndex] = h.subtitleCachePath(key, s.StreamIndex)
+			}
+		}
+	}
+	if err := h.extractSubtitles(ctx, item.Path, outputs); err != nil {
+		if len(outputs) == 1 {
+			return nil, err
+		}
+		// Alguna pista rara ha roto la pasada conjunta: solo la pedida.
+		h.logger.Warn("batch subtitle extraction failed, retrying single track",
+			"item_id", item.ID, "track", trackIndex, "error", err)
+		if err := h.extractSubtitles(ctx, item.Path, map[int]string{trackIndex: cached}); err != nil {
+			return nil, err
+		}
+	}
+	return os.Open(cached)
+}
+
+func (h *StreamHandler) subtitleCachePath(key string, trackIndex int) string {
+	return filepath.Join(h.subtitleCacheDir, fmt.Sprintf("%s-%d.vtt", key, trackIndex))
+}
+
+// subtitleCacheKey identifica el fichero de origen por ruta, tamaño y
+// mtime: si cambia (re-mux, otra versión) la entrada anterior deja de
+// encontrarse y se vuelve a extraer.
+func subtitleCacheKey(path string, info os.FileInfo) string {
+	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d", path, info.Size(), info.ModTime().UnixNano())))
+	return hex.EncodeToString(sum[:])
 }

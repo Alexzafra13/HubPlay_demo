@@ -155,6 +155,7 @@ func streamResponse(s *librarymodel.MediaStream) map[string]any {
 		"stream_type":  s.StreamType,
 		"codec":        s.Codec,
 		"is_default":   s.IsDefault,
+		"is_forced":    s.IsForced,
 	}
 	if s.Profile != "" {
 		resp["profile"] = s.Profile

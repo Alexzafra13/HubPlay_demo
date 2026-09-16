@@ -42,6 +42,20 @@ func (t torrentLibraryTarget) Scan(ctx context.Context, libraryID string) error 
 	return t.svc.Scan(ctx, libraryID)
 }
 
+// subtitleCacheDir es el hermano del directorio de transcode
+// (`~/.hubplay/cache/subtitles` por defecto). Vacío sin config cargada
+// (tests): el handler extrae en cada petición como siempre.
+func subtitleCacheDir(s ServerDeps) string {
+	if s.Config == nil {
+		return ""
+	}
+	transcode := s.Config.Streaming.EffectiveCacheDir()
+	if transcode == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(transcode), "subtitles")
+}
+
 // mountStreaming registra el surface de player: master playlist HLS,
 // per-quality playlist + segmento, direct play, stop session,
 // subtitles (internos + external providers tipo OpenSubtitles).
@@ -53,7 +67,7 @@ func mountStreaming(r chi.Router, deps Dependencies) {
 		deps.Streaming.StreamManager, deps.Catalog.Items, deps.Catalog.MediaStreams,
 		deps.Catalog.ExternalIDs, deps.Providers.Manager, deps.Catalog.Libraries,
 		deps.Admin.Settings, deps.Server.ServerBaseURL, deps.Infra.Logger,
-	)
+	).WithSubtitleCache(subtitleCacheDir(deps.Server))
 
 	r.Route("/stream/{itemId}", func(r chi.Router) {
 		r.Get("/info", streamHandler.Info)
