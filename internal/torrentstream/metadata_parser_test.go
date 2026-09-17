@@ -90,7 +90,7 @@ func TestQualityScoreOrdering(t *testing.T) {
 	web1080 := parseTitle("Film 1080p WEB-DL x264").QualityScore
 	cam := parseTitle("Film 1080p HDCAM").QualityScore
 
-	if !(bluray4k > web1080) {
+	if bluray4k <= web1080 {
 		t.Errorf("4K BluRay (%d) should outscore 1080p WEB-DL (%d)", bluray4k, web1080)
 	}
 	if cam >= 0 {

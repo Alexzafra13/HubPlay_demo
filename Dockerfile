@@ -23,7 +23,7 @@ RUN pnpm run build
 # ═══════════════════════════════════════════
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
-FROM --platform=$BUILDPLATFORM golang:1.25.11-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS backend
+FROM --platform=$BUILDPLATFORM golang:1.25.13-alpine@sha256:1e0126852075c9c60731c8ba49088448b91f63e2aed97ca9d1a9791622a05946 AS backend
 # GOTOOLCHAIN=auto lets Go fetch the exact toolchain go.mod requires
 # if a future bump outpaces this base image. Plug-and-play for prod.
 ENV GOTOOLCHAIN=auto

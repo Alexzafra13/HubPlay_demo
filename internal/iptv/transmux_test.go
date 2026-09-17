@@ -172,6 +172,16 @@ if [ "$mode" = "codec_crash" ]; then
   exit 1
 fi
 
+# codec_crash_holdfd: like codec_crash, but leaves a background child
+# that inherits stderr and outlives the "ffmpeg" process, so the pipe
+# never reaches EOF on its own. Drives processWatcher's bounded drain.
+if [ "$mode" = "codec_crash_holdfd" ]; then
+  sleep 8 &
+  printf '[hls @ 0x12345] Could not find codec parameters for stream 0 (Video: hevc)\n' >&2
+  printf 'Invalid data found when processing input\n' >&2
+  exit 1
+fi
+
 # crash_then_ok: like codec_crash, but only the FIRST process per
 # session crashes; subsequent ffmpeg invocations behave as mode=ok.
 # Coordinated via a marker file (path in FAKE_FFMPEG_MARKER) so a
@@ -793,10 +803,13 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 	if _, err := m.GetOrStart(ctx, "ch-codec", "http://upstream/codec"); !errors.Is(err, ErrTransmuxFailed) {
 		t.Fatalf("first attempt: expected ErrTransmuxFailed, got %v", err)
 	}
-	// processWatcher promociona async tras cmd.Wait(). Bajo
-	// `-race -coverprofile` se ha observado al watcher preempted >15s
-	// (runs 26152130700 + 26498441669). 30s deja margen suficiente sin
-	// penalizar el happy path (que termina en <1s con CI sano).
+	// processWatcher promociona async tras cmd.Wait(). Los fallos
+	// históricos de este wait (runs 26152130700, 26498441669 y
+	// 35137572041, siempre con mode=direct) no eran un watcher lento:
+	// cmd.StderrPipe() cerraba el pipe dentro de Wait() antes de que
+	// el consumidor leyera la línea de códec, el tail llegaba vacío y
+	// nunca se promocionaba. Hoy el pipe lo posee la sesión (os.Pipe).
+	// 30s sigue siendo un techo holgado que no penaliza el happy path.
 	if !m.WaitForDecodeMode("ch-codec", decodeModeReencode, 30*time.Second) {
 		t.Fatalf("channel not promoted to reencode after codec crash; mode=%s",
 			m.pickDecodeMode("ch-codec"))
@@ -863,6 +876,47 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 	}
 	if got := starts["ok"]; got != 1 {
 		t.Errorf("starts ok: got %d want 1", got)
+	}
+}
+
+// The stderr tail must survive a fast crash even when something inherits
+// ffmpeg's stderr and keeps the pipe open after ffmpeg itself has exited:
+// processWatcher waits a bounded grace for EOF, then closes the read end
+// itself so the session is still evicted and the (already buffered)
+// codec line still drives the reencode promotion.
+func TestTransmuxManager_StderrDrainIsBoundedWhenChildHoldsPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake ffmpeg shim relies on /bin/sh; not available on Windows")
+	}
+	prevGrace := stderrDrainGrace
+	stderrDrainGrace = 200 * time.Millisecond
+	t.Cleanup(func() { stderrDrainGrace = prevGrace })
+
+	m, buf := newTestManagerWithOpts(t, "codec_crash_holdfd", 0, TransmuxManagerConfig{})
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, err := m.GetOrStart(ctx, "ch-holdfd", "http://upstream/holdfd"); !errors.Is(err, ErrTransmuxFailed) {
+		t.Fatalf("expected ErrTransmuxFailed, got %v", err)
+	}
+	// The shim's child holds the pipe for ~8s, longer than both waits
+	// below: promotion + eviction can only happen inside them if the
+	// watcher gave up on EOF after the 200ms grace instead of blocking
+	// on the inherited fd.
+	if !m.WaitForDecodeMode("ch-holdfd", decodeModeReencode, 5*time.Second) {
+		t.Fatalf("channel not promoted to reencode; mode=%s\nlog:\n%s",
+			m.pickDecodeMode("ch-holdfd"), buf.String())
+	}
+	if !m.WaitForActiveSessions(0, 5*time.Second) {
+		t.Fatalf("session not evicted after bounded drain; active=%d", m.ActiveSessions())
+	}
+	if !strings.Contains(buf.String(), "transmux stderr drain timed out") {
+		t.Errorf("expected drain-timeout warning in log; got:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "Could not find codec parameters") {
+		t.Errorf("expected buffered codec line in the logged stderr tail; got:\n%s", buf.String())
 	}
 }
 
@@ -1297,7 +1351,13 @@ func TestTransmuxManager_PreSpawnFailureCountsAsSpawnError(t *testing.T) {
 // ─── PB-28: refcount de viewers — liberar el slot al zapear ───
 
 func TestTransmux_LastViewerLeaveStopsSession(t *testing.T) {
-	m := newTestManager(t, "ok", 100*time.Millisecond)
+	// Idle largo a propósito: el reaper no mira viewers, así que con
+	// 100ms de idle una preempción entre el spawn y ActiveSessions()
+	// recogía la sesión por inactividad y el test fallaba sin relación
+	// con PB-28 (flake observado bajo -race con CPU contendida). Con
+	// 10s la única vía para llegar a 0 sesiones dentro del wait es el
+	// terminate de LeaveViewer, que es justo lo que se verifica.
+	m := newTestManager(t, "ok", 10*time.Second)
 	t.Cleanup(m.Shutdown)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1325,7 +1385,8 @@ func TestTransmux_LastViewerLeaveStopsSession(t *testing.T) {
 // Un Leave con un id NUNCA registrado no puede tumbar la sesión de un
 // cliente legacy (que no manda ?v=).
 func TestTransmux_LeaveUnknownViewerIsNoOp(t *testing.T) {
-	m := newTestManager(t, "ok", 100*time.Millisecond)
+	// Idle largo por el mismo motivo que en LastViewerLeaveStopsSession.
+	m := newTestManager(t, "ok", 10*time.Second)
 	t.Cleanup(m.Shutdown)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

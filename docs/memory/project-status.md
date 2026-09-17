@@ -134,8 +134,10 @@ aviso de códec, y **remux/reencode VOD de torrents a HLS**
 - **Entorno**: con el Go 1.27 que hay en el PATH, `go build ./...` falla
   en `anacrolix/torrent` (`undefined: http2.GoAwayError`): el transport
   http2 de `x/net v0.54` lleva `//go:build !(go1.27 && !http2legacy)`.
-  Compilar SIEMPRE con el 1.25.11 de `~/sdk/go`
+  Compilar SIEMPRE con el Go 1.25 de `~/sdk/go`
   (`export PATH="$HOME/sdk/go/bin:$PATH"`), como dice `conventions.md`.
+  `go.mod` pide ya `1.25.13`; con `GOTOOLCHAIN=auto` el 1.25.11 instalado
+  lo descarga solo.
 - **Identidad de instalación para el descubrimiento LAN**
   (`cmd/hubplay/server_id.go`): `server.instance_id` en app_settings (16
   hex, generado una vez). Se anuncia en mDNS (TXT `id=`), en la respuesta
@@ -144,6 +146,38 @@ aviso de códec, y **remux/reencode VOD de torrents a HLS**
   usa para no listar dos veces un servidor que contesta por dos IPs.
 - Pendiente: desplegar en el servidor de la TV (`192.168.1.100:8097`,
   aún sin la caché ni el id). `GET /items/search?q=Toc,%20toc` devuelve 500.
+
+### CI en rojo (run 1195) — arreglado
+
+Tres jobs fallaban, dos de ellos ya en el run anterior (1194):
+
+- **Test Backend** · `TestTransmuxManager_PromotesToReencodeOnCodecCrash`
+  (`mode=direct` tras 30 s). No era un watcher lento: `cmd.StderrPipe()`
+  hace que `cmd.Wait()` cierre el extremo de lectura nada más reaparse
+  el proceso, y bajo carga lo cerraba ANTES de que la goroutine
+  consumidora leyera la línea de códec → tail vacío →
+  `looksLikeCodecError` falso → sin promoción. Reproducido en local
+  (5/25 con `taskset -c 0` + 3 busy loops; log: `ffmpeg_stderr_tail=""`).
+  Fix en `transmux.go`: pipe propio (`os.Pipe`) en `cmd.Stderr`, el padre
+  cierra su write-end tras `Start`, y `processWatcher` espera al
+  consumidor con gracia acotada (`stderrDrainGrace`, 2 s) antes de cerrar
+  él el read-end. 0/40 fallos tras el fix. Test de regresión:
+  `TestTransmuxManager_StderrDrainIsBoundedWhenChildHoldsPipe`.
+- Mismo paquete: `TestTransmux_LastViewerLeaveStopsSession` y
+  `LeaveUnknownViewerIsNoOp` usaban `IdleTimeout=100ms` y el reaper (que
+  no mira viewers) les recogía la sesión antes de la aserción (5/30 en
+  base bajo contención). Ahora idle de 10 s.
+- **Lint** · De Morgan en `metadata_parser_test.go` + `validateOutboundURL`
+  sin uso en `imaging/safety.go`. `golangci-lint v2.5.0` local: 0 issues.
+- **Vulnerability scan** · 10 findings: 6 de stdlib (`go 1.25.11` →
+  `1.25.13`, también la imagen `golang:1.25.13-alpine` del Dockerfile) y
+  `gorilla/websocket 1.5.3`, `x/image 0.45`, `x/text 0.41`,
+  `pion/dtls 3.1.4`, `pion/stun 3.1.5` (todos transitivos de
+  `anacrolix/torrent`). **No verificado en local**: `vuln.go.dev` está
+  bloqueado por el proxy de la sesión; lo confirma el job de CI.
+- El run 1194 falló además en `TestBus_Unsubscribe_RemovesHandler`
+  ("handler not called within 5s"; `internal/db` tardó 480 s en ese
+  runner). No tocado: flake de runner saturado, no reproducido.
 
 ## 🔭 Estado anterior (2026-06-14, fin de sesión)
 
