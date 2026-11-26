@@ -519,9 +519,29 @@ func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Artwork del episodio (fotograma) y de la serie (póster, fondo,
+	// logo) en una sola consulta: sin esto el rail "A continuación" de
+	// la app de TV salía con tarjetas vacías y el hero en negro. Mismo
+	// patrón fail-soft que ContinueWatching.
+	idSet := make(map[string]struct{}, len(items)*2)
+	for _, item := range items {
+		idSet[item.EpisodeID] = struct{}{}
+		if item.SeriesID != "" {
+			idSet[item.SeriesID] = struct{}{}
+		}
+	}
+	allIDs := make([]string, 0, len(idSet))
+	for id := range idSet {
+		allIDs = append(allIDs, id)
+	}
+	imageMap, err := h.images.GetPrimaryURLs(r.Context(), allIDs)
+	if err != nil {
+		h.logger.Debug("next up: GetPrimaryURLs", "error", err)
+	}
+
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"id":             item.EpisodeID,
 			"episode_title":  item.EpisodeTitle,
 			"season_number":  item.SeasonNumber,
@@ -529,7 +549,27 @@ func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 			"duration_ticks": item.DurationTicks,
 			"series_title":   item.SeriesTitle,
 			"series_id":      item.SeriesID,
-		})
+		}
+		if urls, ok := imageMap[item.EpisodeID]; ok {
+			if u, ok := urls["primary"]; ok {
+				entry["poster_url"] = u.Path
+			}
+			if u, ok := urls["backdrop"]; ok {
+				entry["backdrop_url"] = u.Path
+			}
+		}
+		if seriesImgs, ok := imageMap[item.SeriesID]; ok {
+			if u, ok := seriesImgs["primary"]; ok {
+				entry["series_poster_url"] = u.Path
+			}
+			if u, ok := seriesImgs["backdrop"]; ok {
+				entry["series_backdrop_url"] = u.Path
+			}
+			if u, ok := seriesImgs["logo"]; ok {
+				entry["series_logo_url"] = u.Path
+			}
+		}
+		result = append(result, entry)
 	}
 
 	handlers.RespondData(w, http.StatusOK, result)

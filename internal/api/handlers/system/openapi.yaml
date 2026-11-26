@@ -1140,7 +1140,7 @@ paths:
                 properties:
                   data:
                     type: array
-                    items: { $ref: "#/components/schemas/ItemSummary" }
+                    items: { $ref: "#/components/schemas/NextUpEntry" }
 
   /me/progress/{itemId}:
     parameters:
@@ -2774,6 +2774,25 @@ components:
             total: { type: integer }
             offset: { type: integer }
             limit: { type: integer }
+
+    NextUpEntry:
+      type: object
+      description: |
+        Next episode per followed series. Image paths are present only
+        when the episode / series has that artwork.
+      properties:
+        id:                  { type: string }
+        episode_title:       { type: string }
+        season_number:       { type: integer, nullable: true }
+        episode_number:      { type: integer, nullable: true }
+        duration_ticks:      { type: integer, format: int64 }
+        series_title:        { type: string }
+        series_id:           { type: string }
+        poster_url:          { type: string }
+        backdrop_url:        { type: string }
+        series_poster_url:   { type: string }
+        series_backdrop_url: { type: string }
+        series_logo_url:     { type: string }
 
     ItemSummary:
       type: object

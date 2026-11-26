@@ -718,6 +718,58 @@ func TestProgressHandler_NextUp_ShapesEpisodes(t *testing.T) {
 	}
 }
 
+func TestProgressHandler_NextUp_IncludesArtwork(t *testing.T) {
+	t.Parallel()
+	env := newProgressTestEnv(t)
+	env.userData.nextUpFn = func(_ context.Context, _ string, _ int) ([]*librarymodel.NextUpItem, error) {
+		return []*librarymodel.NextUpItem{
+			{EpisodeID: "ep-1", EpisodeTitle: "Pilot", SeriesTitle: "Show", SeriesID: "series-1"},
+			{EpisodeID: "ep-2", EpisodeTitle: "Bare", SeriesTitle: "Other", SeriesID: "series-2"},
+		}, nil
+	}
+	env.images.primaryURLs = map[string]map[string]librarymodel.PrimaryImageRef{
+		"ep-1": {
+			"primary":  {Path: "/img/ep-still.jpg"},
+			"backdrop": {Path: "/img/ep-still-bd.jpg"},
+		},
+		"series-1": {
+			"primary":  {Path: "/img/series-poster.jpg"},
+			"backdrop": {Path: "/img/series-bd.jpg"},
+			"logo":     {Path: "/img/series-logo.png"},
+		},
+	}
+	rr := env.do(http.MethodGet, "/api/v1/me/next-up", "", defaultClaims())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	var out map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&out)
+	data, _ := out["data"].([]any)
+	if len(data) != 2 {
+		t.Fatalf("want 2 entries, got %d", len(data))
+	}
+	entry := data[0].(map[string]any)
+	want := map[string]string{
+		"poster_url":          "/img/ep-still.jpg",
+		"backdrop_url":        "/img/ep-still-bd.jpg",
+		"series_poster_url":   "/img/series-poster.jpg",
+		"series_backdrop_url": "/img/series-bd.jpg",
+		"series_logo_url":     "/img/series-logo.png",
+	}
+	for k, v := range want {
+		if entry[k] != v {
+			t.Errorf("%s: got %v want %v", k, entry[k], v)
+		}
+	}
+	// Sin artwork: las claves no aparecen (el cliente cae a su placeholder).
+	bare := data[1].(map[string]any)
+	for k := range want {
+		if _, ok := bare[k]; ok {
+			t.Errorf("bare entry should not carry %s: %v", k, bare[k])
+		}
+	}
+}
+
 func TestProgressHandler_NextUp_Unauthenticated(t *testing.T) {
 	t.Parallel()
 	env := newProgressTestEnv(t)
