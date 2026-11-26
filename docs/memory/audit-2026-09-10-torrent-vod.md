@@ -65,13 +65,20 @@ probe, 1 start).
 
 ## 🟢 Bajos
 
-- **T-8 · De-dup de descargas por `src` exacto**: magnet y URL `.torrent`
-  del mismo contenido lanzan dos jobs que copian sobre el mismo destino.
-  Fix propuesto: de-dup por `InfoHash()` tras `addTorrent`.
-- **T-9 · Descargas sin cancelación ni timeout**: swarm muerto ⇒ goroutine,
-  holder y scratch vivos para siempre; `DELETE` responde 409 eternamente.
-  Fix propuesto: ctx por job + `DELETE` cancela activos, o timeout sin
-  progreso.
+- ✅ **T-8 · De-dup de descargas por `src` exacto** (2026-11-26): magnet y
+  URL `.torrent` del mismo contenido lanzaban dos jobs que copiaban sobre
+  el mismo destino. **Fix:** `claimDownload` — tras `addTorrent`, bajo
+  `m.mu`, si otro job activo tiene el mismo infohash el nuevo falla con
+  `ErrDuplicateDownload` sin registrarse como holder. Test:
+  `TestDownload_DuplicateInfoHashIsRejected`.
+- ✅ **T-9 · Descargas sin cancelación ni timeout** (2026-11-26): swarm
+  muerto ⇒ goroutine, holder y scratch vivos para siempre; `DELETE`
+  respondía 409 eternamente. **Fix:** ctx por job; `DELETE` cancela jobs
+  en cola/descargando (409 solo al copiar a la biblioteca);
+  `download_stall_timeout` (30m) sin progreso ⇒ `ErrDownloadStalled`.
+  Tests: `TestDownload_CancelWhileResolvingMetadata`,
+  `TestDownload_RemoveWhileCopyingIsRefused`, `TestDownload_StallTimeout`
+  (cliente real hermético vía seam `tuneClientConfig`).
 - ✅ **T-10 · Alias `bySrc` no registrado** al re-unirse a una sesión ya
   activa por otro `src`. **Fix:** se registra el alias.
 - ✅ **T-11 · `Close`/`Shutdown` no idempotentes** (segundo close del canal
@@ -84,4 +91,4 @@ probe, 1 start).
   inválido → 400, infohash desconocido → 404, mapeo de modos).
 - `fetchTorrentFile` ya no existe; `addTorrentFromURL` con `allowPrivate`
   no tiene test de integración propio (el guard sí, en `imaging`).
-- T-8/T-9 cuando se aborden.
+- ~~T-8/T-9~~ ✅ (`download_lifecycle_test.go`).

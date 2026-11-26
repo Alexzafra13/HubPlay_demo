@@ -1829,5 +1829,15 @@
     "testOk": "Conexión correcta",
     "testFail": "Falló la conexión",
     "add": "Añadir"
+  },
+  "downloads": {
+    "title": "Descargas",
+    "queued": "En cola",
+    "downloading": "Descargando",
+    "copying": "Copiando a la biblioteca",
+    "completed": "Completado",
+    "failed": "Error",
+    "dismiss": "Descartar",
+    "cancel": "Cancelar descarga"
   }
 }

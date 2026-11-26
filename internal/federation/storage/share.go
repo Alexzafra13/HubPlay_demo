@@ -404,8 +404,8 @@ func (r *Repository) attachPrimaryImageColors(ctx context.Context, items []*fede
 //
 // Implemented as raw SQL because sqlc parses neither FTS5 MATCH nor
 // tsvector @@ to_tsquery. Same precedent as item_repository.go's
-// List path. The query parameter is appended with '*' for prefix
-// matching (SQLite); the Postgres variant runs through `toTSQueryPrefix`.
+// List path. The query is sanitised per dialect (`toFTS5Prefix` /
+// `toTSQueryPrefix`): raw user text like "Toc, toc" is FTS syntax.
 //
 // Caller is expected to apply a sensible per-peer limit; the function
 // caps at 100 defensively so a runaway query cannot stream a peer's
@@ -420,9 +420,13 @@ func (r *Repository) SearchSharedItems(ctx context.Context, peerID, query string
 
 	var ftsParam string
 	if r.useSQLite() {
-		ftsParam = query + "*"
+		ftsParam = toFTS5Prefix(query)
 	} else {
 		ftsParam = toTSQueryPrefix(query)
+	}
+	if ftsParam == "" {
+		// Solo puntuación: nada que buscar, y FTS5 rechaza una consulta vacía.
+		return []*federation.SharedItem{}, nil
 	}
 
 	rows, err := r.db.QueryContext(ctx, r.searchSharedItemsSQL, peerID, ftsParam, limit)

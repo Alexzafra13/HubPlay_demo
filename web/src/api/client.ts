@@ -531,7 +531,8 @@ export class ApiClient {
   }
 
   // dismissDownload removes a finished (completed/failed) job from the list
-  // (admin-only). 409 if the job is still in progress.
+  // or cancels a queued/downloading one (admin-only). 409 while it is being
+  // copied to the library.
   async dismissDownload(id: string): Promise<void> {
     await this.request<void>("DELETE", `/torrent/downloads/${encodeURIComponent(id)}`);
   }

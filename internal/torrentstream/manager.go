@@ -47,9 +47,18 @@ var (
 	ErrMetadataTimeout = errors.New("torrentstream: timed out resolving metadata")
 	// ErrNoFiles is returned when a resolved torrent has no files.
 	ErrNoFiles = errors.New("torrentstream: torrent has no files")
-	// ErrDownloadActive se devuelve al intentar descartar un job que sigue
-	// en vuelo (hay que dejarlo terminar o, en el futuro, cancelarlo).
-	ErrDownloadActive = errors.New("torrentstream: download still in progress")
+	// ErrDownloadActive se devuelve al intentar descartar un job que está
+	// copiando a la biblioteca: cancelarlo dejaría ficheros a medias allí.
+	ErrDownloadActive = errors.New("torrentstream: download is copying to the library")
+	// ErrDownloadCanceled: el admin canceló el job desde el panel.
+	ErrDownloadCanceled = errors.New("torrentstream: download canceled")
+	// ErrDownloadStalled: el job no avanzó ni un byte en DownloadStallTimeout
+	// (swarm muerto). Sin esto la goroutine, el holder y el scratch vivían
+	// para siempre.
+	ErrDownloadStalled = errors.New("torrentstream: download stalled (no progress)")
+	// ErrDuplicateDownload: ya hay un job activo para el mismo infohash
+	// (p.ej. magnet y .torrent del mismo contenido). Se mantiene el primero.
+	ErrDuplicateDownload = errors.New("torrentstream: already downloading this torrent")
 )
 
 // Options configures the manager. Zero values are filled with sane
@@ -61,6 +70,9 @@ type Options struct {
 	IdleTimeout     time.Duration // close a session after this long without reads (default 5m)
 	Readahead       int64         // sequential read-ahead window in bytes (default 16 MiB)
 	MetadataTimeout time.Duration // wait for magnet→info (default 60s)
+	// DownloadStallTimeout falla una descarga-a-biblioteca que lleva este
+	// tiempo sin completar ni un byte (default 30m).
+	DownloadStallTimeout time.Duration
 	// AllowPrivateUpstreams relaja el guard SSRF al bajar un .torrent por
 	// http(s): permite hosts privados/LAN (p.ej. el Prowlarr empaquetado en
 	// docker, que resuelve a una IP privada). Opt-in del operador. Default
@@ -83,6 +95,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MetadataTimeout <= 0 {
 		o.MetadataTimeout = 60 * time.Second
+	}
+	if o.DownloadStallTimeout <= 0 {
+		o.DownloadStallTimeout = 30 * time.Minute
 	}
 	if o.DataDir == "" {
 		o.DataDir = filepath.Join(os.TempDir(), "hubplay-torrent")
@@ -121,7 +136,15 @@ type Manager struct {
 	closeOnce  sync.Once
 	closeErr   error
 	now        func() time.Time // injectable for tests
+	// downloadTick: cadencia del bucle de progreso de las descargas
+	// (default 1s; los tests la bajan).
+	downloadTick time.Duration
 }
+
+// tuneClientConfig es un seam de tests (package-level, ver conventions.md):
+// los tests lo usan para un cliente hermético (sin DHT ni trackers, puerto
+// efímero). En producción no hace nada.
+var tuneClientConfig = func(*torrent.ClientConfig) {}
 
 // New builds a Manager and starts its idle reaper. Returns ErrDisabled
 // (and a nil Manager) when opts.Enabled is false so the caller can simply
@@ -142,6 +165,7 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 	cfg.DataDir = opts.DataDir
 	cfg.DisableIPv6 = true // many container hosts have no IPv6 socket family
 	cfg.Seed = false       // we are a leech-to-watch client, not a seeder
+	tuneClientConfig(cfg)
 
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
@@ -165,6 +189,7 @@ func New(opts Options, logger *slog.Logger) (*Manager, error) {
 		reaperStop:   make(chan struct{}),
 		reaperDone:   make(chan struct{}),
 		now:          time.Now,
+		downloadTick: time.Second,
 	}
 	go m.reapLoop()
 	return m, nil
@@ -424,10 +449,12 @@ func (m *Manager) pruneDownloads(now time.Time) {
 	}
 }
 
-// RemoveDownload descarta un job terminal del listado (el "×" del panel). No
-// permite descartar uno en vuelo — para eso habría que cancelarlo, que es
-// otra feature. Devuelve ErrDownloadActive si sigue activo, o (false, nil) si
-// el id no existe.
+// RemoveDownload quita un job del listado (el "×" del panel). Si es
+// terminal solo lo descarta; si está en cola o descargando lo CANCELA (su
+// goroutine suelta el torrent y limpia el scratch al salir) y desaparece
+// del listado de inmediato. Un job copiando a la biblioteca no se toca
+// (ErrDownloadActive): está a punto de acabar y cortarlo dejaría ficheros
+// a medias en la biblioteca. (false, nil) si el id no existe.
 func (m *Manager) RemoveDownload(id string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -435,8 +462,12 @@ func (m *Manager) RemoveDownload(id string) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	if s := j.get(); isActiveDownload(s.Status) {
+	switch s := j.get(); {
+	case s.Status == DownloadCopying:
 		return false, ErrDownloadActive
+	case isActiveDownload(s.Status):
+		j.markCanceled()
+		j.cancel()
 	}
 	delete(m.downloads, id)
 	return true, nil

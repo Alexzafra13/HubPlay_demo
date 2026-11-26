@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
@@ -206,8 +207,14 @@ func (r *ItemRepository) List(ctx context.Context, filter librarymodel.ItemFilte
 	// Búsqueda full-text: SQLite usa FTS5, Postgres usa tsvector.
 	if filter.Query != "" {
 		if r.useSQLite() {
-			conds = append(conds, "rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)")
-			args = append(args, filter.Query+"*")
+			if fts := toFTS5Prefix(filter.Query); fts != "" {
+				conds = append(conds, "rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)")
+				args = append(args, fts)
+			} else {
+				// Solo puntuación: no hay nada que buscar (igual que el
+				// tsquery vacío de Postgres, que no casa con nada).
+				conds = append(conds, "0 = 1")
+			}
 		} else {
 			conds = append(conds, "search_vector @@ to_tsquery('simple', ?)")
 			args = append(args, toTSQueryPrefix(filter.Query))
@@ -855,6 +862,34 @@ func itemsFromPgChildrenRows(rows []sqlc_pg.GetItemChildrenRow) []*librarymodel.
 		out[i] = &item
 	}
 	return out
+}
+
+// toFTS5Prefix convierte texto libre en una consulta FTS5 segura para
+// `items_fts MATCH ?`. La entrada cruda no vale: `,`, `"`, `(`, `-`, `:`,
+// `^`, `+` o palabras como `AND`/`NOT` son sintaxis de FTS5 y provocan un
+// error SQL (→ 500; caso real: "Toc, toc"). Troceamos como el tokenizador
+// `unicode61` de la tabla (letras, números y marcas forman token; todo lo
+// demás separa), entrecomillamos cada token para que nunca se lea como
+// operador y marcamos el último como prefijo para la búsqueda mientras se
+// escribe: `"toc" "toc"*`. Devuelve "" si no queda ningún token.
+func toFTS5Prefix(q string) string {
+	tokens := strings.FieldsFunc(q, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && !unicode.IsMark(r)
+	})
+	if len(tokens) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, t := range tokens {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteByte('"')
+		b.WriteString(t)
+		b.WriteByte('"')
+	}
+	b.WriteByte('*')
+	return b.String()
 }
 
 // toTSQueryPrefix turns a free-text search into a Postgres tsquery

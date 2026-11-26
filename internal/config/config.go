@@ -190,6 +190,11 @@ type TorrentConfig struct {
 	// (magnet → info) antes de fallar. Default 60s.
 	MetadataTimeout time.Duration `yaml:"metadata_timeout"`
 
+	// DownloadStallTimeout: una descarga-a-biblioteca que lleva este tiempo
+	// sin completar ni un byte (swarm muerto) se da por fallida y suelta su
+	// scratch. Default 30m.
+	DownloadStallTimeout time.Duration `yaml:"download_stall_timeout"`
+
 	// DisableReencode desactiva el camino de transcode pesado (reencode
 	// HEVC/AV1/XviD → H.264). Default false (reencode activo). Ponlo true en
 	// hosts flojos: esas fuentes se marcan como no reproducibles en vez de
@@ -517,11 +522,12 @@ func defaults() *Config {
 			},
 		},
 		Torrent: TorrentConfig{
-			Enabled:         false, // opt-in: trae cliente torrent + rutas
-			MaxSessions:     4,
-			IdleTimeout:     5 * time.Minute,
-			ReadaheadBytes:  16 << 20,
-			MetadataTimeout: 60 * time.Second,
+			Enabled:              false, // opt-in: trae cliente torrent + rutas
+			MaxSessions:          4,
+			IdleTimeout:          5 * time.Minute,
+			ReadaheadBytes:       16 << 20,
+			MetadataTimeout:      60 * time.Second,
+			DownloadStallTimeout: 30 * time.Minute,
 			Torznab: TorznabConfig{
 				CacheTTL: 20 * time.Minute,
 			},

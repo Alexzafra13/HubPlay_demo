@@ -818,3 +818,52 @@ func TestItemRepository_LatestSeriesByActivity(t *testing.T) {
 		t.Errorf("Mr Robot LatestActivityAt = %v, want ~%v", rows[1].LatestActivityAt, wantActivity)
 	}
 }
+
+// Regresión: el texto del usuario iba crudo al MATCH de FTS5 y la
+// puntuación/palabras reservadas daban error SQL → 500 en
+// /items/search (caso real: "Toc, toc").
+func TestItemRepository_List_FTSSearch_PunctuationIsNotSyntax(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
+	seedLibraryForItems(t, libRepo)
+
+	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "Toc, toc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m2", "lib-1", "Mission: Impossible")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m3", "lib-1", "Spider-Man")); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		query string
+		want  int
+	}{
+		{"Toc, toc", 1},
+		{"toc,", 1},
+		{"Mission: Imp", 1},
+		{"spider-man", 1},
+		{`"unbalanced`, 0},
+		{"(Toc", 1},
+		{"toc AND", 0}, // AND es un token más, no un operador
+		{"NOT toc", 0},
+		{"^toc", 1},
+		{"Spider + Man", 1},
+		{"Pokémon", 0},
+		{",.;:!?", 0}, // solo puntuación: sin resultados, sin error
+	}
+	for _, tc := range cases {
+		t.Run(tc.query, func(t *testing.T) {
+			_, total, err := repo.List(context.Background(), librarymodel.ItemFilter{Query: tc.query})
+			if err != nil {
+				t.Fatalf("List(%q): %v", tc.query, err)
+			}
+			if total != tc.want {
+				t.Errorf("List(%q) total = %d, want %d", tc.query, total, tc.want)
+			}
+		})
+	}
+}

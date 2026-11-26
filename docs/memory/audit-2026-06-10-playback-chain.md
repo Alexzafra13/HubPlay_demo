@@ -401,6 +401,14 @@ por el mismo carril (prefijo de label). Tests:
 
 ## Gaps de test (consolidado)
 
+> **Estado verificado 2026-11-26:** 1 abierto (solo el VOD de torrent tiene
+> integración con ffmpeg real, `stream/transcode` no); 2 ✅
+> (`decision_test.go` cubre `"matroska,webm"`); 3 ✅ (`useHls.test.ts`);
+> 4 abierto (sin tests de `rewriteHLSPlaylist`/`resolveURL`); 5 parcial
+> (Segment: unauth/404/nombre inválido ✅; seek-restart, 429 y
+> Stop↔Restart no); 6 parcial (ACL ✅ en `item_trickplay_acl_test.go`;
+> TryLock/regeneración no); 7 ✅.
+
 1. **0 tests de integración con ffmpeg real** (ni con build tag): nada
    verifica que los args *arranquen* — PB-5 (VAAPI) y PB-20 (`-map` fuera
    de rango) serían triviales de cazar transcodeando 2s de `testsrc`.

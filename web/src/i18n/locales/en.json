@@ -1829,5 +1829,15 @@
     "testOk": "Connection OK",
     "testFail": "Connection failed",
     "add": "Add"
+  },
+  "downloads": {
+    "title": "Downloads",
+    "queued": "Queued",
+    "downloading": "Downloading",
+    "copying": "Copying to library",
+    "completed": "Completed",
+    "failed": "Error",
+    "dismiss": "Dismiss",
+    "cancel": "Cancel download"
   }
 }

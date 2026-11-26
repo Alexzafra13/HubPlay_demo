@@ -99,6 +99,20 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 		t.Errorf("expected library_id=lib-shared on hit, got %q", hits[0].LibraryID)
 	}
 
+	// Puntuación en la consulta: antes era sintaxis FTS5 → error SQL.
+	for _, q := range []string{"Federation, Forever", `"Federation`, "federation:"} {
+		got, err := fedRepo.SearchSharedItems(ctx, "peer-A", q, 10)
+		if err != nil {
+			t.Fatalf("SearchSharedItems(%q): %v", q, err)
+		}
+		if len(got) != 1 || got[0].ID != "i-shared-match" {
+			t.Fatalf("SearchSharedItems(%q) = %#v, want only i-shared-match", q, got)
+		}
+	}
+	if got, err := fedRepo.SearchSharedItems(ctx, "peer-A", ",;!", 10); err != nil || len(got) != 0 {
+		t.Fatalf("punctuation-only query: hits=%d err=%v, want 0/nil", len(got), err)
+	}
+
 	// â”€â”€ Empty query short-circuits without touching FTS. â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	empty, err := fedRepo.SearchSharedItems(ctx, "peer-A", "", 10)
 	if err != nil {
