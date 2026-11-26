@@ -2,6 +2,8 @@ package db_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"hubplay/internal/db"
@@ -83,5 +85,49 @@ func TestItemRepository_IngestItem_RollsBackOnBadStream(t *testing.T) {
 	_, err := itemRepo.GetByID(context.Background(), "item-bad")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("item must be rolled back (not found), got err=%v", err)
+	}
+}
+
+// TestItemRepository_IngestItem_ConcurrentWritersDontFail: dos bibliotecas
+// escaneando a la vez (o un escaneo y una importación de canales) abren
+// transacciones de escritura concurrentes. Con BEGIN DEFERRED, SQLite
+// devolvía SQLITE_BUSY al instante sin esperar busy_timeout y el scanner
+// se saltaba el fichero (visto en el E2E: "create item: database is
+// locked"). Con _txlock=immediate esperan su turno. Sin el fix fallan
+// varias inserciones en cada ejecución.
+func TestItemRepository_IngestItem_ConcurrentWritersDontFail(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
+	seedLibraryForItems(t, libRepo)
+
+	const writers, perWriter = 4, 150
+	var wg sync.WaitGroup
+	errs := make(chan error, writers*perWriter)
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				item := newTestItem(fmt.Sprintf("conc-%d-%d", w, i), "lib-1", fmt.Sprintf("Title %d %d", w, i))
+				item.Path = fmt.Sprintf("/media/%d/%d.mkv", w, i)
+				if err := repo.IngestItem(context.Background(), item, nil, nil); err != nil {
+					errs <- err
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+
+	failed := 0
+	for err := range errs {
+		if failed < 3 {
+			t.Errorf("ingest concurrente: %v", err)
+		}
+		failed++
+	}
+	if failed > 0 {
+		t.Fatalf("%d de %d inserciones fallaron", failed, writers*perWriter)
 	}
 }
