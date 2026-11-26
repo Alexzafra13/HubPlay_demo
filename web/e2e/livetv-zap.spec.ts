@@ -54,6 +54,9 @@ function startUpstream(): Promise<{ url: string; close: () => void }> {
 
 /** El <video> del canal (ChannelPlayer lo etiqueta con el nombre)
  *  reproduce de verdad — la definición de "sin spinner colgado". */
+/** Peticiones a /api/ y errores de consola del test en curso (ver test). */
+const netLog: string[] = [];
+
 async function waitChannelPlaying(page: Page, name: string): Promise<void> {
   try {
     await page.waitForFunction(
@@ -85,7 +88,8 @@ async function waitChannelPlaying(page: Page, name: string): Promise<void> {
         error: v.error ? `${v.error.code} ${v.error.message}` : null,
       };
     }, name);
-    throw new Error(`canal "${name}" sin reproducir: ${JSON.stringify(state)}`, { cause: err });
+    const trail = netLog.filter((l) => !l.includes("/events")).slice(-40).join("\n  ");
+    throw new Error(`canal "${name}" sin reproducir: ${JSON.stringify(state)}\n  ${trail}`, { cause: err });
   }
 }
 
@@ -107,6 +111,26 @@ test.describe("smoke: zapping Live TV", () => {
   });
 
   test("zapear 3 canales sin spinner colgado", async ({ page }) => {
+    // Rastro de red de la API para el diagnóstico de waitChannelPlaying:
+    // distingue "el player nunca pidió el manifest" de "el server no
+    // contestó" o "contestó con error".
+    netLog.length = 0;
+    const t0 = Date.now();
+    const stamp = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+    const short = (u: string) => u.replace(/^https?:\/\/[^/]+/, "");
+    page.on("request", (r) => {
+      if (r.url().includes("/api/")) netLog.push(`${stamp()} → ${r.method()} ${short(r.url())}`);
+    });
+    page.on("response", (r) => {
+      if (r.url().includes("/api/")) netLog.push(`${stamp()} ← ${r.status()} ${short(r.url())}`);
+    });
+    page.on("requestfailed", (r) => {
+      if (r.url().includes("/api/")) netLog.push(`${stamp()} ✗ ${r.failure()?.errorText} ${short(r.url())}`);
+    });
+    page.on("console", (m) => {
+      if (m.type() === "error" || m.type() === "warning") netLog.push(`${stamp()} console.${m.type()}: ${m.text().slice(0, 200)}`);
+    });
+
     await loginViaUI(page, server);
     await page.goto(`${server.baseURL}/live-tv`);
 
