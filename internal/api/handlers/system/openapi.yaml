@@ -1816,6 +1816,41 @@ paths:
                   total: { type: integer }
                   from_cache: { type: boolean, description: "true when served from local cache (peer offline or fresh-enough)" }
 
+  /me/peers/{peerID}/items/{itemId}/children:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [federation]
+      summary: Seasons of a shared series, or episodes of a shared season
+      description: |
+        Live call to the peer (no cache). The peer applies the same ACL
+        as the poster route (`can_browse` on the item's library) and
+        answers 404 both for a missing item and for one it does not
+        share. Only seasons and episodes are returned, in season /
+        episode order. A peer that predates this endpoint answers 404,
+        surfaced here as 502.
+      responses:
+        "200":
+          description: Children
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/PeerItem" }
+                      total: { type: integer }
+        "502":
+          description: Peer unreachable, or it does not share / know the item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /me/peers/{peerID}/items/{itemId}/poster:
     parameters:
       - { name: peerID, in: path, required: true, schema: { type: string } }
@@ -3066,6 +3101,9 @@ components:
         year: { type: integer, nullable: true }
         overview: { type: string }
         poster_url: { type: string, nullable: true, description: "Proxied via origin — never the peer's URL directly" }
+        season_number: { type: integer, description: "Seasons and episodes only (children listing)" }
+        episode_number: { type: integer, description: "Episodes only (children listing)" }
+        duration_ticks: { type: integer, format: int64, description: "Episodes only; 100 ns ticks" }
 
     # ─── Live TV ─────────────────────────────────────────────────────
     Channel:

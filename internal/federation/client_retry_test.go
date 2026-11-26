@@ -338,3 +338,52 @@ func TestProxyPeerItemPoster_ForwardsWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestFetchPeerItemChildren_DecodesNumbersAndEscapesID: el id viaja
+// escapado (nunca sale de /peer/items/{id}/children) y los números de
+// temporada/episodio llegan intactos, la temporada 0 incluida.
+func TestFetchPeerItemChildren_DecodesNumbersAndEscapesID(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"items":[
+			{"id":"e1","type":"episode","title":"Piloto","season_number":0,"episode_number":1,"duration_ticks":27000000000,"has_poster":true}
+		],"total":1}`)
+	}))
+	defer srv.Close()
+
+	mgr := newRetryTestManager(t, srv)
+	items, err := mgr.FetchPeerItemChildren(context.Background(), "peer-b", "s/../x")
+	if err != nil {
+		t.Fatalf("FetchPeerItemChildren: %v", err)
+	}
+	if gotURI != "/api/v1/peer/items/s%2F..%2Fx/children" {
+		t.Errorf("request = %q", gotURI)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	e := items[0]
+	if e.SeasonNumber == nil || *e.SeasonNumber != 0 || e.EpisodeNumber == nil || *e.EpisodeNumber != 1 {
+		t.Errorf("numbers = %v/%v, want 0/1", e.SeasonNumber, e.EpisodeNumber)
+	}
+	if e.DurationTicks != 27000000000 || !e.HasPoster {
+		t.Errorf("episode = %+v", e)
+	}
+}
+
+// Un peer antiguo sin el endpoint responde 404: es un error, no una lista vacía.
+func TestFetchPeerItemChildren_OldPeer404IsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"NOT_FOUND","message":"no route"}}`)
+	}))
+	defer srv.Close()
+
+	mgr := newRetryTestManager(t, srv)
+	if _, err := mgr.FetchPeerItemChildren(context.Background(), "peer-b", "s1"); err == nil {
+		t.Fatal("want error for 404")
+	}
+}

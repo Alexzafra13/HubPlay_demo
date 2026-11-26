@@ -66,6 +66,10 @@ type remoteSharedItem struct {
 	// identically to "no server palette".
 	PosterColor      string `json:"poster_color,omitempty"`
 	PosterColorMuted string `json:"poster_color_muted,omitempty"`
+	// Temporadas y episodios (GET /peer/items/{id}/children).
+	SeasonNumber  *int  `json:"season_number,omitempty"`
+	EpisodeNumber *int  `json:"episode_number,omitempty"`
+	DurationTicks int64 `json:"duration_ticks,omitempty"`
 }
 
 type remoteItemsResponse struct {
@@ -138,6 +142,54 @@ func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*Sha
 type SharedLibraryWithPeer struct {
 	Peer    *Peer
 	Library *SharedLibrary
+}
+
+// FetchPeerItemChildren pide al peer las temporadas de una serie o los
+// episodios de una temporada que nos comparte. Sin caché: es una vista
+// de detalle, pequeña, y la caché de catálogo es una foto por
+// biblioteca (meter episodios ahí los mezclaría con el grid). Un peer
+// antiguo sin el endpoint responde 404 y el error sube tal cual.
+func (m *Manager) FetchPeerItemChildren(ctx context.Context, peerID, itemID string) ([]*SharedItem, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return nil, fmt.Errorf("peer %s not paired", peerID)
+	}
+	url, err := joinBaseURL(peer.BaseURL, "/api/v1/peer/items/"+neturl.PathEscape(itemID)+"/children")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "children")
+	if err != nil {
+		return nil, fmt.Errorf("fetch children from peer %s: %w", peerID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodeRemoteError(resp)
+	}
+	var wire remoteItemsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode children: %w", err)
+	}
+	out := make([]*SharedItem, 0, len(wire.Items))
+	for _, w := range wire.Items {
+		out = append(out, &SharedItem{
+			ID:            w.ID,
+			Type:          w.Type,
+			Title:         w.Title,
+			Year:          w.Year,
+			Overview:      w.Overview,
+			HasPoster:     w.HasPoster,
+			LibraryID:     w.LibraryID,
+			SeasonNumber:  w.SeasonNumber,
+			EpisodeNumber: w.EpisodeNumber,
+			DurationTicks: w.DurationTicks,
+		})
+	}
+	return out, nil
 }
 
 // FetchPeerItems hits the remote's paginated catalog browse.

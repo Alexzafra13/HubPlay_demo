@@ -266,6 +266,7 @@ var outOfScopeExact = map[string]string{
 	"GET /peer/stream/session/{sessionId}/subtitles":              "p2p subtitle list (origin side)",
 	"GET /peer/stream/session/{sessionId}/subtitles/{trackIndex}": "p2p subtitle WebVTT (origin side)",
 	"GET /peer/items/{itemId}/poster":                             "p2p poster bytes (origin side)",
+	"GET /peer/items/{itemId}/children":                           "p2p seasons/episodes of a shared item",
 
 	// ── Legacy global SSE (replaced by /me/events) ───────────────────
 	"GET /events": "legacy unscoped SSE; spec only documents /me/events",

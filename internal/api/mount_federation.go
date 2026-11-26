@@ -97,6 +97,13 @@ func mountFederationPublic(r chi.Router, deps Dependencies, fedImgSrv *media.Ima
 			fedImg := fedhandler.NewFederationImageHandler(deps.Federation.Manager, deps.Catalog.Items, deps.Catalog.Images, fedImgSrv, deps.Infra.Logger)
 			r.Get("/peer/items/{itemId}/poster", fedImg.ItemPoster)
 		}
+		// Temporadas de una serie / episodios de una temporada
+		// compartidas. Mismo ACL que el póster (can_browse sobre la
+		// biblioteca del item); sin esto un peer solo veía la raíz.
+		if deps.Catalog.Items != nil {
+			fedChildren := fedhandler.NewFederationChildrenHandler(deps.Federation.Manager, deps.Catalog.Items, deps.Catalog.Images, deps.Infra.Logger)
+			r.Get("/peer/items/{itemId}/children", fedChildren.ItemChildren)
+		}
 	})
 }
 
@@ -172,6 +179,8 @@ func mountAdminAuthAndFederation(r chi.Router, deps Dependencies) {
 		// JWT. Same-origin (no CORS), y el peer nunca ve la IP /
 		// UA del usuario.
 		r.Get("/{peerID}/items/{itemId}/poster", mePeers.ProxyPeerItemPoster)
+		// Temporadas / episodios de una serie compartida (sin caché).
+		r.Get("/{peerID}/items/{itemId}/children", mePeers.BrowsePeerItemChildren)
 		// Streaming proxy (Phase 5). El HLS player del usuario
 		// sólo habla con nosotros; proxieamos los bytes del peer
 		// con nuestro peer JWT.

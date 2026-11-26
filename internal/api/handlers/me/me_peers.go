@@ -154,6 +154,10 @@ type peerItemWire struct {
 	Overview       string           `json:"overview,omitempty"`
 	PosterURL      string           `json:"poster_url,omitempty"`
 	BackdropColors *peerItemPalette `json:"backdrop_colors,omitempty"`
+	// Solo en temporadas y episodios (BrowsePeerItemChildren).
+	SeasonNumber  *int  `json:"season_number,omitempty"`
+	EpisodeNumber *int  `json:"episode_number,omitempty"`
+	DurationTicks int64 `json:"duration_ticks,omitempty"`
 }
 
 // peerItemPalette mirrors the local `backdrop_colors` wire shape so
@@ -230,6 +234,54 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 			"items":      out,
 			"total":      result.Total,
 			"from_cache": result.FromCache,
+		},
+	})
+}
+
+// BrowsePeerItemChildren lista las temporadas de una serie de un peer,
+// o los episodios de una temporada, para poder entrar en ella y
+// reproducir un episodio (el stream federado ya acepta su id: el ACL
+// del peer va por biblioteca). Mismo envoltorio que BrowsePeerItems,
+// sin `from_cache`: no se cachea.
+//
+// GET /api/v1/me/peers/{peerID}/items/{itemId}/children
+func (h *MePeersHandler) BrowsePeerItemChildren(w http.ResponseWriter, r *http.Request) {
+	peerID := handlers.RequireParam(w, r, "peerID")
+	if peerID == "" {
+		return
+	}
+	itemID := handlers.RequireParam(w, r, "itemId")
+	if itemID == "" {
+		return
+	}
+	children, err := h.mgr.FetchPeerItemChildren(r.Context(), peerID, itemID)
+	if err != nil {
+		h.logger.Warn("federation: browse peer item children",
+			"peer_id", peerID, "item_id", itemID, "error", err)
+		handlers.RespondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
+		return
+	}
+	out := make([]peerItemWire, 0, len(children))
+	for _, it := range children {
+		row := peerItemWire{
+			ID:            it.ID,
+			Type:          it.Type,
+			Title:         it.Title,
+			Year:          it.Year,
+			Overview:      it.Overview,
+			SeasonNumber:  it.SeasonNumber,
+			EpisodeNumber: it.EpisodeNumber,
+			DurationTicks: it.DurationTicks,
+		}
+		if it.HasPoster {
+			row.PosterURL = "/api/v1/me/peers/" + peerID + "/items/" + it.ID + "/poster"
+		}
+		out = append(out, row)
+	}
+	handlers.RespondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items": out,
+			"total": len(out),
 		},
 	})
 }

@@ -86,6 +86,12 @@ type SharedItem struct {
 	// migration 014; the consumer falls back to runtime extraction.
 	PosterColor      string `json:"poster_color,omitempty"`
 	PosterColorMuted string `json:"poster_color_muted,omitempty"`
+	// Solo en temporadas y episodios (GET /peer/items/{id}/children):
+	// el consumidor ordena y rotula "T1 · E3" sin pedir el detalle.
+	// Punteros para distinguir la temporada 0 (especiales) de "sin dato".
+	SeasonNumber  *int  `json:"season_number,omitempty"`
+	EpisodeNumber *int  `json:"episode_number,omitempty"`
+	DurationTicks int64 `json:"duration_ticks,omitempty"`
 }
 
 // CachedItem extends SharedItem with the peer + library it belongs
