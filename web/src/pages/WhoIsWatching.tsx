@@ -22,7 +22,7 @@
 // ambient — a soft radial bleed in that colour follows the cursor.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { m } from "framer-motion";
 import { LogOut, Pencil } from "lucide-react";
@@ -39,6 +39,7 @@ import { useAuthStore } from "@/store/auth";
 import { Spinner } from "@/components/common";
 import { avatarColorForUser } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
+import { safeReturnTo } from "@/utils/returnTo";
 import { BrandWordmark } from "@/components/layout/BrandWordmark";
 
 // Minimum posters the catalogue must surface before we promote the
@@ -57,6 +58,9 @@ export default function WhoIsWatching() {
   const { data: me } = useMe();
   const { user, refreshMe, logout: clearLocalAuth } = useAuthStore();
   const navigate = useNavigate();
+  // Destino tras elegir perfil: lo que el usuario pidió antes del login
+  // (p.ej. /link?code=… del QR) o "/" — ver utils/returnTo.ts.
+  const returnTo = safeReturnTo(useLocation().state);
   const switchProfile = useSwitchProfile();
   const logoutMutation = useLogout();
 
@@ -91,9 +95,9 @@ export default function WhoIsWatching() {
 
   useEffect(() => {
     if (!isLoading && !error && profiles && profiles.length <= 1) {
-      navigate("/", { replace: true });
+      navigate(returnTo, { replace: true });
     }
-  }, [isLoading, error, profiles, navigate]);
+  }, [isLoading, error, profiles, navigate, returnTo]);
 
   // The hovered profile drives the page-level ambient tint behind
   // the picker. Computed up here (before the early returns below)
@@ -174,12 +178,12 @@ export default function WhoIsWatching() {
     setPinAttempting(true);
     try {
       if (profile.id === user?.id) {
-        navigate("/", { replace: true });
+        navigate(returnTo, { replace: true });
         return;
       }
       await switchProfile.mutateAsync({ profileId: profile.id, pin: p });
       await refreshMe?.();
-      navigate("/", { replace: true });
+      navigate(returnTo, { replace: true });
     } catch {
       setPinError(t("whoIsWatching.errorWrongPin"));
       setPin("");

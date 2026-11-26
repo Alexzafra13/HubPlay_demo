@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -67,6 +68,11 @@ type Manager struct {
 	// forceDirectPlayLookup es el hook opcional a runtime settings para
 	// `playback.force_direct_play`. Nil-safe.
 	forceDirectPlayLookup func(context.Context) bool
+	// keyframes indexa los ficheros para el remux por segmentos
+	// (remux.go). Nil = desactivado: todo DirectStream va por el ffmpeg
+	// continuo con manifest sintético (los tests construyen el Manager
+	// sin él).
+	keyframes *KeyframeStore
 }
 
 // ManagedSession envuelve una sesión de transcoding con tracking de acceso.
@@ -189,6 +195,13 @@ func NewManager(deps Deps) *Manager {
 		hwAccel:   hwResult,
 		clock:     clk,
 	}
+	// Caché de índices de keyframes, hermana de la de transcode (igual
+	// que la de subtítulos): sobrevive a las sesiones.
+	keyframeDir := ""
+	if cacheDir != "" {
+		keyframeDir = filepath.Join(filepath.Dir(cacheDir), "keyframes")
+	}
+	m.keyframes = NewKeyframeStore(keyframeDir, "", logger)
 
 	if deps.Metrics != nil {
 		m.metrics = deps.Metrics
@@ -379,6 +392,15 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 		return nil, err
 	}
 
+	// Remux con índice de keyframes: segmentos exactos e independientes.
+	// Sin índice a tiempo, el ffmpeg continuo de siempre (la indexación
+	// sigue en segundo plano para la próxima vez).
+	if decision.CopyVideo && burnSub == nil {
+		if ms := m.trySegmentedRemux(ctx, key, userID, item, mediaStreams, audioStreamIndex, decision); ms != nil {
+			return ms, nil
+		}
+	}
+
 	// Arrancar transcode/remux.
 	return m.spawnTranscodeSession(key, userID, itemID, item.Path, audioStreamIndex, burnSub, decision, startTime)
 }
@@ -541,6 +563,126 @@ func (m *Manager) buildDirectPlaySession(key, userID, itemID string, decision Pl
 	}
 }
 
+// remuxIndexWait es lo máximo que el primer play de un fichero sin
+// indexar espera al índice de keyframes antes de caer al remux continuo.
+// Ficheros pequeños/medianos en SSD se indexan dentro; los enormes en
+// disco duro no, y quedan listos para la siguiente reproducción (además
+// /stream/{id}/info lo precalienta).
+const remuxIndexWait = 3 * time.Second
+
+// remuxSegmentTarget es la duración mínima de cada segmento del remux
+// por segmentos (el corte es el primer keyframe a partir de ahí).
+const remuxSegmentTarget = 6.0
+
+// WarmKeyframes lanza en segundo plano la indexación de keyframes del
+// fichero si aún no está hecha. Lo llama /stream/{id}/info, que los
+// clientes piden justo antes de reproducir.
+func (m *Manager) WarmKeyframes(path string) {
+	if m.keyframes != nil && path != "" {
+		m.keyframes.Warm(path)
+	}
+}
+
+// defaultAudioOrdinal devuelve el índice por tipo de la pista de audio
+// que suena: la pedida o, si no, la misma que evalúa Decide (pickStreams:
+// la marcada por defecto o la primera). -1 si no hay audio. Mapearla
+// explícitamente mantiene cada segmento coherente con la decisión.
+func defaultAudioOrdinal(streams []*librarymodel.MediaStream, requested int) int {
+	if requested >= 0 {
+		return requested
+	}
+	ord, chosen := 0, -1
+	for _, s := range streams {
+		if s.StreamType != "audio" {
+			continue
+		}
+		if chosen < 0 || s.IsDefault {
+			chosen = ord
+		}
+		ord++
+	}
+	return chosen
+}
+
+// trySegmentedRemux arranca un remux por segmentos si hay índice de
+// keyframes (o llega en remuxIndexWait). nil = usar el remux continuo.
+func (m *Manager) trySegmentedRemux(ctx context.Context, key, userID string, item *librarymodel.Item, mediaStreams []*librarymodel.MediaStream, audioStreamIndex int, decision PlaybackDecision) *ManagedSession {
+	if m.keyframes == nil || m.transcoder == nil {
+		return nil
+	}
+	idx, ok := m.keyframes.Wait(ctx, item.Path, remuxIndexWait)
+	if !ok {
+		m.logger.Info("keyframe index not ready; using continuous remux", "item", item.ID)
+		return nil
+	}
+	plan := BuildSegmentPlan(idx, float64(item.DurationTicks)/10_000_000, remuxSegmentTarget)
+	if plan == nil {
+		return nil
+	}
+
+	outputDir := filepath.Join(m.transcoder.baseDir, sessionDirName(key))
+	// Restos de una sesión anterior con la misma key pueden ser de un
+	// remux continuo (otra rejilla de cortes): nunca mezclarlos.
+	_ = os.RemoveAll(outputDir)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		m.logger.Warn("segmented remux: output dir", "error", err)
+		return nil
+	}
+	bitrate := decision.Profile.AudioBitrate
+	if bitrate == "" {
+		bitrate = m.cfg.DefaultAudioBitrate
+	}
+	spec := remuxSpec{
+		Input:         item.Path,
+		VideoCodec:    decision.VideoCodec,
+		AudioOrdinal:  defaultAudioOrdinal(mediaStreams, audioStreamIndex),
+		CopyAudio:     decision.CopyAudio,
+		AudioBitrate:  bitrate,
+		AudioChannels: decision.AudioChannels,
+	}
+	session := &Session{
+		ID:        key,
+		ItemID:    item.ID,
+		Profile:   decision.Profile,
+		OutputDir: outputDir,
+		StartedAt: m.now(),
+		remux:     newSegmentRemuxer(m.transcoder.ffmpeg, spec, plan, outputDir, m.logger),
+		plan:      plan,
+	}
+	ms := &ManagedSession{
+		Session:          session,
+		UserID:           userID,
+		InputPath:        item.Path,
+		AudioStreamIndex: audioStreamIndex,
+		Decision:         decision,
+		LastAccessed:     m.now(),
+	}
+
+	m.mu.Lock()
+	m.sessions[key] = ms
+	active := len(m.sessions)
+	m.mu.Unlock()
+
+	m.metrics.TranscodeStarted()
+	m.metrics.SetActiveSessions(active)
+	m.publish(event.Event{
+		Type: event.TranscodeStarted,
+		Data: map[string]any{
+			"session_id": key,
+			"user_id":    userID,
+			"item_id":    item.ID,
+			"profile":    decision.Profile.Name,
+			"method":     string(decision.Method),
+		},
+	})
+	m.logger.Info("segmented remux session started",
+		"key", key,
+		"segments", plan.Count(),
+		"copy_audio", decision.CopyAudio,
+	)
+	return ms
+}
+
 // spawnTranscodeSession arranca el proceso ffmpeg y registra la sesión
 // en el map del manager.
 func (m *Manager) spawnTranscodeSession(key, userID, itemID, inputPath string, audioStreamIndex int, burnSub *BurnSubtitleSpec, decision PlaybackDecision, startTime float64) (*ManagedSession, error) {
@@ -689,6 +831,11 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	m.mu.Unlock()
 	if !ok {
 		return ErrSessionNotFound
+	}
+	// Remux por segmentos: no hay proceso que reiniciar, cada segmento
+	// se genera bajo demanda.
+	if ms.Session != nil && ms.remux != nil {
+		return nil
 	}
 
 	ms.restartMu.Lock()
@@ -948,6 +1095,9 @@ func (m *Manager) Shutdown() {
 
 	for _, ms := range sessions {
 		ms.Stop()
+	}
+	if m.keyframes != nil {
+		m.keyframes.Close()
 	}
 	m.metrics.SetActiveSessions(0)
 	m.logger.Info("stream manager shut down", "stopped_sessions", len(sessions))

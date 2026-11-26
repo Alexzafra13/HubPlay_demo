@@ -80,10 +80,10 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 ---
 
-## Métricas rápidas (verificadas 2026-09-10)
+## Métricas rápidas (verificadas 2026-11-26)
 
 - **400+** ficheros `.go` de producción en `internal/`+`cmd/` · ~56% con `_test.go`; `go test ./...` = 43 paquetes verdes
-- **106** test files en frontend, **763/763** vitest verdes; `knip` como hard gate (0 dead code).
+- **108** test files en frontend, **783/783** vitest verdes; `knip` como hard gate (0 dead code).
 - **31** docs de arquitectura en `docs/architecture/`
 - **272** rutas HTTP registradas (router + mounts), con guard de drift OpenAPI.
 
@@ -106,17 +106,18 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
 - `project-status.md` — estado actual, trabajo abierto, próximos pasos. **Entrypoint.**
+- `roadmap-producto.md` — visión ("mi Plex/Jellyfin"), 5 pilares con criterio de "terminado" y lo que falta a la app de TV Kotlin (`Alexzafra13/Hubplay_Demo_Android`), que es el objetivo final
 - `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
 - `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback; P0/P1/P2 ✅, queda P3)
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario (Fases 0/1/2 + Bloques 1/2 cerrados; Fases 3–5 abiertas)
-- `audit-2026-09-10-torrent-vod.md` — audit del módulo torrent/VOD (T-1..T-7 ✅; T-8/T-9 abiertos)
+- `audit-2026-09-10-torrent-vod.md` — audit del módulo torrent/VOD (T-1..T-11 ✅; quedan tests de handler HLS)
 - `conventions.md` § "Desarrollo en Windows" — Go por zip en `~/sdk/go`, `CI=true pnpm install`, `gofmt -l` ruido por CRLF
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
 - `archive/` — sesiones y audits cerrados (no se lee al inicio; solo arqueología)
 - `README.md` — política de docs/memory/
 
-**Leer `docs/memory/project-status.md` al inicio de cada sesión** para retomar contexto.
+**Leer `docs/memory/project-status.md` al inicio de cada sesión** para retomar contexto: tiene un checklist de inicio ("🧭 Cómo retomar") y la lista ordenada "▶️ Próxima sesión". **Actualizarlo al cerrar cada sesión** (estado + próxima sesión); el trabajo sin apuntar ya ha tenido que reconstruirse desde el git log dos veces.
 
 <!-- autoskills:start -->
 

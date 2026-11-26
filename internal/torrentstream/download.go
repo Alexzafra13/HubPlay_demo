@@ -1,6 +1,8 @@
 package torrentstream
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -59,6 +61,26 @@ type downloadJob struct {
 	src      string
 	infoHash string
 	finished time.Time
+
+	// ctx/cancel: contexto propio del job (hijo de Manager.dlCtx) para que
+	// RemoveDownload pueda cancelar uno solo. canceled marca que lo quitó el
+	// admin: ya no está en el listado, así que no se publica más por SSE (si
+	// no, el panel lo volvería a pintar como "Error").
+	ctx      context.Context
+	cancel   context.CancelFunc
+	canceled bool
+}
+
+func (j *downloadJob) markCanceled() {
+	j.mu.Lock()
+	j.canceled = true
+	j.mu.Unlock()
+}
+
+func (j *downloadJob) isCanceled() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.canceled
 }
 
 func (j *downloadJob) set(fn func(*DownloadJob)) {
@@ -89,7 +111,10 @@ func (j *downloadJob) terminalSince() (DownloadStatus, time.Time) {
 //
 // De-dup: si ya hay un job activo para el mismo src, devuelve ese en vez de
 // lanzar otra goroutine — dos descargas del mismo torrent competirían por los
-// mismos ficheros de scratch y gastarían ancho de banda doble.
+// mismos ficheros de scratch y gastarían ancho de banda doble. Un src
+// distinto del mismo contenido (magnet vs .torrent) solo se detecta al
+// conocer el infohash: ese segundo job falla con ErrDuplicateDownload (ver
+// claimDownload).
 func (m *Manager) StartDownload(src, destDir string, onDone func(error)) DownloadJob {
 	m.mu.Lock()
 	for _, j := range m.downloads {
@@ -100,7 +125,8 @@ func (m *Manager) StartDownload(src, destDir string, onDone func(error)) Downloa
 			}
 		}
 	}
-	j := &downloadJob{src: src, snap: DownloadJob{
+	ctx, cancel := context.WithCancel(m.dlCtx)
+	j := &downloadJob{src: src, ctx: ctx, cancel: cancel, snap: DownloadJob{
 		ID:     uuid.NewString(),
 		Dest:   destDir,
 		Status: DownloadQueued,
@@ -124,16 +150,52 @@ func (m *Manager) Downloads() []DownloadJob {
 	return out
 }
 
-// publishDownload empuja el snapshot del job al sink (SSE), si lo hay.
+// publishDownload empuja el snapshot del job al sink (SSE), si lo hay. Un
+// job cancelado ya salió del listado: no se vuelve a anunciar.
 func (m *Manager) publishDownload(j *downloadJob) {
-	if m.sink == nil {
+	if m.sink == nil || j.isCanceled() {
 		return
 	}
 	m.sink.PublishDownload(j.get())
 }
 
+// claimDownload registra el job como holder del torrent y fija su infohash,
+// salvo que otro job ACTIVO ya tenga ese infohash (T-8): entonces devuelve
+// el id de ese job y no registra nada. Todo bajo m.mu para que dos jobs del
+// mismo contenido no puedan colarse a la vez.
+func (m *Manager) claimDownload(j *downloadJob, ih string) (dupOf string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, other := range m.downloads {
+		if other == j {
+			continue
+		}
+		other.mu.Lock()
+		same := other.infoHash == ih && isActiveDownload(other.snap.Status)
+		other.mu.Unlock()
+		if same {
+			return id
+		}
+	}
+	m.holders[ih]++
+	j.mu.Lock()
+	j.infoHash = ih
+	j.mu.Unlock()
+	return ""
+}
+
+// downloadErr traduce la cancelación del ctx del job a su causa: el admin
+// lo canceló, o el manager se está cerrando.
+func (m *Manager) downloadErr(j *downloadJob) error {
+	if m.dlCtx.Err() == nil && j.isCanceled() {
+		return ErrDownloadCanceled
+	}
+	return j.ctx.Err()
+}
+
 func (m *Manager) runDownload(j *downloadJob, src, destDir string, onDone func(error)) {
 	var t *torrent.Torrent
+	defer j.cancel() // libera el ctx hijo en cualquier salida
 
 	// finish marca el estado terminal, suelta la referencia al torrent
 	// (refcount: drop + limpieza de scratch sólo cuando es el último holder,
@@ -158,34 +220,43 @@ func (m *Manager) runDownload(j *downloadJob, src, destDir string, onDone func(e
 		}
 	}
 	fail := func(err error) {
-		m.logger.Warn("torrentstream: download failed", "src", src, "error", err)
+		if errors.Is(err, ErrDownloadCanceled) {
+			m.logger.Info("torrentstream: download canceled", "src", src)
+		} else {
+			m.logger.Warn("torrentstream: download failed", "src", src, "error", err)
+		}
 		finish(DownloadFailed, err)
 	}
 
-	var err error
-	t, err = m.addTorrent(src)
+	added, err := m.addTorrent(src)
 	if err != nil {
 		fail(err) // t == nil: nada que soltar
 		return
 	}
 	// El infohash de un magnet/torrent se conoce ya tras addTorrent (antes
 	// de la metadata). Lo registramos como holder de inmediato para que un
-	// reap concurrente no nos lo quite.
-	m.acquire(t.InfoHash().HexString())
+	// reap concurrente no nos lo quite — salvo que sea un duplicado.
+	if dup := m.claimDownload(j, added.InfoHash().HexString()); dup != "" {
+		// No somos holder: t se queda nil para no soltar el torrent (lo
+		// comparte el job original).
+		fail(fmt.Errorf("%w (job %s)", ErrDuplicateDownload, dup))
+		return
+	}
+	t = added
+	if j.ctx.Err() != nil { // cancelado mientras se añadía el torrent
+		fail(m.downloadErr(j))
+		return
+	}
 
 	select {
 	case <-t.GotInfo():
-	case <-m.dlCtx.Done():
-		fail(m.dlCtx.Err())
+	case <-j.ctx.Done():
+		fail(m.downloadErr(j))
 		return
 	case <-time.After(m.opts.MetadataTimeout):
 		fail(ErrMetadataTimeout)
 		return
 	}
-
-	j.mu.Lock()
-	j.infoHash = t.InfoHash().HexString()
-	j.mu.Unlock()
 
 	total := t.Length()
 	if total <= 0 {
@@ -201,18 +272,29 @@ func (m *Manager) runDownload(j *downloadJob, src, destDir string, onDone func(e
 	m.publishDownload(j)
 	t.DownloadAll()
 
-	tick := time.NewTicker(time.Second)
+	tick := time.NewTicker(m.downloadTick)
 	defer tick.Stop()
+	lastDone, lastProgress := int64(-1), m.now()
 	for {
 		select {
-		case <-m.dlCtx.Done():
-			fail(m.dlCtx.Err())
+		case <-j.ctx.Done():
+			fail(m.downloadErr(j))
 			return
 		case <-tick.C:
-			j.set(func(s *DownloadJob) { s.BytesDone = t.BytesCompleted() })
+			done := t.BytesCompleted()
+			j.set(func(s *DownloadJob) { s.BytesDone = done })
 			m.publishDownload(j)
 			if t.BytesMissing() == 0 {
 				goto complete
+			}
+			// T-9: un swarm muerto no avanza nunca; sin este corte el job
+			// retenía goroutine, holder y scratch indefinidamente.
+			now := m.now()
+			if done != lastDone {
+				lastDone, lastProgress = done, now
+			} else if now.Sub(lastProgress) > m.opts.DownloadStallTimeout {
+				fail(fmt.Errorf("%w for %s", ErrDownloadStalled, m.opts.DownloadStallTimeout))
+				return
 			}
 		}
 	}

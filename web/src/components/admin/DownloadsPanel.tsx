@@ -16,6 +16,13 @@ function isTerminal(s: DownloadJob["status"]): boolean {
   return s === "completed" || s === "failed";
 }
 
+// Mientras copia a la biblioteca no se puede cancelar (el backend responde
+// 409: cortarlo dejaría ficheros a medias); en cola o descargando, el ×
+// cancela el job y en estado terminal lo descarta del listado.
+function canRemove(s: DownloadJob["status"]): boolean {
+  return s !== "copying";
+}
+
 // upsertJob fusiona el snapshot empujado por SSE en la lista cacheada (por id).
 function upsertJob(prev: DownloadJob[] | undefined, job: DownloadJob): DownloadJob[] {
   const list = prev ? [...prev] : [];
@@ -67,6 +74,11 @@ export function DownloadsPanel() {
   const jobs = data ?? [];
   if (jobs.length === 0) return null;
 
+  const removeLabel = (s: DownloadJob["status"]) =>
+    isTerminal(s)
+      ? t("downloads.dismiss", { defaultValue: "Descartar" })
+      : t("downloads.cancel", { defaultValue: "Cancelar descarga" });
+
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-bg-card p-5">
       <h2 className="text-lg font-semibold text-text-primary">
@@ -83,13 +95,13 @@ export function DownloadsPanel() {
                 <span className="text-[11px] text-text-muted">
                   {t(STATUS[j.status][0], { defaultValue: STATUS[j.status][1] })} · {pct(j)}%
                 </span>
-                {isTerminal(j.status) ? (
+                {canRemove(j.status) ? (
                   <button
                     type="button"
                     onClick={() => dismiss.mutate(j.id)}
                     disabled={dismiss.isPending}
-                    aria-label={t("downloads.dismiss", { defaultValue: "Descartar" })}
-                    title={t("downloads.dismiss", { defaultValue: "Descartar" })}
+                    aria-label={removeLabel(j.status)}
+                    title={removeLabel(j.status)}
                     className="flex size-5 items-center justify-center rounded text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
                   >
                     <X className="size-3.5" />

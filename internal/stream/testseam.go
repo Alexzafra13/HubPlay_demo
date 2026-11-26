@@ -47,3 +47,19 @@ func NewClosedSessionForTest(id, itemID, profileName, outputDir string, startedA
 		done:      done,
 	}
 }
+
+// NewSegmentedSessionForTest devuelve una Session de remux por segmentos
+// sobre outputDir con el plan dado. El ffmpeg es un binario inexistente:
+// los segmentos que ya estén en outputDir se sirven y los que falten
+// fallan al generarse (para probar los handlers sin ffmpeg real).
+func NewSegmentedSessionForTest(id, itemID, outputDir string, plan *SegmentPlan) *Session {
+	return &Session{
+		ID:        id,
+		ItemID:    itemID,
+		OutputDir: outputDir,
+		StartedAt: time.Now(),
+		remux: newSegmentRemuxer("__hubplay_nonexistent_ffmpeg__", remuxSpec{Input: "/nonexistent", AudioOrdinal: -1},
+			plan, outputDir, slog.Default()),
+		plan: plan,
+	}
+}

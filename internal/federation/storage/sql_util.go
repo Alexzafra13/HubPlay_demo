@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"strings"
+	"unicode"
 )
 
 // nullableString wraps a plain string for storage in a nullable TEXT
@@ -54,4 +55,30 @@ func toTSQueryPrefix(q string) string {
 	}
 	tokens[len(tokens)-1] += ":*"
 	return strings.Join(tokens, " & ")
+}
+
+// toFTS5Prefix construye una consulta FTS5 segura para `items_fts MATCH ?`
+// a partir de texto libre: tokens entrecomillados (nunca se leen como
+// operadores) y prefijo en el último. "" si no queda ningún token.
+//
+// Copia privada de la homónima en `internal/db/item_repository.go` (ver
+// allí el porqué), por la misma razón que `toTSQueryPrefix`.
+func toFTS5Prefix(q string) string {
+	tokens := strings.FieldsFunc(q, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && !unicode.IsMark(r)
+	})
+	if len(tokens) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, t := range tokens {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteByte('"')
+		b.WriteString(t)
+		b.WriteByte('"')
+	}
+	b.WriteByte('*')
+	return b.String()
 }

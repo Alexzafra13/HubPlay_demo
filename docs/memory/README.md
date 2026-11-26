@@ -27,9 +27,14 @@ complementa con contexto, decisiones y pendientes.
 
 **Documentos vivos específicos** — referenciados cuando aplica:
 
-- `audit-2026-06-08-production-readiness.md` — roadmap activo. Fases 0/1 +
-  Bloques 1/2 cerrados; **Fases 2–5 abiertas** (supply-chain,
-  observabilidad, frontend, gobernanza).
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback;
+  P0/P1/P2 cerrados, P3 abierta).
+- `audit-2026-06-08-production-readiness.md` — roadmap secundario. Fases
+  0/1/2 cerradas; **Fases 3–5 abiertas** (observabilidad/config, frontend,
+  gobernanza).
+- `audit-2026-09-10-torrent-vod.md` — módulo torrent (hallazgos cerrados;
+  quedan tests de handler HLS).
+- `audit-2026-06-12-federation.md` — módulo P2P/federación.
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
   (SQLite + Postgres) para repos del hot-path.
 

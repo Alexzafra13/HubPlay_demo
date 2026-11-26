@@ -404,6 +404,51 @@ When user seeks to a new position:
 2. If yes → serve cached segment
 3. If no → kill current FFmpeg process, start new one from the seek position using `-ss` flag
 
+This is the **Transcode** path (and the fallback remux path below). It
+works because the encoder forces a keyframe every 6 s
+(`-force_key_frames`), so the synthetic manifest ("segment N covers
+[6N, 6N+6)") is true.
+
+### Segmented Remux (DirectStream with a keyframe index)
+
+With `-c:v copy` ffmpeg can only cut on the file's own keyframes, which
+almost never fall on a 6 s grid: measured 2026-11-26, half of the
+segments started up to 2 s later than the synthetic manifest claimed.
+hls.js corrects with PTS; ExoPlayer (Android TV app) trusts the manifest,
+so seeks landed in the wrong place. Remux sessions therefore use real
+cuts and independent segments (`internal/stream/keyframes.go`,
+`segplan.go`, `remux.go`):
+
+1. **Keyframe index**: `ffprobe -select_streams V:0 -show_entries
+   packet=pts_time,flags` (demux only, packets in decode order). Per
+   keyframe it stores `PTS` and `Lead` — the earliest display time of its
+   decode-order group (lower than PTS for open-GOP leading/RASL
+   pictures). Cached on disk (`<cache>/../keyframes/<sha1(path|size|mtime)>.json`)
+   and in memory; built in the background with concurrency 2.
+   `/stream/{id}/info` pre-warms it; the first play waits at most 3 s and
+   otherwise falls back to the continuous remux (next play is segmented).
+2. **Segment plan**: group keyframes so each segment lasts ≥ 6 s
+   (cut at the first keyframe whose `Lead` is ≥ 6 s after the previous
+   cut). The manifest declares the real `EXTINF`s and
+   `TARGETDURATION = ceil(max)`.
+3. **Per-segment ffmpeg** (~60–90 ms; up to ~0.5 s when audio must be
+   transcoded), generated on request, cached in the session dir, with 3
+   segments of prefetch. Seeking forward or backward is the same
+   operation — no restarts, no rate limiting needed. The recipe and why
+   each flag exists is documented in `remux.go`: `-copyts`, input `-ss`
+   on the keyframe, `noise=drop` on the display-time window
+   `[Lead_i, Lead_{i+1})` (decode-order cut, like HLS), `-to` only as a
+   read stop, `-avoid_negative_ts disabled`,
+   `*_mp4toannexb,dump_extra=freq=keyframe` (SPS/PPS on every
+   keyframe), and for transcoded audio a shared AAC frame grid
+   (`aresample=48000,atrim,asetpts`, 2 s warm-up).
+
+Verified frame by frame (MKV/MP4, closed/open GOP, B-frames, irregular
+keyframes): no frame lost or duplicated, sequential decode without
+errors, every segment self-contained. Regression coverage:
+`remux_integration_test.go` (real ffmpeg, skipped without it) and
+`scripts/seek-check.py` (whole server, out-of-order segment requests).
+
 ---
 
 ## 5. Subtitles

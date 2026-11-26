@@ -14,7 +14,15 @@ export function ProtectedRoute({ adminOnly = false }: ProtectedRouteProps) {
   const location = useLocation();
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // Guarda a dónde iba (p.ej. /link?code=… desde el QR de la TV) para
+    // volver ahí tras el login — ver utils/returnTo.ts.
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location.pathname + location.search }}
+      />
+    );
   }
 
   // Forced password rotation: when the admin created the account

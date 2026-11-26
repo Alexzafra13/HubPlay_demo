@@ -45,6 +45,15 @@ describe("LinkDevice", () => {
   // The QR on the TV encodes verification_uri_complete which lands
   // here with the user_code already in the query string. The form
   // must pre-fill so the operator only taps Aprobar — no typing.
+  // Sin getUserMedia (HTTP plano en la LAN; jsdom tampoco lo tiene) no hay
+  // botón de escanear: en su lugar se explica que la cámara nativa del
+  // móvil sirve. Antes el botón desaparecía sin decir nada.
+  it("explains the native-camera path when in-page scanning is unavailable", () => {
+    render(wrap("/link"));
+    expect(screen.queryByRole("button", { name: /escanear|scan/i })).toBeNull();
+    expect(screen.getByText(/cámara de tu móvil|phone's camera/i)).toBeInTheDocument();
+  });
+
   it("prefills the code input from the ?code= URL parameter", async () => {
     render(wrap("/link?code=ABCD-EFGH"));
     const input = (await screen.findByPlaceholderText(

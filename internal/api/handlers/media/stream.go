@@ -149,6 +149,12 @@ func (h *StreamHandler) effectiveBaseURL(ctx context.Context) string {
 	return strings.TrimRight(value, "/")
 }
 
+// keyframeWarmer lo implementa *stream.Manager: precalienta el índice de
+// keyframes del remux por segmentos.
+type keyframeWarmer interface {
+	WarmKeyframes(path string)
+}
+
 // Info returns playback info for an item (what method will be used, available profiles).
 func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	itemID := handlers.RequireParam(w, r, "itemId")
@@ -199,6 +205,15 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 		decision = stream.Decide(item, mediaStreams, caps, "", audioStreamIndex)
 	}
 	profiles := stream.ProfileNames()
+
+	// El cliente va a reproducir: si será un remux, adelantar la
+	// indexación de keyframes para que la sesión salga ya por segmentos
+	// exactos (opcional: los fakes de test no lo implementan).
+	if decision.Method == stream.MethodDirectStream {
+		if warmer, ok := h.manager.(keyframeWarmer); ok {
+			warmer.WarmKeyframes(item.Path)
+		}
+	}
 
 	handlers.RespondData(w, http.StatusOK, map[string]any{
 		"item_id":     itemID,
@@ -379,8 +394,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// loses free seeking on those items, which is the best we can
 	// do without knowing how long the stream is. `item` was already
 	// resolved + authorized above.
-	if item.DurationTicks > 0 {
-		duration := float64(item.DurationTicks) / 10_000_000
+	if plan := ms.SegmentPlan(); plan != nil || item.DurationTicks > 0 {
 		// Carry the audio + subtitle params forward into segment URLs
 		// so hls.js keeps the same dub AND burned-in subtitle on every
 		// fetch. Without this, the segment handler can't reconstruct
@@ -398,7 +412,15 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 			segSuffix = "?" + strings.Join(params, "&")
 		}
 		segmentTpl := fmt.Sprintf("/api/v1/stream/%s/%s/segment%%05d.ts%s", itemID, quality, segSuffix)
-		manifest := stream.SynthesizeVODManifest(duration, segmentDurationSeconds, segmentTpl)
+		var manifest string
+		if plan != nil {
+			// Remux por segmentos: duraciones reales (cortes en los
+			// keyframes del fichero), no la rejilla de 6 s.
+			manifest = plan.Manifest(segmentTpl)
+		} else {
+			duration := float64(item.DurationTicks) / 10_000_000
+			manifest = stream.SynthesizeVODManifest(duration, segmentDurationSeconds, segmentTpl)
+		}
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", handlers.CacheControlNoCache)
@@ -494,6 +516,13 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remux por segmentos: cada segmento se genera bajo demanda (adelante
+	// o atrás es lo mismo); no hay ffmpeg que esperar ni reiniciar.
+	if ms.SegmentPlan() != nil {
+		h.serveSegmentedRemux(w, r, ms, segmentFile)
+		return
+	}
+
 	segmentPath := filepath.Join(ms.OutputDir, segmentFile)
 
 	// Double-check: resolved path must stay within output directory
@@ -551,6 +580,33 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveSegment(w, r, segmentPath)
+}
+
+// serveSegmentedRemux sirve un segmento de un remux por segmentos,
+// generándolo si aún no existe.
+func (h *StreamHandler) serveSegmentedRemux(w http.ResponseWriter, r *http.Request, ms *stream.ManagedSession, segmentFile string) {
+	matches := segmentIndexPattern.FindStringSubmatch(segmentFile)
+	if len(matches) != 2 {
+		handlers.RespondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+		return
+	}
+	segIdx, err := strconv.Atoi(matches[1])
+	if err != nil {
+		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment index")
+		return
+	}
+	path, err := ms.EnsureSegment(r.Context(), segIdx)
+	switch {
+	case err == nil:
+		serveSegment(w, r, path)
+	case stream.IsSegmentOutOfRange(err):
+		handlers.RespondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+	case r.Context().Err() != nil:
+		// El cliente se fue (seek rápido): nada que responder.
+	default:
+		h.logger.Error("segmented remux failed", "segment", segIdx, "error", err)
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "SEGMENT_FAILED", "could not produce segment")
+	}
 }
 
 // serveSegment writes the segment file with the right HLS headers.

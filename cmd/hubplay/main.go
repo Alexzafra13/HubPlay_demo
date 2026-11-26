@@ -334,6 +334,7 @@ func run(configPath string) error {
 			IdleTimeout:           cfg.Torrent.IdleTimeout,
 			Readahead:             cfg.Torrent.ReadaheadBytes,
 			MetadataTimeout:       cfg.Torrent.MetadataTimeout,
+			DownloadStallTimeout:  cfg.Torrent.DownloadStallTimeout,
 			AllowPrivateUpstreams: cfg.Torrent.AllowPrivateUpstreams,
 			Sink:                  torrentDownloadSink{bus: eventBus},
 		}, logger)

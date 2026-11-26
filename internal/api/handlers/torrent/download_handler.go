@@ -18,8 +18,8 @@ import (
 type Downloader interface {
 	StartDownload(src, destDir string, onDone func(error)) torrentstream.DownloadJob
 	Downloads() []torrentstream.DownloadJob
-	// RemoveDownload descarta un job terminal; (false,nil) si no existe,
-	// ErrDownloadActive si sigue en vuelo.
+	// RemoveDownload descarta un job terminal o cancela uno en vuelo;
+	// (false,nil) si no existe, ErrDownloadActive si está copiando.
 	RemoveDownload(id string) (bool, error)
 }
 
@@ -115,7 +115,9 @@ func (h *DownloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	handlers.RespondData(w, http.StatusOK, h.dl.Downloads())
 }
 
-// Delete descarta un job terminal del listado (el "×" del panel). Admin-only.
+// Delete descarta un job terminal del listado o cancela uno en cola /
+// descargando (el "×" del panel). 409 solo si está copiando a la biblioteca.
+// Admin-only.
 //
 // DELETE /torrent/downloads/{id}
 func (h *DownloadHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +135,7 @@ func (h *DownloadHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, torrentstream.ErrDownloadActive):
 		handlers.RespondError(w, r, http.StatusConflict, "DOWNLOAD_ACTIVE",
-			"the download is still in progress")
+			"the download is being copied to the library; wait for it to finish")
 	case !ok:
 		handlers.RespondError(w, r, http.StatusNotFound, "NOT_FOUND", "download not found")
 	default:

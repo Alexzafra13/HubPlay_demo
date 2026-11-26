@@ -1,282 +1,189 @@
 # Estado del proyecto
 
-> **Entrypoint de cada sesión.** Solo el estado vivo y lo que falta. El
-> detalle de sesiones cerradas vive en `archive/` (no se borra nada, solo
-> se reubica). Última limpieza: 2026-06-10.
+> **Entrypoint de cada sesión.** Solo el estado vivo, lo que falta y el
+> orden en que atacarlo. El detalle de sesiones cerradas vive en
+> `archive/` (no se borra nada, solo se reubica). Última reorganización:
+> 2026-11-26 (sesiones 06-12 → 09-16 movidas a
+> `archive/2026-06-12-to-09-16.md`).
 
 ---
 
-## 🔭 Estado actual (2026-09-10, retomando tras ~3 meses parado)
+## 🧭 Cómo retomar (checklist de inicio de sesión)
 
-**Salud:** MVP funcional, cerca de early-production. `main` == `origin/main`
-(`f30a4709`), sin ramas locales con trabajo sin fusionar.
-
-| Área | Estado |
-|---|---|
-| Tests backend | `go test ./...` verde en Windows (43 paquetes) tras arreglar 1 test no portable (`setup/service_test.go`, ruta absoluta estilo Linux) |
-| Tests frontend | **763/763** vitest (106 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning informativo (React Compiler + `useVirtualizer`, no accionable) |
-| Rama de trabajo | `main` (cambios de esta sesión sin commitear al cierre; ver abajo) |
-| Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta**: PB-19/26/29-31/33/36-39 + gaps de test 1-6 |
-| Audit prod 2026-06-08 | Fases 0/1/2 ✅. Fase 3: **M18, M19, M20 ✅ (2026-09-10)**, M24 parcial; M21/M23 abiertos. Fases 4–5 abiertas |
-| Audit federación 2026-06-12 | F-1/3/4 ✅, F-2 parcial, **F-10 ✅ (2026-09-10)**; F-5..F-9, F-11..F-13 abiertos |
-| **Audit torrent 2026-09-10** (NUEVO) | `audit-2026-09-10-torrent-vod.md`: T-1..T-7, T-10, T-11 ✅; T-8, T-9 abiertos |
-
-**Trabajo del 15–16 de junio que NO estaba documentado aquí** (reconstruido
-del git log; commits `eafd22e7..f30a4709`, PRs #526–528 "dual indexers
-search"): descargar torrent a biblioteca (jobs + refcount + scratch + SSE +
-rescan), pestaña admin "Indexadores" (Prowlarr/Torznab en DB), búsqueda
-general por texto y descubrimiento por carátulas TMDb → fuentes por imdbid,
-Prowlarr turnkey en compose (`docker-compose.torrent.yml`), 429 claro +
-aviso de códec, y **remux/reencode VOD de torrents a HLS**
-(`internal/torrentstream/vodtransmux*.go`, rutas `/torrent/play` y
-`/torrent/hls/{infohash}/…`). Todo mergeado en `main`.
-
-**Sesión 2026-09-10 — revisión general + arreglos:**
-- **Entorno Windows**: Go no estaba instalado (winget se quedó esperando
-  UAC) → instalado por zip en `~/sdk/go` (1.25.11, sin admin). `web/
-  node_modules` estaba desfasado del lockfile → `CI=true pnpm install
-  --frozen-lockfile` (sin TTY pnpm aborta el borrado de `node_modules`).
-  Ver `conventions.md` § "Desarrollo en Windows".
-- **Torrent (audit nuevo)**: T-1 SSRF con `allow_private_upstreams`
-  (`imaging.SafeGetWith` + `SafeGetOpts{AllowPrivate}` — relaja el rango,
-  no desactiva el guard), T-2 doble ffmpeg por `Prepare` concurrente
-  (placeholder + `ready`), T-3 goroutine de stderr filtrada, T-4 `Stop`
-  espera la salida + `watchExit` tira sesiones con ffmpeg muerto, T-5 SSE
-  de descargas solo a admins, T-6 touch del torrent al servir HLS, T-7
-  containment de rutas al copiar a la biblioteca, T-10 alias `bySrc`,
-  T-11 `Close`/`Shutdown` idempotentes. 12 tests nuevos.
-- **Prod Fase 3**: M18+M19 (`RequestLogger` con `handlers.ClientIP` y
-  `log_ips` honrado), M20 (`api.Recoverer` propio con slog + métrica
-  `panic`), M24 parcial (`streaming:` en `hubplay.example.yaml`).
-- **Federación**: F-10 (userinfo en URL de peer rechazado).
-- **Frontend**: directiva `eslint-disable` sin uso en `PageHeader.tsx`.
-- **Arranque nativo en Windows verificado** (binario + SQLite, sin Docker,
-  puerto 8097 porque el servicio instalado ocupa el 8096): wizard por API,
-  scan de `peliculas/` + `series/` (2 películas, 1 serie/9 episodios),
-  login y páginas en Chrome headless. Destapó **dos bugs de playback
-  exclusivos de instalación nativa** (en Docker no se ven porque `/cache`
-  es absoluto y el FS es Linux), ambos corregidos con test:
-  - **W-1** · La clave de sesión `user:item:profile:audio:sub` se usaba
-    como nombre de directorio → `:` es inválido en Windows → TODO
-    transcode/direct-stream fallaba con `mkdir … sintaxis … no correcta`.
-    Fix: `sessionDirName` (`:` → `_`) en `stream/transcode.go`.
-  - **W-2** · `cache_dir` relativo + `cmd.Dir = outputDir` ⇒ ffmpeg
-    resolvía la ruta de manifest/segmentos dentro del propio outputDir →
-    "Could not write header: No such file or directory". Fix: base dir
-    absoluto en `NewTranscoder` y en `iptv.NewTransmuxManager`.
-  - Tras los fixes: playlist 720p + 3 segmentos `video/mp2t` servidos.
-- **README.md creado** (no existía): instalación con Docker y sin Docker
-  (instalador Windows, `install.sh` Linux, tar.gz manual), desarrollo.
-- `handlers.ClientIP` quita el puerto en el fallback a `RemoteAddr`.
-
-**Hallazgos menores sin arreglar (esta sesión):**
-- `POST /setup/libraries` responde con nombres de campo Go (`ID`, `Name`,
-  `ContentType`…) en vez de snake_case como el resto de la API.
-- `/health` fuera de `/api/v1` cae al fallback de la SPA (devuelve HTML);
-  el probe real es `/api/v1/health` y `/health/live`.
-- Un `hubplay.exe` de una release antigua sigue instalado como servicio
-  (`C:\Program Files\HubPlay`, puerto 8096) en la máquina del usuario.
-
-**Próximos pasos sugeridos (en orden):**
-1. Commit + PR de esta sesión (`go test ./...` y vitest verdes).
-2. Torrent T-8/T-9 (de-dup por infohash, cancelación/timeout de descargas)
-   + tests del handler `Play`/`HLSPlaylist`/`HLSSegment`.
-3. Fase 3 restante: M21 (agregación de logs/alerting documentada), M23
-   (validación de config + overrides de env), cerrar M24.
-4. Playback P3 (PB-29/30 DNS-rebind vía `Control` del dialer cierra también
-   B2; PB-26; PB-33) y gaps de test 1-6.
-5. Fase 5 gobernanza: `SECURITY.md`, `CODEOWNERS` (README ✅ 2026-09-10).
-6. Snake_case en la respuesta de `POST /setup/libraries`; probar el
-   instalador Windows de la próxima release con W-1/W-2 (el servicio
-   instalado hoy es de una release anterior y tiene ambos bugs).
-
-**Sesión 2026-09-11 — descubrimiento LAN para la app de TV:**
-- **Diagnóstico**: la app de TV no encontraba el servidor de casa
-  (192.168.1.100, Docker con `ports: 8097:8096`). mDNS (`internal/mdns`)
-  es multicast y no sale del bridge de Docker; además anunciaría el
-  puerto interno 8096, no el 8097 del host.
-- **`internal/discovery`** (nuevo): respondedor UDP en `41860`. Sondeo
-  `HUBPLAY-DISCOVER/1` → JSON `{product, name, version, port, url?}`.
-  El broadcast sí llega a un puerto publicado (docker-proxy). Config
-  `discovery:` (enabled/port/advertise_port/advertise_url) + env
-  `HUBPLAY_DISCOVERY_ADVERTISE_PORT|_URL|_ENABLED`. Los tres compose
-  publican `41860/udp`; los de raíz inyectan el puerto del host
-  (`HUBPLAY_HOST_PORT`), el de `deploy/` anuncia la URL pública porque
-  el 8096 solo escucha en localhost. Tests con puerto efímero (el
-  41860 puede estar ocupado por un server de desarrollo local).
-- `/api/v1/health` lleva `"product":"hubplay"` para que el barrido de
-  subred de la app (fallback para servidores sin respondedor) lo
-  reconozca; la app acepta también el cuerpo antiguo.
-- Verificado en la LAN real: `node` enviando el broadcast recibe la
-  respuesta del server local (puerto 8097 anunciado) y la Mi TV lista
-  el server local (UDP) y el de producción (barrido, aún sin el nuevo
-  binario). **Producción sigue con la imagen antigua**: al desplegar
-  esta versión el descubrimiento pasa a ser inmediato.
+1. Leer este fichero entero (es corto a propósito) y, si toca decidir
+   qué construir, `roadmap-producto.md` (visión, pilares y qué es
+   "terminado" en cada uno; objetivo final: la app de TV en Kotlin).
+2. `git fetch origin main && git log --oneline -10 origin/main`: ¿hay
+   commits que no estén reflejados aquí? Si los hay, reconstruirlos y
+   apuntarlos antes de nada (ya pasó dos veces: junio y septiembre).
+3. Mirar CI de `main` (GitHub Actions: CI, Docker, Release) y PRs abiertos.
+4. Verificar que todo está verde ANTES de tocar nada:
+   - `go build ./... && go vet ./... && go test ./...` (Go **1.25.x**; con
+     1.27 `anacrolix/torrent` no compila, ver `conventions.md`).
+   - `cd web && CI=true pnpm install --frozen-lockfile && pnpm exec tsc -b
+     && pnpm test --run && pnpm exec knip && pnpm exec eslint .`
+   - `golangci-lint run ./...` (CI usa v2.5.0).
+5. Elegir la siguiente tarea de **"▶️ Próxima sesión"** (abajo, en orden).
+6. Al cerrar: actualizar este fichero (estado + próxima sesión) y el audit
+   que corresponda; mover a `archive/` lo que deje de ser vivo.
 
 ---
 
-## 📺 Sesión 2026-09-16 — subtítulos para la app de TV
+## 🔭 Estado actual (2026-11-26, retomando tras ~2 meses parado)
 
-- `GET /items/{id}` ya emite `is_forced` en `media_streams` (la spec
-  OpenAPI lo declaraba, el handler no lo mandaba).
-- **Caché de subtítulos extraídos** (`StreamHandler.WithSubtitleCache`,
-  `~/.hubplay/cache/subtitles`, hermano del de transcode): ffmpeg lee el
-  fichero entero para sacar una pista (medido: 42 s en frío en un MKV
-  grande, 3,6 s con caché de disco del SO), así que al primer fallo se
-  extraen TODAS las pistas de texto del fichero en una pasada
-  (`stream.ExtractSubtitlesVTT`, sin PGS/DVD) y se sirven del disco. Clave
-  = sha1(ruta|tamaño|mtime). Mutex por fichero para peticiones
-  concurrentes. Sin config (tests) no hay caché y se extrae como antes.
-  Test: `TestStreamHandler_SubtitleTrack_CachesEveryTextTrackOnFirstMiss`.
-- La app de TV pide la primera pista de texto nada más arrancar el vídeo
-  (warm-up) y usa un timeout de 180 s: antes reintentaba cada 30 s y cada
-  reintento mataba el ffmpeg anterior, sin acabar nunca.
-- **Entorno**: con el Go 1.27 que hay en el PATH, `go build ./...` falla
-  en `anacrolix/torrent` (`undefined: http2.GoAwayError`): el transport
-  http2 de `x/net v0.54` lleva `//go:build !(go1.27 && !http2legacy)`.
-  Compilar SIEMPRE con el Go 1.25 de `~/sdk/go`
-  (`export PATH="$HOME/sdk/go/bin:$PATH"`), como dice `conventions.md`.
-  `go.mod` pide ya `1.25.13`; con `GOTOOLCHAIN=auto` el 1.25.11 instalado
-  lo descarga solo.
-- **Identidad de instalación para el descubrimiento LAN**
-  (`cmd/hubplay/server_id.go`): `server.instance_id` en app_settings (16
-  hex, generado una vez). Se anuncia en mDNS (TXT `id=`), en la respuesta
-  UDP (`id`) y en `/api/v1/health` (`server_id`, vía
-  `HealthHandler.WithServerID` y `ServerDeps.InstanceID`). La app de TV lo
-  usa para no listar dos veces un servidor que contesta por dos IPs.
-- Pendiente: desplegar en el servidor de la TV (`192.168.1.100:8097`,
-  aún sin la caché ni el id). `GET /items/search?q=Toc,%20toc` devuelve 500.
-
-### CI en rojo (run 1195) — arreglado
-
-Tres jobs fallaban, dos de ellos ya en el run anterior (1194):
-
-- **Test Backend** · `TestTransmuxManager_PromotesToReencodeOnCodecCrash`
-  (`mode=direct` tras 30 s). No era un watcher lento: `cmd.StderrPipe()`
-  hace que `cmd.Wait()` cierre el extremo de lectura nada más reaparse
-  el proceso, y bajo carga lo cerraba ANTES de que la goroutine
-  consumidora leyera la línea de códec → tail vacío →
-  `looksLikeCodecError` falso → sin promoción. Reproducido en local
-  (5/25 con `taskset -c 0` + 3 busy loops; log: `ffmpeg_stderr_tail=""`).
-  Fix en `transmux.go`: pipe propio (`os.Pipe`) en `cmd.Stderr`, el padre
-  cierra su write-end tras `Start`, y `processWatcher` espera al
-  consumidor con gracia acotada (`stderrDrainGrace`, 2 s) antes de cerrar
-  él el read-end. 0/40 fallos tras el fix. Test de regresión:
-  `TestTransmuxManager_StderrDrainIsBoundedWhenChildHoldsPipe`.
-- Mismo paquete: `TestTransmux_LastViewerLeaveStopsSession` y
-  `LeaveUnknownViewerIsNoOp` usaban `IdleTimeout=100ms` y el reaper (que
-  no mira viewers) les recogía la sesión antes de la aserción (5/30 en
-  base bajo contención). Ahora idle de 10 s.
-- **Lint** · De Morgan en `metadata_parser_test.go` + `validateOutboundURL`
-  sin uso en `imaging/safety.go`. `golangci-lint v2.5.0` local: 0 issues.
-- **Vulnerability scan** · 10 findings: 6 de stdlib (`go 1.25.11` →
-  `1.25.13`, también la imagen `golang:1.25.13-alpine` del Dockerfile) y
-  `gorilla/websocket 1.5.3`, `x/image 0.45`, `x/text 0.41`,
-  `pion/dtls 3.1.4`, `pion/stun 3.1.5` (todos transitivos de
-  `anacrolix/torrent`). **No verificado en local**: `vuln.go.dev` está
-  bloqueado por el proxy de la sesión; lo confirma el job de CI.
-- El run 1194 falló además en `TestBus_Unsubscribe_RemovesHandler`
-  ("handler not called within 5s"; `internal/db` tardó 480 s en ese
-  runner). No tocado: flake de runner saturado, no reproducido.
-
-## 🔭 Estado anterior (2026-06-14, fin de sesión)
-
-**Salud:** MVP funcional, cerca de early-production.
+**Salud:** MVP funcional, cerca de early-production. `main` en
+`8e6559b` (#551) con **CI, Docker y Release verdes**. Sin issues abiertos.
 
 | Área | Estado |
 |---|---|
-| Tests backend | `go test ./...` verde (`-race` en stream/api/iptv) |
-| Tests frontend | **748/748** vitest; `tsc`, `eslint` y `knip` limpios |
-| Rama de trabajo | `claude/review-recent-work-9j5lg7` — SSRF transmux cerrado |
-| Audit playback 2026-06-10 | P0 + P1a-d + PB-40..44 + **P2 ✅ (2026-06-12)**. **P3 en curso**: smoke E2E (a)(b)(e) ✅ |
-| Audit prod 2026-06-08 | Fases 0/1/2 + B7 ✅. **Fases 3–5 abiertas** |
+| Tests backend | `go test ./...` verde (Linux, Go 1.25.13) |
+| Tests frontend | **783/783** vitest (108 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning conocido (React Compiler + `useVirtualizer`, no accionable) |
+| Rama de trabajo | `claude/retomar-proyecto-actualizar-znt18w` (sesión 2026-11-26, sin mergear) |
+| Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta** (ver tabla de trabajo abierto) |
+| Audit torrent 2026-09-10 | **Todos los hallazgos ✅** (T-8/T-9 el 2026-11-26). Queda: tests de handler `Play`/`HLSPlaylist`/`HLSSegment` y refcount explícito VOD (T-6) |
+| Audit prod 2026-06-08 | Fases 0/1/2 ✅. Fase 3: M18/M19/M20 ✅, M24 parcial, M21/M23 abiertos. Fases 4–5 abiertas |
+| Audit federación 2026-06-12 | F-1/3/4/10 ✅, F-2 parcial; F-5..F-9, F-11..F-13 abiertos |
+| Producción (servidor de la TV, `192.168.1.100:8097`) | Sigue con una imagen anterior a la caché de subtítulos, el id de instalación y el fix de búsqueda. **Pendiente desplegar.** |
 
-✔️ Checklist de retorno 2026-06-12 hecho: PR #518 mergeada, CI/Docker/
-Release verdes en main (`cfafee0`), rama nueva desde main.
+### Sesión 2026-11-26 — retomar + cerrar pendientes concretos
 
-**Sesión 2026-06-12 — Playback P2 (PB-5/10/22/23):**
-- **PB-5**: pipeline VAAPI real (`-init_hw_device` + `format=nv12,
-  hwupload` al final de la vf chain, tonemap/overlay software antes del
-  upload), `verifyEncoder` ejercita el pipeline real con razón
-  diagnóstica, `FallbackReason`/`Device` expuestos en
-  `/admin/system/stats` + tile GPU en warning, device configurable
-  (`hardware_acceleration.device`), mismo hwupload en el reencode del
-  transmux IPTV.
-- **PB-10**: `stopSiblingSessions` al cambiar de variante, caps que solo
-  cuentan/bloquean full-transcode (remux exento), master playlist
-  filtrado por resolución de la fuente.
-- **PB-22**: `channels=` en capabilities (web emite 6), `AudioChannels =
-  min(src, client, 6)` de `Decide` a `-ac`.
-- **PB-23**: DV vía `side_data_list` (DOVI record) con mapeo de
-  `dv_bl_signal_compatibility_id` → base compatible o DolbyVision puro.
-  ⚠️ items ya escaneados necesitan re-probe para re-etiquetar.
+- **Búsqueda: 500 con puntuación** (`GET /items/search?q=Toc,%20toc`,
+  apuntado el 2026-09-16). El texto del usuario iba crudo al `MATCH` de
+  FTS5 y `,` `"` `(` `-` `:` `^`… son sintaxis FTS5 → `fts5: syntax error`.
+  Fix: `toFTS5Prefix` (tokeniza como `unicode61`, entrecomilla cada token,
+  prefijo `*` en el último; solo puntuación ⇒ sin resultados) en
+  `db/item_repository.go` y copia privada en `federation/storage`
+  (`SearchSharedItems` tenía el mismo bug). Postgres ya saneaba. Tests:
+  `TestItemRepository_List_FTSSearch_PunctuationIsNotSyntax` (reproduce el
+  error exacto sin el fix) + caso en `TestFederationRepository_SearchSharedItems`.
+- **Torrent T-8** (de-dup por infohash): `claimDownload` registra holder +
+  infohash bajo `m.mu`; un segundo job activo del mismo contenido (magnet
+  vs `.torrent`) falla con `ErrDuplicateDownload` sin soltar el torrent
+  del original.
+- **Torrent T-9** (cancelación + timeout): ctx propio por job (hijo de
+  `dlCtx`). `DELETE /torrent/downloads/{id}` cancela jobs en cola o
+  descargando (suelta holder, limpia scratch, deja de publicarse por SSE);
+  409 **solo** mientras copia a la biblioteca (cortar ahí dejaría ficheros
+  a medias). `torrent.download_stall_timeout` (default 30m) falla un job sin
+  progreso con `ErrDownloadStalled`. Panel admin: × "Cancelar descarga" en
+  activos, sin botón al copiar. Claves i18n `downloads.*` añadidas en
+  es/en (antes no existían; salía siempre el `defaultValue` en español).
+- **Tests nuevos:** `download_lifecycle_test.go` con cliente torrent real
+  pero hermético (seam `tuneClientConfig`: sin DHT/trackers, puerto
+  efímero; el stall usa un `.torrent` servido por httptest sin seeds) —
+  estables con `-race -count=20`. `DownloadsPanel.test.tsx`.
+- **Docs:** este fichero reorganizado como guía; checklist de inicio.
+- **QR de emparejado:** escanear el QR de la TV con la cámara nativa del
+  móvil abre `/link?code=…`; sin sesión, `ProtectedRoute` mandaba a
+  `/login` y **el código se perdía**. Ahora `state.from` sobrevive al
+  login y a "¿Quién está viendo?" (`utils/returnTo.ts`, solo rutas
+  internas: bloquea `//host` → open redirect). En HTTP (sin cámara en la
+  página) `/link` explica que sirve la cámara nativa en vez de esconder
+  el botón sin más. Tests: `returnTo.test.ts`, `Login.test.tsx`,
+  `LinkDevice.test.tsx`.
+- **Saltos adelante/atrás medidos con el binario real**
+  (`scripts/seek-check.py`, nuevo): Transcode ✅ 11/11 alineados; **remux
+  ❌ 6/11 segmentos +2 s** (manifest sintético de 6 s vs cortes en los
+  keyframes del fichero). Probable causa de saltos raros en ExoPlayer.
+  Diseño del arreglo en `roadmap-producto.md`, pilar 2.
+- **`roadmap-producto.md`** (nuevo): visión, 5 pilares con estado medido
+  y criterio de "terminado", y lo que le falta a la app de TV (no consume
+  federación; servidor sin desplegar).
 
-**Sesión 2026-06-12 (cont.) — Smoke E2E Playwright (P3, gap de test 7):**
-- Harness en `web/e2e/`: cada spec arranca su servidor real (binario
-  con SPA embebida) y lo aprovisiona por API (wizard → admin →
-  bibliotecas → scan); fixtures de media generados con ffmpeg
-  (película MKV 2-audios → DirectStream/HLS; episodios MP4).
-- 3 smokes verdes: play→seek-restart→close→resume · backend SIGKILL
-  mid-play→ErrorOverlay acotado (PB-16) · ended→UpNext→siguiente.
-- Job `e2e-smoke` en ci.yml (paralelo; promover a `build.needs` cuando
-  demuestre estabilidad). data-testid nuevos: `player-error-overlay`,
-  `upnext-overlay`.
-- ⚠️ Los Chromium de Playwright NO decodifican H.264/AAC (open codecs):
-  local → `PW_CHROME` con Chrome/Chrome-for-Testing; CI → Chrome del
-  runner (`channel: "chrome"`). Documentado en `web/e2e/README.md`.
-- **(cont. 2)** Smokes (c) dub-switch (menú Audio → `?audio=1` →
-  resume al playhead) y (d) LiveTV zap (upstream M3U+MPEG-TS sintético
-  del propio test → import → transmux → zap por "Canales similares")
-  ✅. **Los 5 escenarios E2E del audit cubiertos.**
-- ✅ **Hallazgo (B2-adyacente) CERRADO (2026-06-14)**: `isSafeUpstream`
-  solo cubría el proxy passthrough — el **transmux lanzaba ffmpeg
-  contra la URL upstream sin validarla**. Cerrado: `GetOrStart` valida
-  `isSafeUpstream` antes de spawnear (métrica `unsafe_upstream`, error
-  → 502 `UPSTREAM_BLOCKED` en el handler). Knob nuevo
-  `iptv.allow_private_upstreams` (default false) que relaja el guard en
-  AMBOS planos (proxy + transmux) para tuners de LAN (HDHomeRun,
-  tvheadend) y loopback. El E2E (`helpers/server.ts`) lo activa para su
-  upstream sintético. Tests: `TestIsSafeUpstream_AllowPrivate`,
-  `TestTransmuxManager_GetOrStart_RejectsUnsafeUpstream`. Documentado en
-  `hubplay.example.yaml`.
+- **Remux por segmentos (pilar 2, la pieza principal de la sesión)**:
+  el remux (vídeo copiado) ya no usa un ffmpeg largo con manifest
+  sintético de 6 s. Índice de keyframes cacheado por fichero
+  (`stream/keyframes.go`, caché en `<cache>/../keyframes/`) → plan con
+  los cortes reales (`segplan.go`) → cada segmento es un ffmpeg corto e
+  independiente (`remux.go`, 60–90 ms; prefetch de 3). Ir adelante o
+  atrás es lo mismo: `RestartSessionAt` es no-op en estas sesiones.
+  Receta validada fotograma a fotograma (MKV/MP4, GOP abierto/cerrado,
+  B-frames, keyframes irregulares, audio AC3→AAC sobre rejilla común) y
+  documentada flag a flag en `remux.go`. Si no hay índice en 3 s, el remux
+  continuo de antes (la indexación sigue y la próxima vez va por
+  segmentos); `/stream/{id}/info` precalienta el índice. La federación
+  también sirve el manifest del plan y los segmentos bajo demanda (antes
+  dependía del manifest de ffmpeg, que en este modo no existe).
+  `seek-check.py` ampliado a 4 películas (regular, irregular+B-frames,
+  GOP abierto+AC3 en MP4, transcode) con desfase constante ±0,1 s y
+  continuidad entre segmentos: **verde**. Tests: unitarios de índice,
+  plan, args y remuxer; integración con ffmpeg real
+  (`remux_integration_test.go`, verificada con mutaciones); handler
+  local y de federación. Diseño en `docs/architecture/streaming.md`
+  § Segmented Remux.
 
-**Sesión 2026-06-14 — SSRF transmux (cierre del hallazgo arriba):**
-Ver bloque ✅. Nota: PB-29 (LookupIP sin ctx) y PB-30 (TOCTOU
-DNS-rebind vía dialer Control) siguen abiertos — son un endurecimiento
-distinto (validar en el `Control` del `net.Dialer`), no el hueco de
-cobertura que se acaba de cerrar.
+**Hallazgos de esta sesión sin arreglar:**
+- `gofmt -l internal/` lista ~145 ficheros: el gofmt de Go ≥1.19 reformatea
+  listas dentro de comentarios de doc (y algún orden de import). El CI no
+  lo exige. Si se quiere limpiar: un commit aislado `gofmt -w` sin más
+  cambios, nunca mezclado con trabajo real.
+- 13 PRs de Dependabot abiertos. **Ya cubiertos por #551** (cerrables):
+  #547 gorilla/websocket 1.5.3, #543 pion/dtls 3.1.4, #542 pion/stun 3.1.5.
+  **Majors que requieren trabajo**: #539 react-router 7→8, #511 golang
+  1.26 (choca con la restricción de Go 1.25 por `anacrolix/torrent`),
+  #508 pnpm/action-setup 6, #507/#506 acciones de docker. Resto (#550
+  vitest, #549 sharp, #540 go-deps, #532 x/net, #509 alpine 3.24): probar
+  y mergear uno a uno.
 
-- **Pendiente P3**: PB-19/26/29-31/33/36-39 + resto de gaps de test
-  del audit (1-6).
+---
+
+## ▶️ Próxima sesión (en orden)
+
+1. **Mergear esta rama** (PR → main) y desplegar en el servidor de la TV;
+   probar el QR con el móvil en real.
+2. **Probar saltos en la Mi TV** con el remux por segmentos (hecho
+   2026-11-26, `seek-check.py` verde); después, indexar keyframes en
+   segundo plano tras el escaneo y el reinicio inmediato del transcode
+   en saltos lejanos (`roadmap-producto.md` pilar 2, "Pendiente").
+3. **App TV: "Compartido contigo"** (federación; el servidor ya lo da) +
+   F-5/F-6 en servidor.
+4. **Dependabot**: cerrar los 3 ya cubiertos; mergear los menores tras CI;
+   decidir react-router 8 y golang 1.26 (este último bloqueado hasta que
+   `anacrolix/torrent` compile con x/net nuevo / Go ≥1.27).
+5. **Torrent — tests de handler** `Play`/`HLSPlaylist`/`HLSSegment`
+   (segmento inválido → 400, infohash desconocido → 404, mapeo de modos).
+6. **Fase 3 prod**: M23 (validación de config + overrides de env), cerrar
+   M24 (`example.yaml` completo), M21 (alerting/agregación documentado).
+7. **Playback P3**: PB-29/30 (DNS-rebind vía `Control` del `net.Dialer`;
+   cierra también B2), PB-26, PB-33, PB-39 (`SubtitleTrack` índice → 400).
+8. **Pequeños**: snake_case en `POST /setup/libraries`; `/health` fuera de
+   `/api/v1` devuelve la SPA.
+9. **Fase 5 gobernanza**: `SECURITY.md`, `CODEOWNERS`.
 
 ---
 
 ## 📋 Trabajo abierto
 
-**Roadmap principal:** `audit-2026-06-10-playback-chain.md` (cada item
-con ✅/pendiente y fix propuesto).
+**Roadmap principal:** `audit-2026-06-10-playback-chain.md`.
 
 | Prioridad | Tema | Items |
 |---|---|---|
-| Media | **Playback P3** | Smoke E2E Playwright (play→seek→resume, UpNext, dub-switch, LiveTV zap, server caído), PB-19/26/29-31/33/36-39 + gaps de test del audit |
-| Media | **Torrent** (audit 2026-09-10) | T-8 (de-dup descargas por infohash), T-9 (cancelación/timeout de descargas), tests de handler Play/HLS |
-| Media | **Fase 3 — observabilidad/config** (audit prod) | M21, M23, resto de M24 (alerting documentado, validación de config, completar `example.yaml`). ✅ M18/M19/M20 (2026-09-10) |
+| **Alta** | **Remux por segmentos: probar en TV + indexar tras escaneo** | Remux arreglado 2026-11-26 (`seek-check.py` verde). Falta verificación en ExoPlayer real e indexación previa de ficheros grandes. Pilar 2 |
+| **Alta** | **App TV sin federación** | La app no consume `/me/peers/*`. Pilar 3 |
+| Media | **Playback P3** | PB-19, PB-26, PB-29/30/31, PB-33, PB-36..39. Gaps de test: **1** (integración ffmpeg real en `stream/transcode`; solo el VOD de torrent la tiene), **4** (`rewriteHLSPlaylist`/`resolveURL` de IPTV sin tests), **5** parcial (Segment: seek-restart, 429, Stop↔Restart con `-race`), **6** parcial (trickplay: ACL ✅, TryLock/regeneración no). Gaps 2, 3 y 7 ✅ |
+| Media | **Torrent** | Tests de handler Play/HLS; T-6 refcount explícito (holder) desde el VOD |
+| Media | **Fase 3 — observabilidad/config** | M21, M23, resto de M24 |
 | Media | **Fase 4 — frontend** | B10 (ESLint type-aware), B14 (tests de páginas grandes) |
-| Baja | **Fase 5 — gobernanza** | `SECURITY.md`, `CODEOWNERS` (README ✅ 2026-09-10) |
-| Baja | **Bajos sueltos** | B2 (DNS-rebind TOCTOU — parte se arregla con PB-29/30), B3 (refresh TTL 30d), M6 (backup periódico) |
+| Media | **Dependencias** | 13 PRs de Dependabot (ver hallazgos arriba) |
+| Baja | **Fase 5 — gobernanza** | `SECURITY.md`, `CODEOWNERS` (README ✅) |
+| Baja | **Bajos sueltos** | B2 (DNS-rebind; se cierra con PB-29/30), B3 (refresh TTL 30d), M6 (backup periódico), snake_case en `POST /setup/libraries`, `/health` sin prefijo → SPA |
 
 **Features de producto (gap vs Jellyfin/Plex, no son bugs):**
 Chromecast, SyncPlay, control remoto de sesiones, ajustes de
-apariencia/offset de subtítulos (fácil ahora: el render es propio —
-`useSubtitleOverlay`), audio boost. Y retirar del backend los endpoints
-de subtítulos online que ya no tienen consumer
-(`/subtitles/external*` + provider OpenSubtitles).
+apariencia/offset de subtítulos (fácil: el render es propio —
+`useSubtitleOverlay`), audio boost. Y retirar del backend los endpoints de
+subtítulos online que ya no tienen consumer (`/subtitles/external*` +
+provider OpenSubtitles).
 
 **Acciones de OPERADOR (no de código):**
+- Desplegar la versión actual en el servidor de la TV.
 - `NSSM_EXPECTED_SHA256`: tras la próxima release, copiar el sha256
   logueado, contrastarlo y fijar la repo variable.
 - SignPath: aplicar en signpath.org + `vars.HUBPLAY_SIGNING_ENABLED`.
   Guía: `docs/architecture/windows-installer-signing.md`.
+- Probar el instalador Windows de la próxima release (W-1/W-2 corregidos
+  el 2026-09-10; el servicio instalado en la máquina de desarrollo es de
+  una release anterior y tiene ambos bugs).
 
 **Pendientes menores (de audits cerrados):** TT-8 resto (comentarios en
 inglés en sub-paquetes de handlers, incremental), F15-10/11/12 (polish),
@@ -286,76 +193,78 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
 
 ## 🏛 Referencias vivas
 
+- `roadmap-producto.md` — **visión y pilares** (qué es "terminado"),
+  estado medido, qué le falta a la app de TV.
+- `scripts/seek-check.py` — prueba de saltos adelante/atrás contra el
+  binario real (criterio de "terminado" del pilar de reproducción; 4
+  películas: remux regular, irregular+B-frames, GOP abierto+AC3, transcode).
 - `architecture-decisions.md` — ADRs (AppError, observability/sink,
   keystore, preflight, sqlc adapter, ADR-026 logs).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,
-  comentarios en español, regeneración sqlc.
-- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback;
-  P0/P1/P2 ✅, P3 abierta; PB-40..44 de reportes de usuario ✅).
-- `audit-2026-09-10-torrent-vod.md` — **NUEVO** audit del módulo torrent
-  (streaming, remux VOD, descargas, fuentes). T-1..T-7/T-10/T-11 ✅;
-  quedan T-8, T-9 y tests del handler HLS.
-- `audit-2026-06-12-federation.md` — audit del módulo P2P/
-  federación. Base cripto/auth sólida; abiertos F-1 (SSRF en redirects
-  del cliente saliente) y F-2 (cuotas por peer prometidas y no
-  implementadas → DoS de recursos locales) como 🟠, + 6 🟡 (exp sin
-  techo, revoke no fail-closed, HLS bajo rate-limit, etc.). Key
-  rotation y download siguen sin implementar (Phase 2/7).
+  comentarios en español, regeneración sqlc, desarrollo en Windows.
+- `audit-2026-06-10-playback-chain.md` — **roadmap activo** (playback).
+- `audit-2026-09-10-torrent-vod.md` — módulo torrent (todo ✅ salvo tests
+  de handler HLS).
+- `audit-2026-06-12-federation.md` — P2P/federación.
 - `audit-2026-06-08-production-readiness.md` — roadmap secundario
   (Fases 3–5 abiertas).
 - `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend.
 - `web/verify/` — arnés de verificación en navegador (layout real).
+- `web/e2e/` — smokes Playwright (ver su README: hace falta Chrome real).
 
 ## 📦 Archivo (`archive/`, no se lee al inicio)
 
-- `2026-06-10-supply-chain-and-playback.md` — **esta sesión**: Fase 2
-  supply-chain, audit playback + P0–P1, PB-40..44, quick wins del
-  player, Docker/CI, incidencias de squash-merges.
-- `2026-05-27-to-06-08.md` — endurecimiento prod (Fases 0/1 + Bloques
-  1/2), F15-5, TT-8 root, audits 2026-05-27 cerrados.
-- `2026-05-19-to-05-27.md` y anteriores — sesiones históricas.
-- `audit-2026-05-14-go-backend-review.md` + `intervention-2026-05-14.md`,
-  `audit-2026-05-27-architecture-macro.md` +
-  `audit-2026-05-27-per-package-review.md` — audits cerrados.
-- `per-user-channel-order-spec-shipped.md` y audits 2026-04/05 antiguos.
+- `2026-06-12-to-09-16.md` — P2 playback (VAAPI, ABR, surround, DV),
+  smokes E2E, SSRF transmux, revisión de septiembre (audit torrent,
+  W-1/W-2 Windows, README), descubrimiento LAN para la app de TV, caché de
+  subtítulos, CI en rojo de #551.
+- `2026-06-10-supply-chain-and-playback.md` — Fase 2 supply-chain, audit
+  playback + P0–P1, PB-40..44, Docker/CI.
+- `2026-05-27-to-06-08.md` y anteriores — sesiones históricas.
+- Audits cerrados: `audit-2026-05-14-*`, `audit-2026-05-27-*`, 2026-04/05.
 
 ---
 
 ## 🧠 Aprendizajes transversales
 
-Patrones consolidados que vale la pena replicar:
-
 - **Notify-channel + deadline** para tests determinísticos (canon F15-1):
   buffer 32, send non-blocking, `select { case <-notify; case <-deadline }`.
 - **Sink pattern** para observability: interfaces locales por paquete con
   `noopSink{}` default. Evita ciclos de import.
-- **Package-level seam** (`var timeNow = time.Now`) cuando la API es ancha
-  (33+ callsites): idiomático stdlib, opt-in para tests. Mejor que DI
-  cuando cambiar el constructor desborda el beneficio.
+- **Package-level seam** (`var timeNow = time.Now`,
+  `var tuneClientConfig`) cuando la API es ancha o el colaborador es
+  externo: idiomático, opt-in para tests.
 - **Feature modules** (`library.Module`, `iptv.Module`) con shutdown LIFO.
-- **Adapter en la frontera** para no importar `db` en paquetes de dominio
-  (structs espejo + conversión en el composition root).
+- **Adapter en la frontera** para no importar `db` en paquetes de dominio.
 - **Opt-in via repo variable** (`vars.X_ENABLED`) para features de CI con
-  setup externo del operador (SignPath, NSSM_EXPECTED_SHA256).
+  setup externo del operador.
 - **Cerrar por análisis** cuando el runtime moderno resuelve el problema
   teórico. No refactorizar sin bug observable.
 - **Fix centralizado vs audit por paquete** — un punto en vez de N.
 - **Verificación en navegador real para cambios visuales/de layout**:
-  jsdom no ve layout (PB-42/PB-44 eran invisibles para los tests).
+  jsdom no ve layout.
 - **React Compiler + stores externos mutables**: aislar con
-  `"use no memo"`; refs no se leen en render (usar useState
-  initializer para valores congelados por montaje).
-- **(Nuevo) El tipo TS puede mentir sobre el wire** (PB-43): los
-  fixtures de test deben tener la forma del WIRE, no del tipo; la
-  conversión vive en la frontera del cliente (`normalizeMediaStream`).
-  Si un helper tolera dos formas (`stream_type ?? type`), es señal de
-  un desajuste sin resolver.
-- **(Nuevo) Squash-merge de rama viva = conflictos en cascada** y
-  resoluciones manuales peligrosas (main acabó con código duplicado).
-  Rama nueva tras cada merge, o merge-commit para ramas largas.
-- **(Nuevo) Multi-arch sin QEMU**: stages de build con
-  `--platform=$BUILDPLATFORM` + `GOOS/GOARCH=$TARGETARCH`
-  (CGO_ENABLED=0). 20min → ~6-8min.
-- **(Nuevo) Guards de drift** (OpenAPI router coverage, sqlc-verify)
-  cazan lo que el dev olvida — correr `go test ./...` COMPLETO antes de
-  cada push, no solo los paquetes tocados.
+  `"use no memo"`; refs no se leen en render.
+- **El tipo TS puede mentir sobre el wire** (PB-43): fixtures con la forma
+  del WIRE; conversión en la frontera del cliente.
+- **Squash-merge de rama viva = conflictos en cascada**. Rama nueva tras
+  cada merge.
+- **Multi-arch sin QEMU**: `--platform=$BUILDPLATFORM` + `GOOS/GOARCH`.
+- **Guards de drift** (OpenAPI, sqlc-verify): correr `go test ./...`
+  COMPLETO antes de cada push.
+- **(Nuevo) Nunca texto de usuario crudo en un lenguaje de consulta**
+  (FTS5 `MATCH`, `to_tsquery`): sanear en la frontera, en TODOS los
+  dialectos y TODOS los call sites (el bug de FTS5 estaba duplicado en
+  federación).
+- **(Nuevo) `cmd.StderrPipe()` + `cmd.Wait()` pierde líneas**: `Wait`
+  cierra el read-end al reapear. Pipe propio (`os.Pipe`) si el tail de
+  stderr decide algo (fix de #551).
+- **(Nuevo) Prototipar ffmpeg antes de codificar**: el remux por
+  segmentos destapó 6 trampas de ffmpeg (cortes relativos al arranque,
+  `-ss` de MKV que cae antes, `-ss` de salida que pone tiempos a 0, `-to`
+  por DTS, DTS negativo solo en el segmento 0, SPS/PPS ausentes en
+  keyframes no IDR) que una implementación "de memoria" habría metido.
+  Validar fotograma a fotograma con ffprobe y fijarlo con tests de
+  integración + mutaciones.
+- **(Nuevo) Apuntar el trabajo al cerrar sesión**: dos veces se ha
+  reconstruido trabajo no documentado desde el git log.
