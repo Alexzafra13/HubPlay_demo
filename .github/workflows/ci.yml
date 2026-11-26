@@ -214,9 +214,9 @@ jobs:
 
       - name: Verify sqlc-generated code is in sync
         env:
-          # setup-go fija GOTOOLCHAIN=local; sqlc v1.31.1 exige go>=1.26
-          # mientras go.mod va en 1.25 — auto deja que `go install`
-          # descargue el toolchain que el módulo de sqlc declara.
+          # setup-go fija GOTOOLCHAIN=local; auto deja que `go install`
+          # descargue el toolchain que declare el módulo de sqlc si algún
+          # día pide uno más nuevo que el de go.mod.
           GOTOOLCHAIN: auto
         run: make sqlc-verify
 
@@ -232,13 +232,13 @@ jobs:
 
       - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
-          # Pinned to avoid CI breaking on every upstream release. We're
-          # on the v2 line because go.mod targets Go 1.25 and the last
-          # v1 release (v1.64.8) is built with go 1.24, so it can't
-          # analyse the module. Matching `.golangci.yml` uses the v2
+          # Pinned to avoid CI breaking on every upstream release. The
+          # binary must be built with a Go >= the one go.mod targets
+          # (1.26): v2.15.0 is built with go 1.26 (v2.5.0 was go 1.25 and
+          # refuses to load the module). Matching `.golangci.yml` uses the v2
           # schema. golangci-lint-action v7 is the first tag that
           # accepts v2 binaries; v6 hard-rejects them in parseVersion.
-          version: v2.5.0
+          version: v2.15.0
 
   vuln:
     name: Vulnerability scan

@@ -39,8 +39,9 @@ func TestKillProcessGroup_KillsRunningProcess(t *testing.T) {
 		t.Fatalf("KillProcessGroup: %v", err)
 	}
 	select {
-	case <-done:
-		// process reaped — killed as expected
+	case werr := <-done:
+		// process reaped — killed as expected (Wait reports the signal)
+		t.Logf("wait after kill: %v", werr)
 	case <-time.After(5 * time.Second):
 		t.Fatal("process not killed within 5s")
 	}

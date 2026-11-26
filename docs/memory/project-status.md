@@ -18,11 +18,14 @@
    apuntarlos antes de nada (ya pasó dos veces: junio y septiembre).
 3. Mirar CI de `main` (GitHub Actions: CI, Docker, Release) y PRs abiertos.
 4. Verificar que todo está verde ANTES de tocar nada:
-   - `go build ./... && go vet ./... && go test ./...` (Go **1.25.x**; con
-     1.27 `anacrolix/torrent` no compila, ver `conventions.md`).
+   - `go build ./... && go vet ./... && go test ./...` (Go **1.26.11** desde
+     2026-11-26; `GOTOOLCHAIN=auto` lo descarga solo. Con `anacrolix/torrent`
+     v1.63 también compila con 1.27).
    - `cd web && CI=true pnpm install --frozen-lockfile && pnpm exec tsc -b
      && pnpm test --run && pnpm exec knip && pnpm exec eslint .`
-   - `golangci-lint run ./...` (CI usa v2.5.0).
+   - `golangci-lint run ./...` (CI usa v2.15.0; tiene que estar compilado
+     con un Go >= el de `go.mod`, si no se niega a cargar la config).
+     Sin binario local: `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...`.
 5. Elegir la siguiente tarea de **"▶️ Próxima sesión"** (abajo, en orden).
 6. Al cerrar: actualizar este fichero (estado + próxima sesión) y el audit
    que corresponda; mover a `archive/` lo que deje de ser vivo.
@@ -32,18 +35,64 @@
 ## 🔭 Estado actual (2026-11-26, retomando tras ~2 meses parado)
 
 **Salud:** MVP funcional, cerca de early-production. `main` en
-`8e6559b` (#551) con **CI, Docker y Release verdes**. Sin issues abiertos.
+`0d3cefd` (#552, mergeado sin esperar al CI) con **CI y Release en rojo**
+(Docker verde). Sin issues abiertos. Ver "Revisión pre-app de TV" abajo.
 
 | Área | Estado |
 |---|---|
-| Tests backend | `go test ./...` verde (Linux, Go 1.25.13) |
+| Tests backend | `go test ./...` verde: 45 paquetes (Linux, Go 1.25.13 en `main` y 1.26.11 en la rama de la revisión) |
 | Tests frontend | **783/783** vitest (108 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning conocido (React Compiler + `useVirtualizer`, no accionable) |
-| Rama de trabajo | `claude/retomar-proyecto-actualizar-znt18w` (sesión 2026-11-26, sin mergear) |
+| CI de `main` | ❌ Vulnerability scan (15 vulns, la mayoría de stdlib solo arregladas en Go 1.26) · ❌ E2E `livetv-zap` (timeout 30 s, 2/2 intentos) · ❌ Release macOS (evermeet `getrelease` → 410) ⇒ **no se publica la nightly** |
+| Rama de trabajo | `claude/affectionate-euler-y94rf9` (revisión 2026-11-26, sin mergear) |
 | Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta** (ver tabla de trabajo abierto) |
 | Audit torrent 2026-09-10 | **Todos los hallazgos ✅** (T-8/T-9 el 2026-11-26). Queda: tests de handler `Play`/`HLSPlaylist`/`HLSSegment` y refcount explícito VOD (T-6) |
 | Audit prod 2026-06-08 | Fases 0/1/2 ✅. Fase 3: M18/M19/M20 ✅, M24 parcial, M21/M23 abiertos. Fases 4–5 abiertas |
 | Audit federación 2026-06-12 | F-1/3/4/10 ✅, F-2 parcial; F-5..F-9, F-11..F-13 abiertos |
 | Producción (servidor de la TV, `192.168.1.100:8097`) | Sigue con una imagen anterior a la caché de subtítulos, el id de instalación y el fix de búsqueda. **Pendiente desplegar.** |
+
+### Revisión pre-app de TV (2026-11-26, segunda sesión del día)
+
+Local, sobre `main` (`0d3cefd`): build, vet, `go test` (45 paquetes),
+golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
+**verdes**. Pero el CI de `main` está en rojo desde #552:
+
+- **Vulnerability scan** (15): 11 de la librería estándar (net/http,
+  crypto/tls, crypto/x509, net/textproto) con arreglo **solo en Go
+  1.26.9–1.26.11**: Go 1.25 ya no recibe parches (salió 1.27). Más
+  `x/net` 0.54 → 0.60, `otel/trace` 1.43 → 1.47, `anacrolix/torrent`
+  1.61 y `gorilla/websocket` 1.5.3 (PRNG débil en la máscara).
+  **Hecho en la rama:** Go 1.26.11 (`go.mod` + imagen
+  `golang:1.26.11-alpine` del Dockerfile), `anacrolix/torrent` 1.63,
+  `x/net` 0.63, otel 1.47, `gorilla/websocket` con el fix. Build, vet y
+  `go test ./...` verdes con 1.26.11; compila también con 1.27.4, así que
+  la trampa de "compilar siempre con el Go 1.25 de `~/sdk/go`" desaparece.
+  `govulncheck` no se pudo correr aquí: lo confirma el CI.
+- **Lint** (consecuencia de lo anterior): golangci-lint v2.5.0 está
+  compilado con Go 1.25 y se niega a cargar un módulo `go 1.26`. Subido a
+  v2.15.0 en `ci.yml`. Esa versión trae una regla nueva de gosec, **G703**
+  (path traversal por taint analysis), con **43 avisos** en handlers
+  (media/image, trickplay, stream, iptv logo, uploads, torrent HLS…). Los
+  revisados a mano (uploads `DeleteEntry`, torrent `HLSSegment`, avatar)
+  pasan por saneadores propios (`SanitizeSubpath`/`ResolveSubpath`,
+  `IsValidSegmentName`, lookup en mapa de sesiones) que el análisis no
+  reconoce: el mismo caso que G304, ya excluido en `.golangci.yml`.
+  **Decisión pendiente del usuario:** excluir G703 igual que G304
+  (documentando el porqué) o revisar los 43 uno a uno. Hasta entonces el
+  job Lint de la rama sale rojo con esos 43. El errcheck nuevo
+  (`procutil_unix_test.go`) ya está arreglado.
+- **E2E `livetv-zap`**: falla en CI (el `<video>` del canal no llega a
+  reproducir en 30 s, 2/2 intentos); #552 no tocó IPTV y en local pasa
+  siempre (3 s, Chromium). Los demás specs fallan en local por el Chromium
+  sin H.264 (el README ya pide Chrome real), así que aquí no se puede
+  reproducir el entorno del CI. Siguiente paso: relanzar el job; si
+  vuelve a fallar, bajar el artefacto `playwright-report` (trace).
+- **Release macOS**: `https://evermeet.cx/ffmpeg/getrelease/zip` devuelve
+  **410 Gone**. Arreglado en `scripts/fetch-ffmpeg.sh`: la URL versionada
+  (`ffmpeg-9.1.zip`) se saca de la API de info (`download.zip.url`). No
+  verificable desde este entorno (la descarga redirige a un mirror en el
+  puerto 4242 que el proxy corta): lo confirma el siguiente Release. La
+  API de info ya no publica `sha256`, así que macOS sigue en verificación
+  `soft` (ya lo estaba).
 
 ### Sesión 2026-11-26 — retomar + cerrar pendientes concretos
 
@@ -120,17 +169,21 @@
 - 13 PRs de Dependabot abiertos. **Ya cubiertos por #551** (cerrables):
   #547 gorilla/websocket 1.5.3, #543 pion/dtls 3.1.4, #542 pion/stun 3.1.5.
   **Majors que requieren trabajo**: #539 react-router 7→8, #511 golang
-  1.26 (choca con la restricción de Go 1.25 por `anacrolix/torrent`),
-  #508 pnpm/action-setup 6, #507/#506 acciones de docker. Resto (#550
-  vitest, #549 sharp, #540 go-deps, #532 x/net, #509 alpine 3.24): probar
-  y mergear uno a uno.
+  1.26 (**superado** por la rama de la revisión: Go 1.26.11 + torrent
+  1.63; #532 x/net también), #508 pnpm/action-setup 6, #507/#506 acciones
+  de docker. Resto (#550 vitest, #549 sharp, #540 go-deps, #509 alpine
+  3.24): probar y mergear uno a uno.
 
 ---
 
 ## ▶️ Próxima sesión (en orden)
 
-1. **Mergear esta rama** (PR → main) y desplegar en el servidor de la TV;
-   probar el QR con el móvil en real.
+0. **CI de `main` en verde** (rama `claude/affectionate-euler-y94rf9`):
+   decidir G703 (excluir como G304 o revisar los 43), PR → main
+   **esperando al CI**, relanzar/investigar el E2E `livetv-zap` y
+   confirmar que el Release de macOS publica la nightly.
+1. **Desplegar** `main` en el servidor de la TV (lleva #552: remux por
+   segmentos, QR, búsqueda) y probar el QR con el móvil en real.
 2. **Probar saltos en la Mi TV** con el remux por segmentos (hecho
    2026-11-26, `seek-check.py` verde); después, indexar keyframes en
    segundo plano tras el escaneo y el reinicio inmediato del transcode
@@ -266,5 +319,12 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
   keyframes no IDR) que una implementación "de memoria" habría metido.
   Validar fotograma a fotograma con ffprobe y fijarlo con tests de
   integración + mutaciones.
+- **(Nuevo) No mergear sin el CI terminado**: #552 se mergeó 11 s después
+  de abrir el PR y `main` quedó en rojo en 3 jobs (y sin nightly).
+- **(Nuevo) Una versión de Go sin soporte acumula CVEs de stdlib sin
+  arreglo posible**: cuando sale Go 1.N+2, el 1.N deja de recibir
+  parches. No fijar el proyecto a una versión por una dependencia;
+  subir la dependencia (aquí `anacrolix/torrent` 1.63 resolvió el
+  bloqueo con 1.27).
 - **(Nuevo) Apuntar el trabajo al cerrar sesión**: dos veces se ha
   reconstruido trabajo no documentado desde el git log.
