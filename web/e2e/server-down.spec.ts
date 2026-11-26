@@ -29,14 +29,29 @@ test.describe("smoke: backend caído mid-play", () => {
 
     server.killHard();
 
-    // Con ~30s de buffer sano, el usuario no nota el kill hasta
-    // agotarlo. Seekear a zona NO bufferizada hace el fallo visible
-    // ya — el caso "seekeo y el server no está" — y arranca el reloj
-    // del presupuesto de error del audit en la acción del usuario.
-    await page.evaluate(() => {
+    // Con buffer sano, el usuario no nota el kill hasta agotarlo.
+    // Seekear a zona NO bufferizada hace el fallo visible ya — el caso
+    // "seekeo y el server no está" — y arranca el reloj del presupuesto
+    // de error del audit en la acción del usuario. El destino se calcula
+    // tras el final de lo bufferizado: el remux por segmentos llena el
+    // buffer en segundos (hasta el techo de hls.js), así que un tiempo
+    // fijo puede caer dentro y no tocar la red (pasó con un 200 fijo).
+    const seek = await page.evaluate(() => {
       const v = document.querySelector("video");
-      if (v) v.currentTime = 200;
+      if (!v) return null;
+      let end = v.currentTime;
+      for (let i = 0; i < v.buffered.length; i++) {
+        if (v.buffered.start(i) <= v.currentTime + 1) end = Math.max(end, v.buffered.end(i));
+      }
+      const target = end + 30;
+      if (target < v.duration - 10) v.currentTime = target;
+      return { bufferedEnd: end, target, duration: v.duration };
     });
+    expect(seek, "no hay <video>").not.toBeNull();
+    expect(
+      seek!.target,
+      `película entera en buffer (${JSON.stringify(seek)}): alarga MOVIE_DURATION`,
+    ).toBeLessThan(seek!.duration - 10);
 
     // El player debe rendirse con un error terminal traducido, no
     // reintentar para siempre (PB-16: 3 recoveries con backoff). El

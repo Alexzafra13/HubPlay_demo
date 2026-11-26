@@ -55,14 +55,38 @@ function startUpstream(): Promise<{ url: string; close: () => void }> {
 /** El <video> del canal (ChannelPlayer lo etiqueta con el nombre)
  *  reproduce de verdad — la definición de "sin spinner colgado". */
 async function waitChannelPlaying(page: Page, name: string): Promise<void> {
-  await page.waitForFunction(
-    (n) => {
+  try {
+    await page.waitForFunction(
+      (n) => {
+        const v = document.querySelector(`video[aria-label="${n}"]`);
+        return v instanceof HTMLVideoElement && v.readyState >= 2 && v.currentTime > 0.5;
+      },
+      name,
+      { timeout: 30_000 },
+    );
+  } catch (err) {
+    // Estado del <video> al vencer el plazo: distingue "nunca cargó"
+    // (readyState 0, networkState) de "cargó pero no avanza" o de un
+    // MediaError del decoder. Sin esto el fallo solo dice "timeout".
+    const state = await page.evaluate((n) => {
       const v = document.querySelector(`video[aria-label="${n}"]`);
-      return v instanceof HTMLVideoElement && v.readyState >= 2 && v.currentTime > 0.5;
-    },
-    name,
-    { timeout: 30_000 },
-  );
+      if (!(v instanceof HTMLVideoElement)) return { found: false };
+      const ranges: string[] = [];
+      for (let i = 0; i < v.buffered.length; i++) {
+        ranges.push(`${v.buffered.start(i).toFixed(1)}-${v.buffered.end(i).toFixed(1)}`);
+      }
+      return {
+        found: true,
+        readyState: v.readyState,
+        networkState: v.networkState,
+        currentTime: v.currentTime,
+        paused: v.paused,
+        buffered: ranges.join(","),
+        error: v.error ? `${v.error.code} ${v.error.message}` : null,
+      };
+    }, name);
+    throw new Error(`canal "${name}" sin reproducir: ${JSON.stringify(state)}`, { cause: err });
+  }
 }
 
 test.describe("smoke: zapping Live TV", () => {

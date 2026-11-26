@@ -52,6 +52,11 @@ test.describe("smoke: reproducción VOD", () => {
     await page.mouse.move(640, 360);
     await page.getByRole("button", { name: "Atrás" }).click();
     await expect(page.locator("video")).toBeHidden({ timeout: 10_000 });
+    // Al cerrar un deep-link de película, ItemDetail guarda el progreso
+    // y DESPUÉS hace navigate(-1). El <video> se oculta antes, así que
+    // reabrir ya mismo carreaba con esa vuelta atrás ("navigation
+    // interrupted" / ERR_ABORTED en el goto). Esperar a salir de la ficha.
+    await expect(page).not.toHaveURL(new RegExp(`/items/${movieId}`), { timeout: 10_000 });
 
     // Reabre: debe reanudar cerca del punto del seek, no desde cero.
     await openPlayer(page, server, movieId);

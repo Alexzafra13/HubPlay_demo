@@ -44,9 +44,23 @@ test.describe("smoke: UpNext entre episodios", () => {
     await expect(overlay).toBeHidden({ timeout: 10_000 });
 
     // El siguiente episodio arranca desde el principio y reproduce.
-    await waitForPlayback(page, 0.5);
-    const t = await videoTime(page);
-    expect(t).toBeGreaterThan(0.2);
-    expect(t).toBeLessThan(EPISODE_DURATION - 5);
+    // No vale waitForPlayback(0.5): justo tras el click el <video> aún
+    // puede ser el del episodio terminado (currentTime = 30 > 0.5) y la
+    // lectura siguiente caía en el viejo (30) o en el nuevo recién
+    // cargado (0). Se espera a reproducir dentro del rango del nuevo.
+    await page
+      .waitForFunction(
+        (maxT) => {
+          const v = document.querySelector("video");
+          return !!v && v.readyState >= 2 && v.currentTime > 0.5 && v.currentTime < maxT;
+        },
+        EPISODE_DURATION - 5,
+        { timeout: 30_000 },
+      )
+      .catch(async (err) => {
+        throw new Error(`el siguiente episodio no arrancó desde el principio (t=${await videoTime(page)})`, {
+          cause: err,
+        });
+      });
   });
 });
