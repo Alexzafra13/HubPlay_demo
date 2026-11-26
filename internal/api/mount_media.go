@@ -123,6 +123,7 @@ func mountLibrariesItemsAndIPTV(r chi.Router, deps Dependencies, fedImageDir str
 		ExternalIDs:  deps.Catalog.ExternalIDs,
 		People:       deps.Catalog.People,
 		Collections:  deps.Catalog.Collections,
+		Studios:      deps.Catalog.Studios,
 		Providers:    deps.Providers.Manager,
 		Identifier:   identifier,
 		TrickplayDir: trickplayDir,

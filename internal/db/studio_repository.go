@@ -29,8 +29,10 @@ type StudioRepository struct {
 	sq *sqlc.Queries
 	pq *sqlc_pg.Queries
 
-	listItemsSQL    string
+	listItemsSQL     string
 	setItemStudioSQL string
+	slugForItemSQL   string
+	adoptSQL         string
 }
 
 func NewStudioRepository(driver string, database *sql.DB) *StudioRepository {
@@ -56,6 +58,12 @@ func NewStudioRepository(driver string, database *sql.DB) *StudioRepository {
 			  AND i.type IN ('movie', 'series')
 			ORDER BY COALESCE(i.year, 0) DESC, i.title ASC`),
 		setItemStudioSQL: rewritePlaceholders(driver, `UPDATE metadata SET studio_id = NULLIF(?, '') WHERE item_id = ?`),
+		slugForItemSQL: rewritePlaceholders(driver, `SELECT s.slug FROM metadata m
+			JOIN studios s ON s.id = m.studio_id
+			WHERE m.item_id = ?`),
+		adoptSQL: rewritePlaceholders(driver, `UPDATE studios
+			SET tmdb_id = ?, logo_url = CASE WHEN ? <> '' THEN ? ELSE logo_url END
+			WHERE id = ?`),
 	}
 	if IsPostgres(driver) {
 		r.pq = sqlc_pg.New(database)
@@ -113,44 +121,7 @@ func (r *StudioRepository) EnsureStudio(ctx context.Context, name, logoURL strin
 	}
 	id := "studio:" + slug
 	if tmdbID != nil && *tmdbID > 0 {
-		// Upsert by tmdb_id — the canonical dedupe key when the scanner
-		// has provider data. The query refreshes logo_url only when
-		// non-empty so a re-scan that comes back without a logo (TMDb
-		// transient gap) doesn't blank an existing one.
-		if r.useSQLite() {
-			if err := r.sq.UpsertStudio(ctx, sqlc.UpsertStudioParams{
-				ID:      id,
-				TmdbID:  sql.NullInt64{Int64: *tmdbID, Valid: true},
-				Name:    name,
-				Slug:    slug,
-				LogoUrl: logoURL,
-			}); err != nil {
-				return "", fmt.Errorf("upsert studio (tmdb=%d): %w", *tmdbID, err)
-			}
-			// The conflict resolution may have kept the existing row;
-			// resolve the actual id by tmdb_id rather than trusting
-			// the inserted id (different slug → different id, but the
-			// tmdb_id wins).
-			row, gerr := r.sq.GetStudioByTMDBID(ctx, sql.NullInt64{Int64: *tmdbID, Valid: true})
-			if gerr == nil {
-				return row.ID, nil
-			}
-			return id, nil
-		}
-		if err := r.pq.UpsertStudio(ctx, sqlc_pg.UpsertStudioParams{
-			ID:      id,
-			TmdbID:  sql.NullInt32{Int32: int32(*tmdbID), Valid: true},
-			Name:    name,
-			Slug:    slug,
-			LogoUrl: logoURL,
-		}); err != nil {
-			return "", fmt.Errorf("upsert studio (tmdb=%d): %w", *tmdbID, err)
-		}
-		row, gerr := r.pq.GetStudioByTMDBID(ctx, sql.NullInt32{Int32: int32(*tmdbID), Valid: true})
-		if gerr == nil {
-			return row.ID, nil
-		}
-		return id, nil
+		return r.ensureStudioWithTMDB(ctx, id, name, slug, logoURL, *tmdbID)
 	}
 	// No tmdb_id: dedupe by slug (legacy backfill path).
 	if r.useSQLite() {
@@ -175,6 +146,103 @@ func (r *StudioRepository) EnsureStudio(ctx context.Context, name, logoURL strin
 		return "", fmt.Errorf("upsert studio (slug=%s): %w", slug, err)
 	}
 	return id, nil
+}
+
+// ensureStudioWithTMDB resuelve la fila del estudio cuando el scanner trae
+// tmdb_id, en este orden:
+//
+//  1. Ya hay una fila con ese tmdb_id → esa (refresca el logo si llega uno).
+//  2. Hay una fila con el mismo slug y SIN tmdb_id (la creó el backfill de la
+//     migración 032) → se adopta: se le pone el tmdb_id. Antes el INSERT
+//     chocaba por id/slug — el ON CONFLICT solo cubre tmdb_id —, EnsureStudio
+//     fallaba y el item quedaba sin enlazar tras cada "Actualizar metadatos"
+//     (estudio con 0 títulos aunque la ficha enlazaba a él).
+//  3. Hay una fila con el mismo slug pero OTRO tmdb_id (dos compañías con el
+//     mismo nombre) → fila propia con slug `<slug>-<tmdb_id>`.
+//  4. Nada → INSERT (el ON CONFLICT(tmdb_id) cubre la carrera entre scans).
+func (r *StudioRepository) ensureStudioWithTMDB(ctx context.Context, id, name, slug, logoURL string, tmdbID int64) (string, error) {
+	if existing, err := r.getByTMDBID(ctx, tmdbID); err != nil {
+		return "", err
+	} else if existing != nil {
+		if logoURL != "" && logoURL != existing.LogoURL {
+			if err := r.adopt(ctx, existing.ID, tmdbID, logoURL); err != nil {
+				return "", err
+			}
+		}
+		return existing.ID, nil
+	}
+	sameSlug, err := r.GetBySlug(ctx, slug)
+	if err != nil {
+		return "", err
+	}
+	if sameSlug != nil {
+		if sameSlug.TMDBID == nil {
+			if err := r.adopt(ctx, sameSlug.ID, tmdbID, logoURL); err != nil {
+				return "", err
+			}
+			return sameSlug.ID, nil
+		}
+		slug = fmt.Sprintf("%s-%d", slug, tmdbID)
+		id = "studio:" + slug
+	}
+	if r.useSQLite() {
+		if err := r.sq.UpsertStudio(ctx, sqlc.UpsertStudioParams{
+			ID:      id,
+			TmdbID:  sql.NullInt64{Int64: tmdbID, Valid: true},
+			Name:    name,
+			Slug:    slug,
+			LogoUrl: logoURL,
+		}); err != nil {
+			return "", fmt.Errorf("upsert studio (tmdb=%d): %w", tmdbID, err)
+		}
+	} else if err := r.pq.UpsertStudio(ctx, sqlc_pg.UpsertStudioParams{
+		ID:      id,
+		TmdbID:  sql.NullInt32{Int32: int32(tmdbID), Valid: true},
+		Name:    name,
+		Slug:    slug,
+		LogoUrl: logoURL,
+	}); err != nil {
+		return "", fmt.Errorf("upsert studio (tmdb=%d): %w", tmdbID, err)
+	}
+	// La resolución del conflicto puede haber conservado otra fila (carrera
+	// con otro scan): el id real es el de ese tmdb_id.
+	if row, err := r.getByTMDBID(ctx, tmdbID); err == nil && row != nil {
+		return row.ID, nil
+	}
+	return id, nil
+}
+
+// getByTMDBID devuelve la fila con ese tmdb_id, o (nil, nil) si no hay.
+func (r *StudioRepository) getByTMDBID(ctx context.Context, tmdbID int64) (*librarymodel.Studio, error) {
+	if r.useSQLite() {
+		row, err := r.sq.GetStudioByTMDBID(ctx, sql.NullInt64{Int64: tmdbID, Valid: true})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get studio by tmdb_id: %w", err)
+		}
+		s := studioFromSqliteRow(row)
+		return &s, nil
+	}
+	row, err := r.pq.GetStudioByTMDBID(ctx, sql.NullInt32{Int32: int32(tmdbID), Valid: true})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get studio by tmdb_id: %w", err)
+	}
+	s := studioFromPgRow(row)
+	return &s, nil
+}
+
+// adopt fija el tmdb_id de una fila (la legacy del backfill) y refresca su
+// logo solo si llega uno: un re-scan sin logo no borra el que había.
+func (r *StudioRepository) adopt(ctx context.Context, id string, tmdbID int64, logoURL string) error {
+	if _, err := r.db.ExecContext(ctx, r.adoptSQL, tmdbID, logoURL, logoURL, id); err != nil {
+		return fmt.Errorf("adopt studio %s (tmdb=%d): %w", id, tmdbID, err)
+	}
+	return nil
 }
 
 // GetBySlug fetches the canonical row for /studios/<slug> rendering.
@@ -258,6 +326,23 @@ func (r *StudioRepository) ListItemsForStudio(ctx context.Context, studioID stri
 		out = append(out, &it)
 	}
 	return out, rows.Err()
+}
+
+// SlugForItem devuelve el slug del estudio ENLAZADO al item ("" si no
+// hay enlace). La ficha lo usa para el chip del estudio: derivarlo del
+// nombre fallaba cuando el nombre del item ("Lucasfilm") y el de la fila
+// canónica ("Lucasfilm Ltd.", mismo tmdb_id) no coinciden, o cuando la
+// fila lleva sufijo por homónimo; el chip llevaba a otro estudio vacío.
+func (r *StudioRepository) SlugForItem(ctx context.Context, itemID string) (string, error) {
+	var slug string
+	err := r.db.QueryRowContext(ctx, r.slugForItemSQL, itemID).Scan(&slug)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("studio slug for item %s: %w", itemID, err)
+	}
+	return slug, nil
 }
 
 // SetItemStudio links an item's metadata row to a studio id. Empty

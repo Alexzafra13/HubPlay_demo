@@ -70,6 +70,9 @@ type ItemHandlerDeps struct {
 	ExternalIDs  handlers.ExternalIDsRepository
 	People       handlers.PeopleRepoForItems
 	Collections  handlers.CollectionRepoForItems
+	// Studios da el slug del estudio enlazado para el chip de la ficha.
+	// nil → se deriva del nombre (comportamiento anterior).
+	Studios      studioSlugLookup
 	Providers    handlers.ProviderManager
 	Identifier   MetadataIdentifier
 	TrickplayDir string
@@ -84,7 +87,7 @@ type ItemHandlerDeps struct {
 // NewItemHandler construye el facade + cada uno de los 5 sub-handlers.
 func NewItemHandler(deps ItemHandlerDeps) *ItemHandler {
 	return &ItemHandler{
-		ItemDetailHandler:      newItemDetailHandler(deps.Lib, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.Segments, deps.ExternalIDs, deps.People, deps.Collections, deps.Identifier, deps.Access, deps.Logger),
+		ItemDetailHandler:      newItemDetailHandler(deps.Lib, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.Segments, deps.ExternalIDs, deps.People, deps.Collections, deps.Identifier, deps.Access, deps.Logger).withStudios(deps.Studios),
 		TrickplayHandler:       newTrickplayHandler(deps.Lib, deps.Access, deps.TrickplayDir, deps.Logger),
 		SearchHandler:          newSearchHandler(deps.Lib, deps.Images, deps.UserData, deps.Users, deps.Access, deps.Logger),
 		RecommendationsHandler: newRecommendationsHandler(deps.Lib, deps.ExternalIDs, deps.Providers, deps.Access, deps.Logger),

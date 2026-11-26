@@ -113,6 +113,7 @@ type StudiosRepo interface {
 	List(ctx context.Context) ([]*librarymodel.StudioListEntry, error)
 	GetBySlug(ctx context.Context, slug string) (*librarymodel.Studio, error)
 	ListItemsForStudio(ctx context.Context, studioID string) ([]*librarymodel.StudioItem, error)
+	SlugForItem(ctx context.Context, itemID string) (string, error)
 }
 
 // CollectionsRepo es el contrato amplio del repo de colecciones.

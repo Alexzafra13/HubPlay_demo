@@ -2,6 +2,8 @@
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	librarymodel "hubplay/internal/library/model"
@@ -140,5 +142,145 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 	}
 	if missing != nil {
 		t.Errorf("expected nil for missing slug, got %+v", missing)
+	}
+}
+
+// Regresión (estudio "Lucasfilm Ltd." con 0 títulos): la migración 032
+// creó filas por slug sin tmdb_id. Al refrescar metadatos se borra la fila
+// `metadata` (y su studio_id) y el scanner llama a EnsureStudio CON tmdb_id;
+// el INSERT chocaba por id/slug (no por tmdb_id), EnsureStudio fallaba y el
+// item se quedaba sin enlazar: la ficha seguía enlazando a /studios/<slug>
+// pero la página salía vacía. Ahora adopta la fila legacy.
+func TestStudioRepository_EnsureStudio_AdoptsLegacySlugRow(t *testing.T) {
+	ctx := context.Background()
+	database := testutil.NewTestDB(t)
+	studioRepo := db.NewStudioRepository(testutil.Driver(), database)
+
+	legacyID, err := studioRepo.EnsureStudio(ctx, "Lucasfilm Ltd.", "", nil)
+	if err != nil {
+		t.Fatalf("legacy ensure: %v", err)
+	}
+
+	tmdbID := int64(1)
+	gotID, err := studioRepo.EnsureStudio(ctx, "Lucasfilm Ltd.", "https://image.tmdb.org/lucas.png", &tmdbID)
+	if err != nil {
+		t.Fatalf("ensure with tmdb_id over a legacy row must not fail: %v", err)
+	}
+	if gotID != legacyID {
+		t.Errorf("expected to adopt legacy row %q, got %q", legacyID, gotID)
+	}
+	row, err := studioRepo.GetBySlug(ctx, "lucasfilm-ltd")
+	if err != nil || row == nil {
+		t.Fatalf("get by slug: %v %v", row, err)
+	}
+	if row.TMDBID == nil || *row.TMDBID != tmdbID {
+		t.Errorf("legacy row should now carry tmdb_id %d, got %v", tmdbID, row.TMDBID)
+	}
+	if row.LogoURL != "https://image.tmdb.org/lucas.png" {
+		t.Errorf("logo not refreshed: %q", row.LogoURL)
+	}
+
+	// Mismo nombre, otra compañía de TMDb: fila propia con slug
+	// desambiguado en vez de error (y sin pisar la primera).
+	other := int64(99)
+	otherID, err := studioRepo.EnsureStudio(ctx, "Lucasfilm Ltd.", "", &other)
+	if err != nil {
+		t.Fatalf("ensure homonym studio: %v", err)
+	}
+	if otherID == legacyID {
+		t.Fatalf("homonym with a different tmdb_id must not collapse onto %q", legacyID)
+	}
+	if s, _ := studioRepo.GetBySlug(ctx, "lucasfilm-ltd-99"); s == nil || s.ID != otherID {
+		t.Errorf("expected disambiguated slug lucasfilm-ltd-99 for %q, got %+v", otherID, s)
+	}
+
+	// Y una tercera llamada con el tmdb_id ya conocido vuelve a la misma fila.
+	again, err := studioRepo.EnsureStudio(ctx, "Lucasfilm", "", &tmdbID)
+	if err != nil || again != legacyID {
+		t.Errorf("known tmdb_id must resolve to %q, got %q (%v)", legacyID, again, err)
+	}
+}
+
+// La migración 059 repara los items que el fallo anterior dejó sueltos:
+// metadata con nombre de estudio y studio_id NULL vuelve a apuntar a la
+// fila con ese slug.
+func TestMigration059_RelinksUnlinkedStudios(t *testing.T) {
+	ctx := context.Background()
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	metaRepo := db.NewMetadataRepository(testutil.Driver(), database)
+	studioRepo := db.NewStudioRepository(testutil.Driver(), database)
+	seedLibraryForItems(t, libRepo)
+
+	if err := itemRepo.Create(ctx, newTestItem("item-sw", "lib-1", "Star Wars")); err != nil {
+		t.Fatal(err)
+	}
+	if err := metaRepo.Upsert(ctx, &librarymodel.Metadata{ItemID: "item-sw", Studio: "Lucasfilm Ltd."}); err != nil {
+		t.Fatal(err)
+	}
+	studioID, err := studioRepo.EnsureStudio(ctx, "Lucasfilm Ltd.", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sin SetItemStudio: el item está suelto, como lo dejaba el fallo.
+
+	dir := "migrations/sqlite"
+	if testutil.Driver() == db.DriverPostgres {
+		dir = "migrations/postgres"
+	}
+	sqlText, err := os.ReadFile(filepath.Join("..", "..", dir, "059_relink_unlinked_studios.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, string(sqlText)); err != nil {
+		t.Fatalf("apply 059: %v", err)
+	}
+
+	items, err := studioRepo.ListItemsForStudio(ctx, studioID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "item-sw" {
+		t.Errorf("expected item-sw relinked to %s, got %+v", studioID, items)
+	}
+}
+
+// El chip de la ficha usa el slug de la fila ENLAZADA, no el del nombre:
+// "Lucasfilm" y "Lucasfilm Ltd." comparten tmdb_id y una sola fila.
+func TestStudioRepository_SlugForItem(t *testing.T) {
+	ctx := context.Background()
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	metaRepo := db.NewMetadataRepository(testutil.Driver(), database)
+	studioRepo := db.NewStudioRepository(testutil.Driver(), database)
+	seedLibraryForItems(t, libRepo)
+
+	for _, id := range []string{"item-a", "item-b"} {
+		if err := itemRepo.Create(ctx, newTestItem(id, "lib-1", id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := metaRepo.Upsert(ctx, &librarymodel.Metadata{ItemID: "item-a", Studio: "Lucasfilm"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := metaRepo.Upsert(ctx, &librarymodel.Metadata{ItemID: "item-b", Studio: "Sin enlazar"}); err != nil {
+		t.Fatal(err)
+	}
+	tmdbID := int64(1)
+	ltd, err := studioRepo.EnsureStudio(ctx, "Lucasfilm Ltd.", "", &tmdbID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := studioRepo.SetItemStudio(ctx, "item-a", ltd); err != nil {
+		t.Fatal(err)
+	}
+
+	if slug, err := studioRepo.SlugForItem(ctx, "item-a"); err != nil || slug != "lucasfilm-ltd" {
+		t.Errorf("SlugForItem(item-a) = %q, %v; want lucasfilm-ltd", slug, err)
+	}
+	if slug, err := studioRepo.SlugForItem(ctx, "item-b"); err != nil || slug != "" {
+		t.Errorf("unlinked item must give empty slug, got %q, %v", slug, err)
 	}
 }

@@ -46,7 +46,19 @@ type ItemDetailHandler struct {
 	// inyectado en el constructor de ambos handlers.
 	identifier MetadataIdentifier
 	access     handlers.LibraryAccessService
+	studios    studioSlugLookup
 	logger     *slog.Logger
+}
+
+// studioSlugLookup da el slug del estudio enlazado a un item ("" si no hay).
+type studioSlugLookup interface {
+	SlugForItem(ctx context.Context, itemID string) (string, error)
+}
+
+// withStudios engancha la búsqueda del slug enlazado (opcional).
+func (h *ItemDetailHandler) withStudios(studios studioSlugLookup) *ItemDetailHandler {
+	h.studios = studios
+	return h
 }
 
 func newItemDetailHandler(
@@ -322,7 +334,11 @@ func (h *ItemDetailHandler) attachMetadata(ctx context.Context, resp map[string]
 		// que produjeron cualquier item del catálogo (la tabla
 		// studios está keyed sobre este slug). Studio vacío → sin
 		// slug, sin chip link en el frontend.
-		if slug := db.Slugify(meta.Studio); slug != "" {
+		// Primero el slug de la fila ENLAZADA: el nombre del item puede no
+		// coincidir con el de la fila canónica ("Lucasfilm" frente a
+		// "Lucasfilm Ltd.", mismo tmdb_id) y el chip abría otro estudio
+		// vacío. Sin enlace, el de siempre a partir del nombre.
+		if slug := h.studioSlug(ctx, id, meta.Studio); slug != "" {
 			resp["studio_slug"] = slug
 		}
 	}
@@ -661,4 +677,17 @@ func (h *ItemDetailHandler) Children(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlers.RespondData(w, http.StatusOK, data)
+}
+
+// studioSlug: slug del estudio enlazado al item o, sin enlace (o sin la
+// dependencia), el derivado del nombre.
+func (h *ItemDetailHandler) studioSlug(ctx context.Context, itemID, studioName string) string {
+	if h.studios != nil {
+		if slug, err := h.studios.SlugForItem(ctx, itemID); err == nil && slug != "" {
+			return slug
+		} else if err != nil {
+			h.logger.Debug("studio slug lookup failed", "item_id", itemID, "error", err)
+		}
+	}
+	return db.Slugify(studioName)
 }
