@@ -782,6 +782,14 @@ func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 		if s.mode == decodeModeDirect && looksLikeCodecError(stderrTail) {
 			m.promoteToReencode(s.ChannelID)
 		}
+	case !wasReady:
+		// Exit 0 sin un solo segmento: para el cliente es igual de fallo
+		// (GetOrStart devuelve ErrTransmuxFailed → 502), pero antes se
+		// logueaba como "exited cleanly" a Info y sin stderr, así que un
+		// canal que no arrancaba no dejaba rastro a nivel por defecto.
+		// No cuenta para el breaker (eso sigue reservado a los crashes).
+		log.Warn("transmux ffmpeg exited cleanly before first segment",
+			"ffmpeg_stderr_tail", stderrTail)
 	case err != nil:
 		// Late crash after the session served at least one segment.
 		// The first-segment success already counted; treat the late
