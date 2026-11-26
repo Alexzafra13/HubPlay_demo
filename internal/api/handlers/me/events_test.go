@@ -114,11 +114,12 @@ func TestEventHandler_Stream_UnsubscribesOnClientDisconnect(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 
-	// Handler subscribes to 12 event types.
+	// Handler subscribes to 12 event types, one after another: seeing
+	// ItemAdded registered doesn't mean TranscodeStarted (later in the
+	// loop) is too, so wait for both instead of reading the second one
+	// straight away (that read raced the subscribe loop; failed in CI).
 	waitForHandlerCount(t, bus, event.ItemAdded, 1)
-	if got := bus.HandlerCount(event.TranscodeStarted); got != 1 {
-		t.Errorf("TranscodeStarted count before cancel: %d", got)
-	}
+	waitForHandlerCount(t, bus, event.TranscodeStarted, 1)
 
 	// Disconnect.
 	cancel()
