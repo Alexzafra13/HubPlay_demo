@@ -158,6 +158,19 @@ except ValueError:
 ' || true
 }
 
+# URL versionada del zip de la release actual (p. ej.
+# https://evermeet.cx/ffmpeg/ffmpeg-9.1.zip), de la misma API de info.
+evermeet_zip_url() {
+	curl -fsSL --retry 3 "https://evermeet.cx/ffmpeg/info/$1/release" |
+		python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin)["download"]["zip"]["url"])
+except (ValueError, KeyError, TypeError):
+    pass
+' || true
+}
+
 # Releases de BtbN/FFmpeg-Builds. La carpeta `latest` (tag explícito,
 # no alias) tiene los assets con nombres canónicos `ffmpeg-master-latest-*`
 # que el script consume. **No** usar `releases/latest/download/X` —
@@ -208,10 +221,20 @@ windows-amd64)
 	cp "$dir/bin/ffprobe.exe" "$OUTDIR/ffprobe.exe"
 	;;
 darwin-amd64 | darwin-arm64)
-	# evermeet sirve binarios universales en su zip individual.
+	# evermeet sirve binarios universales en su zip individual. Los
+	# atajos /getrelease/zip devuelven 410 Gone desde noviembre de 2026:
+	# la URL versionada se saca de su API de info (download.zip.url).
 	echo "→ downloading evermeet ffmpeg + ffprobe (universal)"
-	dl "https://evermeet.cx/ffmpeg/getrelease/zip" "$tmpdir/ffmpeg.zip"
-	dl "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" "$tmpdir/ffprobe.zip"
+	ffmpeg_url="$(evermeet_zip_url ffmpeg)"
+	ffprobe_url="$(evermeet_zip_url ffprobe)"
+	if [[ -z "$ffmpeg_url" || -z "$ffprobe_url" ]]; then
+		echo "✗ la API de info de evermeet.cx no devolvió la URL del zip" >&2
+		exit 22
+	fi
+	echo "  $ffmpeg_url"
+	echo "  $ffprobe_url"
+	dl "$ffmpeg_url" "$tmpdir/ffmpeg.zip"
+	dl "$ffprobe_url" "$tmpdir/ffprobe.zip"
 	verify "$tmpdir/ffmpeg.zip" "$(evermeet_sha256 ffmpeg)" "evermeet ffmpeg.zip" soft
 	verify "$tmpdir/ffprobe.zip" "$(evermeet_sha256 ffprobe)" "evermeet ffprobe.zip" soft
 	unzip -q "$tmpdir/ffmpeg.zip" -d "$tmpdir/ffmpeg"
