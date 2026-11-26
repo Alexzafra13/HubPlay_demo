@@ -83,7 +83,7 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 ## Métricas rápidas (verificadas 2026-11-26)
 
 - **400+** ficheros `.go` de producción en `internal/`+`cmd/` · ~56% con `_test.go`; `go test ./...` = 43 paquetes verdes
-- **107** test files en frontend, **765/765** vitest verdes; `knip` como hard gate (0 dead code).
+- **108** test files en frontend, **783/783** vitest verdes; `knip` como hard gate (0 dead code).
 - **31** docs de arquitectura en `docs/architecture/`
 - **272** rutas HTTP registradas (router + mounts), con guard de drift OpenAPI.
 
@@ -106,6 +106,7 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
 - `project-status.md` — estado actual, trabajo abierto, próximos pasos. **Entrypoint.**
+- `roadmap-producto.md` — visión ("mi Plex/Jellyfin"), 5 pilares con criterio de "terminado" y lo que falta a la app de TV Kotlin (`Alexzafra13/Hubplay_Demo_Android`), que es el objetivo final
 - `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
 - `audit-2026-06-10-playback-chain.md` — **roadmap activo** (cadena de playback; P0/P1/P2 ✅, queda P3)

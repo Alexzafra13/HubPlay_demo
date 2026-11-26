@@ -142,6 +142,20 @@ export default function LinkDevice() {
             {t("link.scanQR", { defaultValue: "Escanear código QR" })}
           </button>
         )}
+        {/* Sin cámara en la página (HTTP plano en la LAN: los navegadores
+            solo dan getUserMedia en HTTPS o localhost). Antes el botón
+            simplemente desaparecía sin explicación; la cámara NATIVA del
+            móvil sí lee el QR y abre esta misma página con el código
+            relleno, así que lo decimos. */}
+        {!cameraAvailable && !success && (
+          <p className="flex items-start gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-text-secondary">
+            <QrCode className="mt-0.5 size-4 shrink-0" aria-hidden />
+            {t("link.nativeCameraHint", {
+              defaultValue:
+                "Para escanear, abre la cámara de tu móvil y apunta al QR de la TV: esta página se abrirá con el código ya puesto.",
+            })}
+          </p>
+        )}
       </form>
 
       {success ? (

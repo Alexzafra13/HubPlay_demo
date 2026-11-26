@@ -10,7 +10,9 @@
 
 ## 🧭 Cómo retomar (checklist de inicio de sesión)
 
-1. Leer este fichero entero (es corto a propósito).
+1. Leer este fichero entero (es corto a propósito) y, si toca decidir
+   qué construir, `roadmap-producto.md` (visión, pilares y qué es
+   "terminado" en cada uno; objetivo final: la app de TV en Kotlin).
 2. `git fetch origin main && git log --oneline -10 origin/main`: ¿hay
    commits que no estén reflejados aquí? Si los hay, reconstruirlos y
    apuntarlos antes de nada (ya pasó dos veces: junio y septiembre).
@@ -35,7 +37,7 @@
 | Área | Estado |
 |---|---|
 | Tests backend | `go test ./...` verde (Linux, Go 1.25.13) |
-| Tests frontend | **765/765** vitest (107 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning conocido (React Compiler + `useVirtualizer`, no accionable) |
+| Tests frontend | **783/783** vitest (108 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning conocido (React Compiler + `useVirtualizer`, no accionable) |
 | Rama de trabajo | `claude/retomar-proyecto-actualizar-znt18w` (sesión 2026-11-26, sin mergear) |
 | Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta** (ver tabla de trabajo abierto) |
 | Audit torrent 2026-09-10 | **Todos los hallazgos ✅** (T-8/T-9 el 2026-11-26). Queda: tests de handler `Play`/`HLSPlaylist`/`HLSSegment` y refcount explícito VOD (T-6) |
@@ -71,6 +73,22 @@
   efímero; el stall usa un `.torrent` servido por httptest sin seeds) —
   estables con `-race -count=20`. `DownloadsPanel.test.tsx`.
 - **Docs:** este fichero reorganizado como guía; checklist de inicio.
+- **QR de emparejado:** escanear el QR de la TV con la cámara nativa del
+  móvil abre `/link?code=…`; sin sesión, `ProtectedRoute` mandaba a
+  `/login` y **el código se perdía**. Ahora `state.from` sobrevive al
+  login y a "¿Quién está viendo?" (`utils/returnTo.ts`, solo rutas
+  internas: bloquea `//host` → open redirect). En HTTP (sin cámara en la
+  página) `/link` explica que sirve la cámara nativa en vez de esconder
+  el botón sin más. Tests: `returnTo.test.ts`, `Login.test.tsx`,
+  `LinkDevice.test.tsx`.
+- **Saltos adelante/atrás medidos con el binario real**
+  (`scripts/seek-check.py`, nuevo): Transcode ✅ 11/11 alineados; **remux
+  ❌ 6/11 segmentos +2 s** (manifest sintético de 6 s vs cortes en los
+  keyframes del fichero). Probable causa de saltos raros en ExoPlayer.
+  Diseño del arreglo en `roadmap-producto.md`, pilar 2.
+- **`roadmap-producto.md`** (nuevo): visión, 5 pilares con estado medido
+  y criterio de "terminado", y lo que le falta a la app de TV (no consume
+  federación; servidor sin desplegar).
 
 **Hallazgos de esta sesión sin arreglar:**
 - `gofmt -l internal/` lista ~145 ficheros: el gofmt de Go ≥1.19 reformatea
@@ -89,19 +107,25 @@
 
 ## ▶️ Próxima sesión (en orden)
 
-1. **Mergear esta rama** (PR → main) y desplegar en el servidor de la TV.
-2. **Dependabot**: cerrar los 3 ya cubiertos; mergear los menores tras CI;
+1. **Mergear esta rama** (PR → main) y desplegar en el servidor de la TV;
+   probar el QR con el móvil en real.
+2. **Remux con keyframes reales** + reinicio inmediato en saltos lejanos
+   (`roadmap-producto.md` pilar 2) hasta `scripts/seek-check.py` en verde;
+   luego probar saltos en la Mi TV.
+3. **App TV: "Compartido contigo"** (federación; el servidor ya lo da) +
+   F-5/F-6 en servidor.
+4. **Dependabot**: cerrar los 3 ya cubiertos; mergear los menores tras CI;
    decidir react-router 8 y golang 1.26 (este último bloqueado hasta que
    `anacrolix/torrent` compile con x/net nuevo / Go ≥1.27).
-3. **Torrent — tests de handler** `Play`/`HLSPlaylist`/`HLSSegment`
+5. **Torrent — tests de handler** `Play`/`HLSPlaylist`/`HLSSegment`
    (segmento inválido → 400, infohash desconocido → 404, mapeo de modos).
-4. **Fase 3 prod**: M23 (validación de config + overrides de env), cerrar
+6. **Fase 3 prod**: M23 (validación de config + overrides de env), cerrar
    M24 (`example.yaml` completo), M21 (alerting/agregación documentado).
-5. **Playback P3**: PB-29/30 (DNS-rebind vía `Control` del `net.Dialer`;
+7. **Playback P3**: PB-29/30 (DNS-rebind vía `Control` del `net.Dialer`;
    cierra también B2), PB-26, PB-33, PB-39 (`SubtitleTrack` índice → 400).
-6. **Pequeños**: snake_case en `POST /setup/libraries`; `/health` fuera de
+8. **Pequeños**: snake_case en `POST /setup/libraries`; `/health` fuera de
    `/api/v1` devuelve la SPA.
-7. **Fase 5 gobernanza**: `SECURITY.md`, `CODEOWNERS`.
+9. **Fase 5 gobernanza**: `SECURITY.md`, `CODEOWNERS`.
 
 ---
 
@@ -111,6 +135,8 @@
 
 | Prioridad | Tema | Items |
 |---|---|---|
+| **Alta** | **Remux con keyframes reales** | Medido: 6/11 segmentos +2 s (`scripts/seek-check.py`). Pilar 2 de `roadmap-producto.md` |
+| **Alta** | **App TV sin federación** | La app no consume `/me/peers/*`. Pilar 3 |
 | Media | **Playback P3** | PB-19, PB-26, PB-29/30/31, PB-33, PB-36..39. Gaps de test: **1** (integración ffmpeg real en `stream/transcode`; solo el VOD de torrent la tiene), **4** (`rewriteHLSPlaylist`/`resolveURL` de IPTV sin tests), **5** parcial (Segment: seek-restart, 429, Stop↔Restart con `-race`), **6** parcial (trickplay: ACL ✅, TryLock/regeneración no). Gaps 2, 3 y 7 ✅ |
 | Media | **Torrent** | Tests de handler Play/HLS; T-6 refcount explícito (holder) desde el VOD |
 | Media | **Fase 3 — observabilidad/config** | M21, M23, resto de M24 |
@@ -144,6 +170,10 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
 
 ## 🏛 Referencias vivas
 
+- `roadmap-producto.md` — **visión y pilares** (qué es "terminado"),
+  estado medido, qué le falta a la app de TV.
+- `scripts/seek-check.py` — prueba de saltos adelante/atrás contra el
+  binario real (criterio de "terminado" del pilar de reproducción).
 - `architecture-decisions.md` — ADRs (AppError, observability/sink,
   keystore, preflight, sqlc adapter, ADR-026 logs).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,

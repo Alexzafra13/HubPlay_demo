@@ -1,11 +1,12 @@
 import { useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { m, useReducedMotion } from "framer-motion";
 import { useLogin } from "@/api/hooks";
 import { ApiError } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
+import { safeReturnTo } from "@/utils/returnTo";
 import { Button } from "@/components/common";
 import { Input } from "@/components/common";
 import { BrandWordmark } from "@/components/layout/BrandWordmark";
@@ -68,6 +69,8 @@ function loginErrorMessage(
 export default function Login() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = safeReturnTo(location.state);
   const login = useLogin();
   const setAuth = useAuthStore((s) => s.setAuth);
   const reduceMotion = useReducedMotion();
@@ -98,9 +101,9 @@ export default function Login() {
           if (data.user.password_change_required) {
             navigate("/change-password");
           } else if ((data.profiles?.length ?? 0) > 1) {
-            navigate("/select-profile");
+            navigate("/select-profile", { state: { from: returnTo } });
           } else {
-            navigate("/");
+            navigate(returnTo);
           }
         },
         onError(err) {

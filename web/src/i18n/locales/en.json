@@ -212,7 +212,8 @@
       "permissionDenied": "We need camera permission. Allow it in your browser and try again.",
       "noCamera": "No camera available on this device.",
       "genericError": "Could not start the camera. Make sure you are on HTTPS and try again."
-    }
+    },
+    "nativeCameraHint": "To scan, open your phone's camera and point it at the QR code on the TV: this page will open with the code already filled in."
   },
   "notifications": {
     "title": "Notifications",

@@ -40,13 +40,15 @@ import Login from "./Login";
 import { ApiError } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
 
-function wrap(node: React.ReactElement) {
+function wrap(node: React.ReactElement, routerState?: unknown) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return (
     <QueryClientProvider client={client}>
-      <MemoryRouter>{node}</MemoryRouter>
+      <MemoryRouter initialEntries={[{ pathname: "/login", state: routerState }]}>
+        {node}
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -190,7 +192,9 @@ describe("Login redirect logic", () => {
     render(wrap(<Login />));
     await submitLogin();
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith("/select-profile");
+      expect(navigateMock).toHaveBeenCalledWith("/select-profile", {
+        state: { from: "/" },
+      });
     });
   });
 
@@ -212,6 +216,63 @@ describe("Login redirect logic", () => {
       ],
     });
     render(wrap(<Login />));
+    await submitLogin();
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith("/");
+    });
+  });
+});
+
+// Volver a donde ibas: el QR de la TV abre /link?code=… en el móvil; sin
+// sesión, ProtectedRoute manda a /login con state.from y el código debe
+// sobrevivir al login (antes se perdía y había que teclearlo).
+describe("Login return-to", () => {
+  const soloLogin = {
+    access_token: "tok",
+    refresh_token: "ref",
+    expires_in: 900,
+    user: {
+      id: "u1",
+      username: "alice",
+      display_name: "Alice",
+      role: "user",
+      created_at: "2026-05-10T10:00:00Z",
+      password_change_required: false,
+    },
+    profiles: [
+      { id: "u1", username: "alice", display_name: "Alice", role: "user", is_active: true, has_pin: false },
+    ],
+  };
+
+  it("returns to the page that sent the user to login (QR /link?code)", async () => {
+    apiMock.login.mockResolvedValueOnce(soloLogin);
+    render(wrap(<Login />, { from: "/link?code=ABCD-EFGH" }));
+    await submitLogin();
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith("/link?code=ABCD-EFGH");
+    });
+  });
+
+  it("carries the destination through the profile picker", async () => {
+    apiMock.login.mockResolvedValueOnce({
+      ...soloLogin,
+      profiles: [
+        ...soloLogin.profiles,
+        { id: "u2", username: "alice/kid", display_name: "Kid", role: "user", is_active: true, has_pin: false, parent_user_id: "u1" },
+      ],
+    });
+    render(wrap(<Login />, { from: "/link?code=ABCD-EFGH" }));
+    await submitLogin();
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith("/select-profile", {
+        state: { from: "/link?code=ABCD-EFGH" },
+      });
+    });
+  });
+
+  it("ignores an off-site destination (open redirect)", async () => {
+    apiMock.login.mockResolvedValueOnce(soloLogin);
+    render(wrap(<Login />, { from: "//evil.example/phish" }));
     await submitLogin();
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith("/");

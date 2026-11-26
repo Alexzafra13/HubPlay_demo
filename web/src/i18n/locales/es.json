@@ -212,7 +212,8 @@
       "permissionDenied": "Necesitamos permiso para la cámara. Acéptalo en el navegador y vuelve a intentarlo.",
       "noCamera": "No se ha encontrado ninguna cámara en este dispositivo.",
       "genericError": "No se pudo iniciar la cámara. Asegúrate de estar en HTTPS y vuelve a intentarlo."
-    }
+    },
+    "nativeCameraHint": "Para escanear, abre la cámara de tu móvil y apunta al QR de la TV: esta página se abrirá con el código ya puesto."
   },
   "notifications": {
     "title": "Notificaciones",
