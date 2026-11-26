@@ -608,3 +608,85 @@ func TestDecide_AudioChannels_NilCapsDefaultsToStereo(t *testing.T) {
 		t.Errorf("AudioChannels = %d, want 2 (default web caps)", d.AudioChannels)
 	}
 }
+
+// La federación solo sirve HLS: un MP4 H.264/AAC (DirectPlay) debe salir
+// como remux con vídeo y audio copiados, no como DirectPlay (el amigo
+// respondía 409 WRONG_METHOD a la playlist de calidad).
+func TestRequireHLS_DirectPlayBecomesRemux(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "mov,mp4,m4a,3gp,3g2,mj2"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true, Channels: 2},
+	}
+
+	d := RequireHLS(Decide(item, streams, nil, "", -1), item, streams, nil, "", -1)
+	if d.Method != MethodDirectStream {
+		t.Fatalf("expected DirectStream, got %s", d.Method)
+	}
+	if !d.CopyVideo || !d.CopyAudio {
+		t.Errorf("expected video+audio copy, got CopyVideo=%v CopyAudio=%v", d.CopyVideo, d.CopyAudio)
+	}
+	if d.Container != "mpegts" {
+		t.Errorf("expected mpegts container, got %q", d.Container)
+	}
+}
+
+// FLAC no cabe en MPEG-TS: aunque el cliente lo decodifique, el remux
+// tiene que re-encodear el audio.
+func TestRequireHLS_FlacAudioIsReencoded(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "mov,mp4,m4a,3gp,3g2,mj2"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "flac", IsDefault: true, Channels: 2},
+	}
+
+	d := RequireHLS(Decide(item, streams, nil, "", -1), item, streams, nil, "", -1)
+	if d.Method != MethodDirectStream || !d.CopyVideo {
+		t.Fatalf("expected DirectStream with video copy, got %s CopyVideo=%v", d.Method, d.CopyVideo)
+	}
+	if d.CopyAudio {
+		t.Error("FLAC must be re-encoded for MPEG-TS")
+	}
+}
+
+// Contenedor que ffmpeg no sabe reempaquetar (webm no está en la lista):
+// sin remux posible, transcode completo.
+func TestRequireHLS_NonRemuxableContainerTranscodes(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "webm"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "vp9", IsDefault: true},
+		{StreamType: "audio", Codec: "opus", IsDefault: true},
+	}
+	caps := &Capabilities{
+		VideoCodecs: map[string]bool{"vp9": true},
+		AudioCodecs: map[string]bool{"opus": true},
+		Containers:  map[string]bool{"webm": true},
+	}
+
+	first := Decide(item, streams, caps, "", -1)
+	if first.Method != MethodDirectPlay {
+		t.Fatalf("precondition: expected DirectPlay, got %s", first.Method)
+	}
+	d := RequireHLS(first, item, streams, caps, "", -1)
+	if d.Method != MethodTranscode || d.CopyVideo {
+		t.Errorf("expected full Transcode, got %s CopyVideo=%v", d.Method, d.CopyVideo)
+	}
+}
+
+// Cualquier decisión que no sea DirectPlay pasa intacta.
+func TestRequireHLS_LeavesOtherMethodsAlone(t *testing.T) {
+	t.Parallel()
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
+		{StreamType: "video", Codec: "hevc", IsDefault: true},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+	in := Decide(item, streams, nil, "", -1)
+	out := RequireHLS(in, item, streams, nil, "", -1)
+	if out != in {
+		t.Errorf("expected unchanged decision, got %+v (was %+v)", out, in)
+	}
+}

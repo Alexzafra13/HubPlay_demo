@@ -18,6 +18,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/domain"
@@ -42,11 +43,14 @@ func (h *MePeersHandler) ProxyPeerItemPoster(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// We pass If-None-Match through so the origin's strong ETag check
-	// short-circuits to 304 without bytes flowing. The ProxyPeerItemPoster
-	// helper takes a path-only request; the conditional handling lives
-	// at the origin's ServeImageByID.
-	resp, err := h.mgr.ProxyPeerItemPoster(r.Context(), peerID, itemID)
+	// `?w=N` (1..4095) se reenvía al amigo, que sirve una miniatura de su
+	// caché: las tarjetas de la TV piden ~400 px en vez del original.
+	// Cualquier otro valor se ignora (póster original, como antes).
+	width := 0
+	if v, err := strconv.Atoi(r.URL.Query().Get("w")); err == nil && v > 0 && v < maxPosterWidth {
+		width = v
+	}
+	resp, err := h.mgr.ProxyPeerItemPoster(r.Context(), peerID, itemID, width)
 	if err != nil {
 		if errors.Is(err, domain.ErrPeerNotFound) {
 			handlers.RespondError(w, r, http.StatusNotFound, "PEER_NOT_FOUND", "peer not found")
@@ -69,3 +73,7 @@ func (h *MePeersHandler) ProxyPeerItemPoster(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
+
+// maxPosterWidth es el mismo tope que aplica el endpoint de imágenes del
+// amigo a `?w=` (0 < w < 4096).
+const maxPosterWidth = 4096

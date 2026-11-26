@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -295,5 +296,45 @@ func TestProxyPeerStreamRequest_GivesUpAfterRefresh(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&attempts); got != 2 {
 		t.Fatalf("expected exactly 2 attempts (initial + one refresh), got %d", got)
+	}
+}
+
+// TestProxyPeerItemPoster_ForwardsWidth: con `width` > 0 el amigo recibe
+// `?w=` y sirve una miniatura; sin él, la ruta va limpia (póster original).
+// El id viaja escapado: nunca puede salirse de /peer/items/{id}/poster.
+func TestProxyPeerItemPoster_ForwardsWidth(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.URL.RequestURI())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = io.WriteString(w, "jpeg")
+	}))
+	defer srv.Close()
+
+	mgr := newRetryTestManager(t, srv)
+	for _, width := range []int{400, 0} {
+		resp, err := mgr.ProxyPeerItemPoster(context.Background(), "peer-b", "item/../x", width)
+		if err != nil {
+			t.Fatalf("ProxyPeerItemPoster(w=%d): %v", width, err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{
+		"/api/v1/peer/items/item%2F..%2Fx/poster?w=400",
+		"/api/v1/peer/items/item%2F..%2Fx/poster",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("request %d = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
