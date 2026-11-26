@@ -71,15 +71,19 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
   compilado con Go 1.25 y se niega a cargar un módulo `go 1.26`. Subido a
   v2.15.0 en `ci.yml`. Esa versión trae una regla nueva de gosec, **G703**
   (path traversal por taint analysis), con **43 avisos** en handlers
-  (media/image, trickplay, stream, iptv logo, uploads, torrent HLS…). Los
-  revisados a mano (uploads `DeleteEntry`, torrent `HLSSegment`, avatar)
-  pasan por saneadores propios (`SanitizeSubpath`/`ResolveSubpath`,
-  `IsValidSegmentName`, lookup en mapa de sesiones) que el análisis no
-  reconoce: el mismo caso que G304, ya excluido en `.golangci.yml`.
-  **Decisión pendiente del usuario:** excluir G703 igual que G304
-  (documentando el porqué) o revisar los 43 uno a uno. Hasta entonces el
-  job Lint de la rama sale rojo con esos 43. El errcheck nuevo
-  (`procutil_unix_test.go`) ya está arreglado.
+  (media/image, trickplay, stream, iptv logo, uploads, torrent HLS…).
+  **Revisados los 43 a mano:** 42 falsos positivos (pasan por
+  `IsSafePathSegment`, regex de segmento + `filepath.Dir`,
+  `SanitizeSubpath`/`ResolveSubpath`, cachés por sha256 o rutas de la BD,
+  que el análisis no reconoce) y **1 real**: la subida de imagen de
+  colección (`POST /collections/{id}/images/{type}/upload`) usaba el id
+  ya decodificado en el nombre del fichero, y `..%2F..%2Fx` escribía la
+  imagen fuera de `collection-images/` (solo admin, contenido limitado a
+  imagen válida). Arreglado en `parseCollectionImageRoute` (id con
+  `IsSafePathSegment` → 400) con
+  `TestCollectionHandler_UploadImage_RejectsTraversalID` (falla sin el
+  fix). Con eso, G703 excluido en `.golangci.yml` como G304, con el
+  motivo apuntado. El errcheck nuevo (`procutil_unix_test.go`), arreglado.
 - **E2E `livetv-zap`**: falla en CI (el `<video>` del canal no llega a
   reproducir en 30 s, 2/2 intentos); #552 no tocó IPTV y en local pasa
   siempre (3 s, Chromium). Los demás specs fallan en local por el Chromium
@@ -179,8 +183,7 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
 ## ▶️ Próxima sesión (en orden)
 
 0. **CI de `main` en verde** (rama `claude/affectionate-euler-y94rf9`):
-   decidir G703 (excluir como G304 o revisar los 43), PR → main
-   **esperando al CI**, relanzar/investigar el E2E `livetv-zap` y
+   PR → main **esperando al CI**, relanzar/investigar el E2E `livetv-zap` y
    confirmar que el Release de macOS publica la nightly.
 1. **Desplegar** `main` en el servidor de la TV (lleva #552: remux por
    segmentos, QR, búsqueda) y probar el QR con el móvil en real.

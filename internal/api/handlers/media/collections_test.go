@@ -1,11 +1,18 @@
 package media_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	stdpng "image/png"
+	"io/fs"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -113,5 +120,82 @@ func TestCollectionHandler_Get_PassesUnescapedIDThrough(t *testing.T) {
 	}
 	if repo.gotID != "collection:9485" {
 		t.Errorf("repo received id = %q, want %q (no double-decoding)", repo.gotID, "collection:9485")
+	}
+}
+
+// fakeOverrideRepo registra los UpsertFile para que el test vea si el
+// handler llegó a guardar un override.
+type fakeOverrideRepo struct {
+	upserts []string
+}
+
+func (f *fakeOverrideRepo) UpsertURL(context.Context, string, string, string) error { return nil }
+func (f *fakeOverrideRepo) UpsertFile(_ context.Context, _, _, basename string) error {
+	f.upserts = append(f.upserts, basename)
+	return nil
+}
+func (f *fakeOverrideRepo) Delete(context.Context, string, string) error { return nil }
+func (f *fakeOverrideRepo) Get(context.Context, string, string) (*librarymodel.CollectionImageOverride, error) {
+	return nil, nil
+}
+func (f *fakeOverrideRepo) ListByCollection(context.Context, string) ([]librarymodel.CollectionImageOverride, error) {
+	return nil, nil
+}
+
+// TestCollectionHandler_UploadImage_RejectsTraversalID: el id llega
+// decodificado (PathUnescape) y forma parte del nombre del fichero, así
+// que "..%2F..%2Fescape" escribía la imagen dos carpetas por encima de
+// collection-images/. Debe ser 400 sin tocar disco ni la BD.
+func TestCollectionHandler_UploadImage_RejectsTraversalID(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	imageDir := filepath.Join(root, "a", "images")
+	if err := os.MkdirAll(imageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	overrides := &fakeOverrideRepo{}
+	h := media.NewCollectionHandler(&fakeCollectionRepo{}, overrides, nil, imageDir, nil, slog.Default())
+
+	var png bytes.Buffer
+	if err := stdpng.Encode(&png, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", "poster.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(png.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/collections/x/images/poster/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "..%2F..%2Fescape")
+	rctx.URLParams.Add("type", "poster")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+
+	h.UploadCollectionImage(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d (want 400); body=%s", rr.Code, rr.Body.String())
+	}
+	if len(overrides.upserts) != 0 {
+		t.Errorf("override guardado con id inseguro: %v", overrides.upserts)
+	}
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			t.Errorf("fichero escrito: %s", p)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
