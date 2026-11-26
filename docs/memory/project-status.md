@@ -44,11 +44,11 @@ en la rama de la sesión (ver "Revisión pre-app de TV"). Sin issues abiertos.
 | Tests backend | `go test ./...` verde: 45 paquetes (Linux, Go 1.26.11) |
 | Tests frontend | **783/783** vitest (108 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning conocido (React Compiler + `useVirtualizer`, no accionable) |
 | CI de `main` | ✅ todo salvo ❌ E2E (`livetv-zap`, `server-down`): causas encontradas y arregladas en la rama (SQLite `SQLITE_BUSY` + tests que ya no probaban lo que decían). E2E local con Chrome: 20/20 |
-| Rama de trabajo | `claude/affectionate-euler-y94rf9` (rehecha desde `main` tras #553; sin mergear) |
+| Rama de trabajo | `claude/stoic-feynman-pyojkw` (desde `main` `b840d0b`, sin mergear): federación con DirectPlay + pósters en miniatura. Pareja de la rama homónima de la app de TV ("Compartido contigo") |
 | Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta** (ver tabla de trabajo abierto) |
 | Audit torrent 2026-09-10 | **Todos los hallazgos ✅** (T-8/T-9 el 2026-11-26). Queda: tests de handler `Play`/`HLSPlaylist`/`HLSSegment` y refcount explícito VOD (T-6) |
 | Audit prod 2026-06-08 | Fases 0/1/2 ✅. Fase 3: M18/M19/M20 ✅, M24 parcial, M21/M23 abiertos. Fases 4–5 abiertas |
-| Audit federación 2026-06-12 | F-1/3/4/10 ✅, F-2 parcial; F-5..F-9, F-11..F-13 abiertos |
+| Audit federación 2026-06-12 | F-1/3/4/10 ✅, F-2 parcial; F-5..F-9, F-11..F-13 abiertos. **Nuevo 2026-11-26**: DirectPlay federado daba 409 (arreglado en la rama) |
 | Producción (servidor de la TV, `192.168.1.100:8097`) | Sigue con una imagen anterior a la caché de subtítulos, el id de instalación y el fix de búsqueda. **Pendiente desplegar.** |
 
 ### Revisión pre-app de TV (2026-11-26, segunda sesión del día)
@@ -205,6 +205,28 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
   local y de federación. Diseño en `docs/architecture/streaming.md`
   § Segmented Remux.
 
+### Sesión 2026-11-26 (tarde) — app de TV con todo lo que da el backend
+
+Inventario de rutas de `openapi.yaml` contra lo que llama la app de TV
+(detalle en `Hubplay_Demo_Android/docs/memory/archive/project-status-detalle-2026-11-26.md`).
+La app no usaba federación, ni liberaba sesiones, ni el logout del
+servidor, ni "quitar de Continuar viendo": hecho en la rama
+`claude/stoic-feynman-pyojkw` de la app. Del lado del servidor:
+
+- **Bug: federación + DirectPlay = imposible de ver** (web y TV). La
+  federación solo proxya manifest + segmentos, pero el amigo podía decidir
+  DirectPlay (MP4 H.264/AAC) y su playlist de calidad respondía 409
+  `WRONG_METHOD`. `StartSessionRequest.RequireHLS` (las dos llamadas
+  federadas lo piden) rebaja DirectPlay a remux con `stream.RequireHLS`
+  (audio copiado si cabe en TS, AAC si no; contenedor no remuxable →
+  transcode). Tests: `TestRequireHLS_*` y
+  `TestFederationStream_SessionsRequireHLS` (falla sin el arreglo).
+- **Pósters de amigos en miniatura**: `GET /me/peers/{p}/items/{i}/poster`
+  reenvía `?w=N` al amigo (antes cada tarjeta bajaba el original por dos
+  servidores). Id escapado en la ruta. Test
+  `TestProxyPeerItemPoster_ForwardsWidth`.
+- `go vet` + `go test ./...` (45 paquetes) verdes con Go 1.26.11.
+
 **Hallazgos de esta sesión sin arreglar:**
 - `gofmt -l internal/` lista ~145 ficheros: el gofmt de Go ≥1.19 reformatea
   listas dentro de comentarios de doc (y algún orden de import). El CI no
@@ -222,10 +244,11 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
 
 ## ▶️ Próxima sesión (en orden)
 
-0. **CI de `main` en verde** (rama `claude/affectionate-euler-y94rf9`):
-   PR → main **esperando a que el CI termine en verde** (#552 y #553 se
-   mergearon a los 11 s y a los 2 min, con el CI a medias). Release macOS
-   y nightly ya confirmados en verde con #553.
+0. **CI de `main` en verde**: la rama de la revisión entró como #554
+   (E2E) y #555 (next-up con artwork) — `main` en `b840d0b`. Confirmar en
+   GitHub Actions que CI, Docker y Release terminaron en verde. Después,
+   PR de `claude/stoic-feynman-pyojkw` **esperando al CI** (#552 y #553 se
+   mergearon con el CI a medias).
 1. **Desplegar** `main` en el servidor de la TV (lleva #552: remux por
    segmentos, QR, búsqueda) y probar el QR con el móvil en real. Incluir
    la rama `claude/stoic-curie-9je0wx` (2026-11-26): `/me/next-up` ahora
@@ -236,8 +259,11 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
    2026-11-26, `seek-check.py` verde); después, indexar keyframes en
    segundo plano tras el escaneo y el reinicio inmediato del transcode
    en saltos lejanos (`roadmap-producto.md` pilar 2, "Pendiente").
-3. **App TV: "Compartido contigo"** (federación; el servidor ya lo da) +
-   F-5/F-6 en servidor.
+3. ~~**App TV: "Compartido contigo"**~~ hecho en las ramas
+   `claude/stoic-feynman-pyojkw` (app + servidor, 2026-11-26): mergear con
+   CI verde y probar con un segundo servidor emparejado. Queda F-5/F-6 en
+   servidor (cortar el stream federado al desconectar; segmentos fuera del
+   rate-limit) y compartir series (hoy solo items de primer nivel).
 4. **Dependabot**: cerrar los 3 ya cubiertos; mergear los menores tras CI;
    decidir react-router 8 y golang 1.26 (este último bloqueado hasta que
    `anacrolix/torrent` compile con x/net nuevo / Go ≥1.27).
@@ -260,7 +286,7 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
 | Prioridad | Tema | Items |
 |---|---|---|
 | **Alta** | **Remux por segmentos: probar en TV + indexar tras escaneo** | Remux arreglado 2026-11-26 (`seek-check.py` verde). Falta verificación en ExoPlayer real e indexación previa de ficheros grandes. Pilar 2 |
-| **Alta** | **App TV sin federación** | La app no consume `/me/peers/*`. Pilar 3 |
+| **Alta** | **Federación en la TV: probar** | App ("Compartido contigo") y servidor (DirectPlay federado, pósters `?w=`) hechos en `claude/stoic-feynman-pyojkw`, sin mergear ni probar en real. Pilar 3 |
 | Media | **Playback P3** | PB-19, PB-26, PB-29/30/31, PB-33, PB-36..39. Gaps de test: **1** (integración ffmpeg real en `stream/transcode`; solo el VOD de torrent la tiene), **4** (`rewriteHLSPlaylist`/`resolveURL` de IPTV sin tests), **5** parcial (Segment: seek-restart, 429, Stop↔Restart con `-race`), **6** parcial (trickplay: ACL ✅, TryLock/regeneración no). Gaps 2, 3 y 7 ✅ |
 | Media | **Torrent** | Tests de handler Play/HLS; T-6 refcount explícito (holder) desde el VOD |
 | Media | **Fase 3 — observabilidad/config** | M21, M23, resto de M24 |
