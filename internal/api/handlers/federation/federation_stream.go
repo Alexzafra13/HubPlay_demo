@@ -277,6 +277,16 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Remux por segmentos: manifest con los cortes reales (y, de paso,
+	// saltos libres para el peer). URLs relativas al index.m3u8, igual que
+	// las que escribe ffmpeg en el manifest continuo.
+	if plan := ms.SegmentPlan(); plan != nil {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("Cache-Control", handlers.CacheControlNoCache)
+		_, _ = w.Write([]byte(plan.Manifest("segment%05d.ts")))
+		return
+	}
+
 	manifestPath := ms.ManifestPath()
 	if err := waitForFile(manifestPath, 10*time.Second); err != nil {
 		handlers.RespondError(w, r, http.StatusServiceUnavailable, "MANIFEST_NOT_READY", "manifest still being generated")
@@ -331,6 +341,11 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if ms.SegmentPlan() != nil {
+		h.serveSegmentedRemux(w, r, ms, segmentFile)
+		return
+	}
+
 	segmentPath := filepath.Join(ms.OutputDir, segmentFile)
 	if filepath.Dir(segmentPath) != ms.OutputDir {
 		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment path")
@@ -344,6 +359,34 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", handlers.CacheControlHourly)
 	http.ServeFile(w, r, segmentPath)
+}
+
+// serveSegmentedRemux sirve (generándolo si hace falta) un segmento de un
+// remux por segmentos para un peer.
+func (h *FederationStreamHandler) serveSegmentedRemux(w http.ResponseWriter, r *http.Request, ms *stream.ManagedSession, segmentFile string) {
+	m := remuxSegmentIndex.FindStringSubmatch(segmentFile)
+	if len(m) != 2 {
+		handlers.RespondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+		return
+	}
+	idx, err := strconv.Atoi(m[1])
+	if err != nil {
+		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment index")
+		return
+	}
+	path, err := ms.EnsureSegment(r.Context(), idx)
+	switch {
+	case err == nil:
+		w.Header().Set("Content-Type", "video/mp2t")
+		w.Header().Set("Cache-Control", handlers.CacheControlHourly)
+		http.ServeFile(w, r, path)
+	case stream.IsSegmentOutOfRange(err):
+		handlers.RespondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+	case r.Context().Err() != nil:
+	default:
+		h.logger.Warn("federation: segmented remux failed", "segment", idx, "error", err)
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "SEGMENT_FAILED", "could not produce segment")
+	}
 }
 
 // Subtitles lists the embedded subtitle tracks of the item backing

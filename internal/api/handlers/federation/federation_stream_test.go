@@ -158,6 +158,8 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 		r.Use(federation.RequirePeerJWT(mgr))
 		r.Post("/api/v1/peer/stream/{itemId}/session", fedHandler.StartSession)
 		r.Get("/api/v1/peer/stream/session/{sessionId}/subtitles", fedHandler.Subtitles)
+		r.Get("/api/v1/peer/stream/session/{sessionId}/{quality}/index.m3u8", fedHandler.QualityPlaylist)
+		r.Get("/api/v1/peer/stream/session/{sessionId}/{quality}/{segment}", fedHandler.Segment)
 		r.Get("/api/v1/peer/items/{itemId}/poster", fedImg.ItemPoster)
 	})
 

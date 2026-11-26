@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """seek-check — prueba de saltos adelante/atrás contra el servidor REAL.
 
-Genera dos películas de 12 min con ffmpeg (H.264 → DirectStream/remux y
-MPEG-4 → Transcode), arranca el binario con una config temporal, hace el
+Genera cuatro películas de 6 min con ffmpeg (tres H.264 → DirectStream/
+remux: keyframes regulares, irregulares con B-frames, y GOP abierto en
+MP4 con audio AC3 a convertir; y una MPEG-4 → Transcode), arranca el binario con una config temporal, hace el
 wizard por API, escanea, y pide segmentos HLS fuera de orden
-(0,1,2,60,61,10,11,100,59,119,3). Para cada uno comprueba con ffprobe que
-el primer PTS de vídeo cae donde dice el manifest (suma de EXTINF), con
-tolerancia de 2,5 s (offset MPEG-TS de ~1,4 s + jitter).
+(arranque, saltos adelante y atrás, final). Para cada uno comprueba con
+ffprobe que empieza en keyframe y donde dice el manifest (suma de
+EXTINF): desfase constante entre segmentos (±0,1 s; el offset MPEG-TS
+es ~1,4 s) y, entre segmentos consecutivos, sin huecos ni solapes.
 
 Uso (desde la raíz del repo, con ffmpeg/ffprobe en el PATH):
 
     go build -o /tmp/hubplay ./cmd/hubplay
     python3 scripts/seek-check.py /tmp/hubplay
 
-Código de salida 0 si todo cuadra. Estado verificado el 2026-11-26:
-Transcode OK; Remux con 6/11 segmentos desplazados +2 s (el manifest
-sintético declara 6 s y el remux solo puede cortar en keyframes del
-fichero) — ver docs/memory/roadmap-producto.md, pilar 2.
+Código de salida 0 si todo cuadra. Historia: el 2026-11-26 el remux
+fallaba (6/11 segmentos +2 s: manifest sintético de 6 s frente a cortes
+en los keyframes del fichero); desde el remux por segmentos
+(internal/stream/remux.go) los cortes del manifest son los reales.
 """
 import json
 import os
+import random
 import re
 import shutil
 import socket
@@ -30,9 +33,12 @@ import time
 import urllib.error
 import urllib.request
 
-SEQ = [0, 1, 2, 60, 61, 10, 11, 100, 59, 119, 3]
-TOLERANCE = 2.5
-DURATION = 720  # 12 min → 120 segmentos de 6 s
+# Posiciones como fracción del número de segmentos: arranque, salto
+# adelante, atrás, casi al final, de vuelta al principio.
+SEQ = [0.0, "+1", "+1", 0.5, "+1", 0.08, "+1", 0.85, 0.49, 1.0, 0.03]
+TOLERANCE = 2.5   # |desfase| máximo (offset MPEG-TS ~1,4 s)
+SPREAD = 0.1      # variación máxima del desfase entre segmentos
+DURATION = 360  # 6 min
 
 
 def free_port():
@@ -43,9 +49,25 @@ def free_port():
 
 def gen_media(root):
     movies = os.path.join(root, "movies")
+    # Keyframes irregulares (como x264 con detección de escena).
+    rnd = random.Random(7)
+    t, kf = 0.0, []
+    while t < DURATION:
+        kf.append(f"{t:.3f}")
+        t += rnd.uniform(0.8, 9.5)
+    irregular = ",".join(kf)
     specs = [
-        # keyframe cada 4 s: NO cae en la rejilla de 6 s → destapa el remux
-        ("Remux Seek (2026)", "mkv", ["-c:v", "libx264", "-preset", "ultrafast", "-g", "100", "-c:a", "aac"]),
+        # keyframe cada 4 s: NO cae en la rejilla de 6 s
+        ("Remux Regular (2026)", "mkv", ["-c:v", "libx264", "-preset", "ultrafast", "-g", "100", "-c:a", "aac"]),
+        # B-frames + keyframes irregulares
+        ("Remux Irregular (2026)", "mkv", ["-c:v", "libx264", "-preset", "fast", "-x264-params",
+                                           "keyint=600:min-keyint=1:scenecut=0", "-force_key_frames", irregular,
+                                           "-c:a", "aac"]),
+        # GOP abierto (keyframes no IDR) en MP4 + audio AC3 (el navegador
+        # no lo decodifica → vídeo copiado y audio convertido a AAC)
+        ("Remux OpenGOP AC3 (2026)", "mp4", ["-c:v", "libx264", "-preset", "fast", "-x264-params",
+                                             "keyint=150:min-keyint=20:open-gop=1:bframes=3",
+                                             "-c:a", "ac3", "-b:a", "192k"]),
         ("Transcode Seek (2026)", "avi", ["-c:v", "mpeg4", "-q:v", "8", "-g", "250", "-c:a", "libmp3lame"]),
     ]
     for title, ext, codec in specs:
@@ -97,7 +119,14 @@ def check_item(c, item_id, title):
     print(f"\n{title} — {method}, {len(segs)} segmentos")
     bad = 0
     tmp = tempfile.mkdtemp()
-    for idx in SEQ:
+    n = len(segs)
+    order, prev = [], 0
+    for pos in SEQ:
+        idx = prev + 1 if pos == "+1" else min(n - 1, round(pos * (n - 1)))
+        order.append(idx)
+        prev = idx
+    drifts, ranges = [], {}
+    for idx in order:
         u = segs[idx] if segs[idx].startswith(("/", "http")) else vdir + segs[idx]
         st, body, dt = c.req("GET", u)
         if st != 200:
@@ -108,19 +137,38 @@ def check_item(c, item_id, title):
         with open(p, "wb") as f:
             f.write(body)
         out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
-                              "-show_entries", "packet=pts_time", "-of", "csv=p=0", p],
+                              "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", p],
                              capture_output=True, text=True).stdout.split()
-        pts = [float(x.strip(",")) for x in out if x.strip(",") not in ("", "N/A")]
-        expected = sum(durs[:idx])
-        if not pts:
+        pk = []
+        for line in out:
+            f = line.split(",")
+            if f[0] not in ("", "N/A"):
+                pk.append((float(f[0]), "K" in f[1]))
+        if not pk:
             print(f"  seg {idx:3d}: sin vídeo")
             bad += 1
             continue
-        drift = min(pts) - expected
-        ok = abs(drift) < TOLERANCE
+        pts = sorted(t for t, _ in pk)
+        expected = sum(durs[:idx])
+        drift = pts[0] - expected
+        drifts.append(drift)
+        ranges[idx] = (pts[0], pts[-1])
+        key_first = pk[0][1]
+        ok = abs(drift) < TOLERANCE and key_first
         bad += 0 if ok else 1
-        print(f"  seg {idx:3d}: {dt:5.2f}s  manifest {expected:6.1f}s  pts {min(pts):7.2f}..{max(pts):7.2f}"
-              f"  drift {drift:+.2f}  {'OK' if ok else 'MAL'}")
+        print(f"  seg {idx:3d}: {dt:5.2f}s  manifest {expected:6.1f}s  pts {pts[0]:7.2f}..{pts[-1]:7.2f}"
+              f"  drift {drift:+.2f}{'' if key_first else '  (NO empieza en keyframe)'}  {'OK' if ok else 'MAL'}")
+    if drifts and max(drifts) - min(drifts) > SPREAD:
+        print(f"  desfase variable entre segmentos: {min(drifts):+.3f}..{max(drifts):+.3f}  MAL")
+        bad += 1
+    # Continuidad al reproducir seguido: el siguiente empieza justo
+    # tras el anterior (ni hueco ni solape de más de un fotograma).
+    for a in ranges:
+        if a + 1 in ranges:
+            gap = ranges[a + 1][0] - ranges[a][1]
+            if not (0 < gap < 0.2):
+                print(f"  seg {a}->{a + 1}: hueco/solape {gap:+.3f}s  MAL")
+                bad += 1
     shutil.rmtree(tmp, ignore_errors=True)
     return bad
 
@@ -169,7 +217,7 @@ discovery:
         items = []
         for _ in range(120):
             items = c.json("GET", "/api/v1/items?limit=10&type=movie").get("items") or []
-            if len(items) >= 2:
+            if len(items) >= 4:
                 break
             time.sleep(0.5)
         bad = sum(check_item(c, it["id"], it["title"]) for it in sorted(items, key=lambda i: i["title"]))

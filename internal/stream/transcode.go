@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,7 +30,36 @@ type Session struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	stderr    *stderrTail
+
+	// Remux por segmentos (DirectStream con índice de keyframes): sin
+	// ffmpeg largo; cada segmento lo genera remux bajo demanda según
+	// plan. Nil en transcode y en el remux clásico.
+	remux *segmentRemuxer
+	plan  *SegmentPlan
 }
+
+// SegmentPlan devuelve el plan de cortes reales si la sesión es un remux
+// por segmentos, o nil (manifest sintético + ffmpeg continuo).
+func (s *Session) SegmentPlan() *SegmentPlan {
+	if s == nil {
+		return nil
+	}
+	return s.plan
+}
+
+// EnsureSegment devuelve la ruta del segmento i de un remux por
+// segmentos, generándolo si hace falta. Error si la sesión no es de ese
+// tipo o el índice no existe.
+func (s *Session) EnsureSegment(ctx context.Context, i int) (string, error) {
+	if s == nil || s.remux == nil {
+		return "", errors.New("stream: not a segmented remux session")
+	}
+	return s.remux.Ensure(ctx, i)
+}
+
+// IsSegmentOutOfRange indica si err viene de pedir un segmento que el
+// plan no tiene (el handler responde 404 en vez de 503).
+func IsSegmentOutOfRange(err error) bool { return errors.Is(err, errSegmentOutOfRange) }
 
 // stderrTail conserva los últimos bytes del stderr de ffmpeg para que
 // una muerte inesperada del proceso sea diagnosticable en logs (el
@@ -298,14 +328,20 @@ func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (
 	return session, nil
 }
 
-// Stop cancela el proceso ffmpeg y borra los ficheros de salida.
+// Stop cancela el proceso ffmpeg (o las generaciones del remux por
+// segmentos) y borra los ficheros de salida.
 func (s *Session) Stop() {
+	if s.remux != nil {
+		s.remux.Stop()
+	}
 	if s.cancel != nil {
 		s.cancel()
 	}
-	select {
-	case <-s.done:
-	case <-time.After(5 * time.Second):
+	if s.done != nil {
+		select {
+		case <-s.done:
+		case <-time.After(5 * time.Second):
+		}
 	}
 	_ = os.RemoveAll(s.OutputDir)
 }

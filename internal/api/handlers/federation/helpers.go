@@ -20,6 +20,10 @@ type imageServer interface {
 // (e.g. segment00001.ts, stream.m3u8).
 var validSegmentName = regexp.MustCompile(`^(segment\d{5}\.ts|stream\.m3u8)$`)
 
+// remuxSegmentIndex extrae el índice de "segment00042.ts" (remux por
+// segmentos).
+var remuxSegmentIndex = regexp.MustCompile(`^segment(\d+)\.ts$`)
+
 // waitForFile polls for a file to exist on disk, used to wait for
 // FFmpeg output.
 func waitForFile(path string, timeout time.Duration) error {

@@ -46,31 +46,43 @@ web y en la TV. Criterio automático: `scripts/seek-check.py` en verde.
 
 | Modo | Estado (medido 2026-11-26 con `scripts/seek-check.py`) |
 |---|---|
-| **Transcode** (códec no soportado → H.264) | ✅ 11/11 segmentos alineados con el manifest, saltos lejanos en 2,5 s |
-| **DirectStream / remux** (H.264 copiado — el caso MÁS común) | ❌ 6/11 segmentos empiezan **+2 s** tarde |
+| **Transcode** (códec no soportado → H.264) | ✅ segmentos alineados con el manifest; salto lejano en 2,5 s |
+| **DirectStream / remux** (H.264 copiado — el caso MÁS común) | ✅ **arreglado 2026-11-26** (remux por segmentos): keyframes regulares, irregulares con B-frames y GOP abierto con audio AC3→AAC, todos alineados; cada segmento en 0,00–0,09 s (hasta 0,56 s convirtiendo audio) |
 | DirectPlay (fichero tal cual) | ✅ por diseño (range requests) |
 
-**El fallo del remux:** el manifest VOD es sintético (todos los
-segmentos "6 s"), pero copiando el vídeo ffmpeg solo puede cortar en los
-keyframes del fichero. Con keyframes cada 4 s salen segmentos de 8 y 4 s;
-en ficheros reales (x264 con scenecut) los keyframes son irregulares, así
-que el desajuste es la norma. hls.js suele corregirlo con los PTS;
-**ExoPlayer (la app de TV) confía en el manifest**: posición desplazada,
-saltos que caen en otro sitio, solapes. Es el candidato nº 1 a "al pasar
-adelante/atrás hace cosas raras" en la tele.
+**Qué era:** el manifest VOD era sintético ("6 s por segmento") pero
+copiando el vídeo ffmpeg solo corta en los keyframes del fichero: antes,
+6/11 segmentos empezaban hasta 2 s tarde. ExoPlayer (la app de TV) se fía
+del manifest, así que los saltos caían en otro sitio. Con el demuxer HLS
+de ffmpeg como "reproductor que se fía del manifest", un salto pedido al
+segundo X caía hasta 6,7 s después; ahora cae en el sitio (el resto que
+queda en ficheros irregulares es la política de ese demuxer de avanzar al
+siguiente keyframe, y sale mejor que un HLS de referencia generado por el
+propio ffmpeg).
 
-**Arreglo propuesto (prioridad 1):** manifest de remux con los keyframes
-reales, como Jellyfin (`KeyframeExtractor`):
-1. Extraer los tiempos de keyframe del vídeo (cues de Matroska / índice
-   MP4; si no, `ffprobe -select_streams v:0 -show_entries
-   packet=pts_time,flags`), cachearlos por fichero (ruta+tamaño+mtime) y
-   calcularlos al escanear o en el primer play.
-2. Agrupar keyframes en segmentos de ~6 s y emitir EXTINF reales.
-3. Cortar ffmpeg exactamente ahí (`-f segment -segment_times …` o
-   `-hls_time` con los mismos tiempos) y que el seek-restart arranque en
-   el keyframe de inicio del segmento pedido.
-4. `seek-check.py` en verde para remux con keyframes de 4 s e
-   irregulares; añadir el caso al CI (job opcional, necesita ffmpeg).
+**Cómo está hecho** (`internal/stream/keyframes.go`, `segplan.go`,
+`remux.go`; detalle en `docs/architecture/streaming.md` § Segmented
+Remux): índice de keyframes cacheado por fichero → plan de segmentos con
+los cortes reales → cada segmento es una invocación corta de ffmpeg
+independiente (adelante y atrás son lo mismo, sin reinicios), con 3 de
+prefetch. Receta validada fotograma a fotograma; cobertura en
+`remux_integration_test.go` (ffmpeg real, con tests de mutación hechos a
+mano: quitar cualquier pieza de la receta los hace fallar) y
+`seek-check.py`.
+
+**Pendiente de esta pieza:**
+- **Probar en la Mi TV** tras desplegar (ExoPlayer real).
+- **Indexar en segundo plano tras el escaneo**: hoy el índice se calcula
+  en el primer play (espera máx. 3 s) o al pedir `/info`; un fichero
+  enorme en disco duro no llega en 3 s y esa primera reproducción va por
+  el remux continuo de siempre (la siguiente ya sale por segmentos).
+- Opcional: leer los cues de Matroska directamente (indexar sin leer el
+  fichero entero) y poda de la caché `keyframes/` (un JSON pequeño por
+  fichero, sin límite hoy).
+- Transcode: en el run inicial los segmentos salen con +1,47 s de
+  desfase y tras un reinicio con +1,40 (70 ms; dentro de tolerancia).
+  Probable mismo efecto que se corrigió en el remux
+  (`-avoid_negative_ts`); revisar.
 
 **Mejora barata:** el salto lejano espera 2 s fijos a que aparezca el
 segmento antes de reiniciar ffmpeg (`waitForFile(…, 2s)` en
@@ -153,8 +165,9 @@ colecciones, salvapantallas). Pendiente, en orden propuesto:
 ## Orden de ataque recomendado
 
 1. Mergear la rama actual + desplegar en el servidor de la TV.
-2. Pilar 2: remux con keyframes reales + reinicio inmediato en saltos
-   lejanos (`seek-check.py` en verde).
+2. Pilar 2: ~~remux con keyframes reales~~ ✅ (2026-11-26); queda probar
+   en la Mi TV, indexar tras el escaneo y el reinicio inmediato del
+   transcode en saltos lejanos.
 3. Pilar 3 en la app: "Compartido contigo" (+ F-5/F-6 en servidor).
 4. Pilar 1/5: bugs de estudios/logos y rails nuevos.
 5. Release de la app (firma, Baseline Profile, Play Store).

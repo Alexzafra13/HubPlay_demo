@@ -90,6 +90,28 @@
   y criterio de "terminado", y lo que le falta a la app de TV (no consume
   federación; servidor sin desplegar).
 
+- **Remux por segmentos (pilar 2, la pieza principal de la sesión)**:
+  el remux (vídeo copiado) ya no usa un ffmpeg largo con manifest
+  sintético de 6 s. Índice de keyframes cacheado por fichero
+  (`stream/keyframes.go`, caché en `<cache>/../keyframes/`) → plan con
+  los cortes reales (`segplan.go`) → cada segmento es un ffmpeg corto e
+  independiente (`remux.go`, 60–90 ms; prefetch de 3). Ir adelante o
+  atrás es lo mismo: `RestartSessionAt` es no-op en estas sesiones.
+  Receta validada fotograma a fotograma (MKV/MP4, GOP abierto/cerrado,
+  B-frames, keyframes irregulares, audio AC3→AAC sobre rejilla común) y
+  documentada flag a flag en `remux.go`. Si no hay índice en 3 s, el remux
+  continuo de antes (la indexación sigue y la próxima vez va por
+  segmentos); `/stream/{id}/info` precalienta el índice. La federación
+  también sirve el manifest del plan y los segmentos bajo demanda (antes
+  dependía del manifest de ffmpeg, que en este modo no existe).
+  `seek-check.py` ampliado a 4 películas (regular, irregular+B-frames,
+  GOP abierto+AC3 en MP4, transcode) con desfase constante ±0,1 s y
+  continuidad entre segmentos: **verde**. Tests: unitarios de índice,
+  plan, args y remuxer; integración con ffmpeg real
+  (`remux_integration_test.go`, verificada con mutaciones); handler
+  local y de federación. Diseño en `docs/architecture/streaming.md`
+  § Segmented Remux.
+
 **Hallazgos de esta sesión sin arreglar:**
 - `gofmt -l internal/` lista ~145 ficheros: el gofmt de Go ≥1.19 reformatea
   listas dentro de comentarios de doc (y algún orden de import). El CI no
@@ -109,9 +131,10 @@
 
 1. **Mergear esta rama** (PR → main) y desplegar en el servidor de la TV;
    probar el QR con el móvil en real.
-2. **Remux con keyframes reales** + reinicio inmediato en saltos lejanos
-   (`roadmap-producto.md` pilar 2) hasta `scripts/seek-check.py` en verde;
-   luego probar saltos en la Mi TV.
+2. **Probar saltos en la Mi TV** con el remux por segmentos (hecho
+   2026-11-26, `seek-check.py` verde); después, indexar keyframes en
+   segundo plano tras el escaneo y el reinicio inmediato del transcode
+   en saltos lejanos (`roadmap-producto.md` pilar 2, "Pendiente").
 3. **App TV: "Compartido contigo"** (federación; el servidor ya lo da) +
    F-5/F-6 en servidor.
 4. **Dependabot**: cerrar los 3 ya cubiertos; mergear los menores tras CI;
@@ -135,7 +158,7 @@
 
 | Prioridad | Tema | Items |
 |---|---|---|
-| **Alta** | **Remux con keyframes reales** | Medido: 6/11 segmentos +2 s (`scripts/seek-check.py`). Pilar 2 de `roadmap-producto.md` |
+| **Alta** | **Remux por segmentos: probar en TV + indexar tras escaneo** | Remux arreglado 2026-11-26 (`seek-check.py` verde). Falta verificación en ExoPlayer real e indexación previa de ficheros grandes. Pilar 2 |
 | **Alta** | **App TV sin federación** | La app no consume `/me/peers/*`. Pilar 3 |
 | Media | **Playback P3** | PB-19, PB-26, PB-29/30/31, PB-33, PB-36..39. Gaps de test: **1** (integración ffmpeg real en `stream/transcode`; solo el VOD de torrent la tiene), **4** (`rewriteHLSPlaylist`/`resolveURL` de IPTV sin tests), **5** parcial (Segment: seek-restart, 429, Stop↔Restart con `-race`), **6** parcial (trickplay: ACL ✅, TryLock/regeneración no). Gaps 2, 3 y 7 ✅ |
 | Media | **Torrent** | Tests de handler Play/HLS; T-6 refcount explícito (holder) desde el VOD |
@@ -173,7 +196,8 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
 - `roadmap-producto.md` — **visión y pilares** (qué es "terminado"),
   estado medido, qué le falta a la app de TV.
 - `scripts/seek-check.py` — prueba de saltos adelante/atrás contra el
-  binario real (criterio de "terminado" del pilar de reproducción).
+  binario real (criterio de "terminado" del pilar de reproducción; 4
+  películas: remux regular, irregular+B-frames, GOP abierto+AC3, transcode).
 - `architecture-decisions.md` — ADRs (AppError, observability/sink,
   keystore, preflight, sqlc adapter, ADR-026 logs).
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo,
@@ -235,5 +259,12 @@ distribución avanzada (auto-update, TLS LAN, macOS notarized, AppImage).
 - **(Nuevo) `cmd.StderrPipe()` + `cmd.Wait()` pierde líneas**: `Wait`
   cierra el read-end al reapear. Pipe propio (`os.Pipe`) si el tail de
   stderr decide algo (fix de #551).
+- **(Nuevo) Prototipar ffmpeg antes de codificar**: el remux por
+  segmentos destapó 6 trampas de ffmpeg (cortes relativos al arranque,
+  `-ss` de MKV que cae antes, `-ss` de salida que pone tiempos a 0, `-to`
+  por DTS, DTS negativo solo en el segmento 0, SPS/PPS ausentes en
+  keyframes no IDR) que una implementación "de memoria" habría metido.
+  Validar fotograma a fotograma con ffprobe y fijarlo con tests de
+  integración + mutaciones.
 - **(Nuevo) Apuntar el trabajo al cerrar sesión**: dos veces se ha
   reconstruido trabajo no documentado desde el git log.
