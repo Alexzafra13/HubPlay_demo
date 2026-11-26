@@ -186,7 +186,11 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
    PR → main **esperando al CI**, relanzar/investigar el E2E `livetv-zap` y
    confirmar que el Release de macOS publica la nightly.
 1. **Desplegar** `main` en el servidor de la TV (lleva #552: remux por
-   segmentos, QR, búsqueda) y probar el QR con el móvil en real.
+   segmentos, QR, búsqueda) y probar el QR con el móvil en real. Incluir
+   la rama `claude/stoic-curie-9je0wx` (2026-11-26): `/me/next-up` ahora
+   manda artwork (`poster_url`/`backdrop_url` del episodio y
+   `series_poster_url`/`series_backdrop_url`/`series_logo_url`); sin ella
+   el rail "A continuación" de la app de TV sale con tarjetas vacías.
 2. **Probar saltos en la Mi TV** con el remux por segmentos (hecho
    2026-11-26, `seek-check.py` verde); después, indexar keyframes en
    segundo plano tras el escaneo y el reinicio inmediato del transcode
