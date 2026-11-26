@@ -294,6 +294,11 @@ type StartSessionRequest struct {
 	StartTime        float64
 	AudioStreamIndex int
 	BurnSubIndex     int
+	// RequireHLS: el cliente no puede descargar el fichero tal cual (la
+	// federación solo proxya HLS), así que DirectPlay se rebaja a remux.
+	// No entra en la key: un mismo usuario/item siempre llega por el
+	// mismo camino (los usuarios de peer llevan prefijo propio).
+	RequireHLS bool
 }
 
 // sessionKey deriva la clave canónica desde los campos identitarios.
@@ -372,6 +377,9 @@ func (m *Manager) startSessionSlow(ctx context.Context, key string, req StartSes
 
 	// Decidir método de playback.
 	decision := m.decidePlayback(ctx, item, mediaStreams, caps, profileName, audioStreamIndex, burnSub)
+	if req.RequireHLS {
+		decision = RequireHLS(decision, item, mediaStreams, caps, profileName, audioStreamIndex)
+	}
 
 	// DirectPlay no necesita sesión de transcode.
 	if decision.Method == MethodDirectPlay {

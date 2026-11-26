@@ -154,6 +154,61 @@ func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *
 	}
 }
 
+// tsCopyableAudio son los códecs de audio que el muxer mpegts de ffmpeg
+// acepta en copia. FLAC/Vorbis no caben en TS: con esos se re-encodea el
+// audio (barato) aunque el cliente los decodifique.
+var tsCopyableAudio = map[string]bool{
+	"aac":  true,
+	"mp3":  true,
+	"mp2":  true,
+	"ac3":  true,
+	"eac3": true,
+	"opus": true,
+}
+
+// RequireHLS convierte una decisión DirectPlay en la más barata que se
+// pueda servir como HLS, para los caminos que no tienen descarga directa
+// del fichero: la federación solo proxya manifest + segmentos, y una
+// sesión DirectPlay no tiene ni lo uno ni lo otro (el servidor del amigo
+// respondía 409 WRONG_METHOD a la playlist de calidad y un MP4 H.264/AAC,
+// el caso más común, no se podía ver). El vídeo ya era compatible, así
+// que basta remux con `-c:v copy`; solo el audio se re-encodea si no cabe
+// en TS. Cualquier otra decisión se devuelve tal cual.
+func RequireHLS(d PlaybackDecision, item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *Capabilities, requestedProfile string, audioStreamIndex int) PlaybackDecision {
+	if d.Method != MethodDirectPlay {
+		return d
+	}
+	videoStream, audioStream := pickStreams(streams, audioStreamIndex)
+	eff := effectiveCapabilities(caps)
+	profile := DefaultProfile()
+	if p, ok := Profiles[requestedProfile]; ok {
+		profile = p
+	}
+	audioChannels := transcodeAudioChannels(audioStream, eff.MaxAudioChannels)
+	if videoStream == nil || !containerInSet(item.Container, remuxableContainers) {
+		return PlaybackDecision{
+			Method:        MethodTranscode,
+			VideoCodec:    "h264",
+			AudioCodec:    "aac",
+			Container:     "mpegts",
+			Profile:       profile,
+			AudioChannels: audioChannels,
+		}
+	}
+	copyAudio := audioStream == nil ||
+		(eff.AudioCodecs[audioStream.Codec] && tsCopyableAudio[audioStream.Codec])
+	return PlaybackDecision{
+		Method:        MethodDirectStream,
+		VideoCodec:    videoStream.Codec,
+		AudioCodec:    audioCodecName(audioStream),
+		Container:     "mpegts",
+		Profile:       profile,
+		CopyVideo:     true,
+		CopyAudio:     copyAudio,
+		AudioChannels: audioChannels,
+	}
+}
+
 // transcodeAudioChannels calcula los canales de salida del transcode
 // de audio: min(fuente, cliente, 6). El techo de 6 es el límite
 // práctico de AAC-LC en navegadores (5.1); 7.1 se pliega a 5.1.

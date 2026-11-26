@@ -169,6 +169,9 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 		Caps:             caps,
 		AudioStreamIndex: -1,
 		BurnSubIndex:     -1,
+		// El consumidor solo recibe manifest + segmentos por el proxy: sin
+		// camino directo al fichero, DirectPlay se rebaja a remux.
+		RequireHLS: true,
 	})
 	if err != nil {
 		h.logger.Warn("federation: start stream session failed", "error", err, "peer_id", peer.ID, "item_id", itemID)
@@ -261,6 +264,7 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 		ProfileName:      quality,
 		AudioStreamIndex: -1,
 		BurnSubIndex:     -1,
+		RequireHLS:       true,
 	})
 	if err != nil {
 		h.logger.Warn("federation: quality playlist start session", "error", err, "peer", peer.ID, "session", sess.ID)
@@ -268,11 +272,9 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 		return
 	}
 	if ms.Decision.Method == stream.MethodDirectPlay {
-		// DirectPlay isn't representable as an HLS manifest. The
-		// initial StartSession already returned the right method to
-		// the peer; if we're here it means the caller's client asked
-		// for HLS anyway. 409 -- the requesting peer should follow
-		// the original method response.
+		// Defensivo: con RequireHLS el manager nunca devuelve DirectPlay
+		// aquí (antes sí, y un MP4 H.264/AAC de un amigo no se podía ver:
+		// la federación no tiene camino directo al fichero).
 		handlers.RespondError(w, r, http.StatusConflict, "WRONG_METHOD", "session decided direct_play; use the direct path")
 		return
 	}

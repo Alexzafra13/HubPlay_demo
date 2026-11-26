@@ -30,6 +30,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -547,5 +548,49 @@ func TestFederationStream_Subtitles_NoMatchingTracks_ReturnsEmpty(t *testing.T) 
 	}
 	if len(body.Data) != 0 {
 		t.Errorf("data length = %d, want 0", len(body.Data))
+	}
+}
+
+// La federación solo proxya HLS: tanto el arranque como la playlist de
+// calidad tienen que pedir al manager una sesión servible por HLS. Sin
+// esto, un MP4 H.264/AAC salía DirectPlay y la playlist de calidad daba
+// 409 WRONG_METHOD: el item del amigo no se podía reproducir.
+func TestFederationStream_SessionsRequireHLS(t *testing.T) {
+	env := newFedTestEnv(t)
+	env.share(federation.ShareScopes{CanBrowse: true, CanPlay: true})
+
+	var mu sync.Mutex
+	var seen []stream.StartSessionRequest
+	env.streams.startSessionFn = func(_ context.Context, req stream.StartSessionRequest) (*stream.ManagedSession, error) {
+		mu.Lock()
+		seen = append(seen, req)
+		mu.Unlock()
+		return &stream.ManagedSession{
+			Decision: stream.PlaybackDecision{Method: stream.MethodDirectStream, CopyVideo: true},
+		}, nil
+	}
+
+	sid := env.startSessionAndGetSID(t)
+	req, err := http.NewRequest(http.MethodGet,
+		env.srv.URL+"/api/v1/peer/stream/session/"+sid+"/1080p/index.m3u8", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+env.peerToken())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("quality playlist: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) < 2 {
+		t.Fatalf("StartSession called %d times, want start + quality playlist", len(seen))
+	}
+	for i, r := range seen {
+		if !r.RequireHLS {
+			t.Errorf("StartSession call %d without RequireHLS: federated sessions have no direct path", i)
+		}
 	}
 }

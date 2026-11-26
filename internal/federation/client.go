@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 	"time"
 )
 
@@ -512,9 +513,18 @@ func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID str
 // library, so a peer that lost a share can no longer read posters
 // even if it cached the item id locally.
 //
+// width > 0 pide al amigo una miniatura de ese ancho máximo (`?w=`, la
+// misma caché de miniaturas que sirve las imágenes locales). Sin él, cada
+// tarjeta de la app de TV bajaba el póster original (a menudo 2000×3000)
+// a través de dos servidores.
+//
 // Caller MUST defer resp.Body.Close(); the response is not buffered.
-func (m *Manager) ProxyPeerItemPoster(ctx context.Context, peerID, itemID string) (*http.Response, error) {
-	return m.ProxyPeerStreamRequest(ctx, peerID, fmt.Sprintf("/api/v1/peer/items/%s/poster", itemID))
+func (m *Manager) ProxyPeerItemPoster(ctx context.Context, peerID, itemID string, width int) (*http.Response, error) {
+	path := "/api/v1/peer/items/" + neturl.PathEscape(itemID) + "/poster"
+	if width > 0 {
+		path += "?w=" + strconv.Itoa(width)
+	}
+	return m.ProxyPeerStreamRequest(ctx, peerID, path)
 }
 
 // ProxyPeerStreamRequest issues a GET against `path` on the remote

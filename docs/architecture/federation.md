@@ -425,7 +425,9 @@ To avoid hitting remote servers on every browse:
 
 - When a user opens a federated server's library, items are cached locally
 - Cache refreshes every **6 hours** in the background
-- Remote posters/images are proxied through the local server (user never contacts remote directly)
+- Remote posters/images are proxied through the local server (user never contacts remote directly).
+  `GET /me/peers/{peer}/items/{item}/poster?w=N` forwards `w` to the peer,
+  which serves a cached thumbnail (the TV app asks for 400 px cards)
 - If the remote server is offline, cached content is still browsable (with an "offline" badge)
 - Cache stores: title, year, type, overview, genres, rating, poster URL — enough for browsing
 - Full metadata is fetched on-demand when the user opens an item detail
@@ -444,11 +446,16 @@ User on Server A clicks play on content from Server B:
    not B's defaults.
 
 2. Server B calls stream.Manager.StartSession(item, caps, scope=peer).
-   The existing Decide() runs unchanged: DirectPlay if codecs declared
-   support the file; DirectStream if container needs remux only;
-   Transcode otherwise. B's MaxReencodeSessions cap and HWAccel apply
-   automatically — federation streams compete for the same transcode
-   budget as local users.
+   Decide() runs with A's caps, but with `RequireHLS: true`: federation
+   only proxies the HLS manifest + segments (there is no direct-file path
+   through the peer proxy), so a DirectPlay decision is downgraded to
+   DirectStream (video copied; audio copied when it fits in MPEG-TS, AAC
+   otherwise) — see `stream.RequireHLS`. Before 2026-11-26 a DirectPlay
+   decision (MP4 H.264/AAC, the common case) made the quality playlist
+   answer 409 WRONG_METHOD and the item could not be played. DirectStream
+   if container needs remux only; Transcode otherwise. B's
+   MaxReencodeSessions cap and HWAccel apply automatically — federation
+   streams compete for the same transcode budget as local users.
 
 3. Server B → Server A: { session_id, master_playlist_url }
 

@@ -104,7 +104,9 @@ tu web **y en tu tele** como una sección más, con progreso propio.
 | Emparejado por invitación, cripto Ed25519, revocación | ✅ base sólida (audit 2026-06-12) |
 | Compartir por biblioteca con permisos browse/play/download | ✅ |
 | Consumir: navegar, buscar, recientes, seguir viendo, pósters, streaming HLS, progreso (`/me/peers/*`) | ✅ en servidor y **web** |
-| Consumir en la **app de TV** | ❌ **la app no llama a ningún endpoint de federación** |
+| Consumir en la **app de TV** | ✅ en la rama `claude/stoic-feynman-pyojkw` (2026-11-26): pestaña "Compartido", ficha, reproducción con subtítulos y progreso, rails en Inicio, búsqueda. Sin probar en real |
+| Reproducir un MP4 H.264/AAC de un amigo | ✅ **arreglado 2026-11-26** (antes 409 `WRONG_METHOD` en web y TV: la federación no tiene camino directo y el amigo decidía DirectPlay) |
+| Series compartidas | ❌ solo se comparten items de primer nivel: la serie se ve, sus episodios no |
 | Límites por amigo | 🟡 concurrencia sí (5 por defecto); sin cuota de ancho de banda |
 | Descargar del amigo a tu servidor, rotación de claves | ❌ no implementado (Phase 7 / 2+) |
 | Hardening F-5..F-9, F-11..F-13 | ⏳ (para amigos de confianza no bloquea) |
@@ -112,10 +114,8 @@ tu web **y en tu tele** como una sección más, con progreso propio.
 **Falta (servidor):** F-6 (cortar el stream federado al desconectar) y
 F-5 (segmentos fuera del rate-limit), que afectan a ver contenido de un
 amigo en la tele.
-**Falta (app TV):** sección "Compartido contigo": rail de recientes de
-amigos en Inicio, navegar sus bibliotecas, ficha, reproducir vía
-`/me/peers/{peer}/stream/...` y guardar progreso. El servidor ya lo da
-todo.
+**Falta (app TV):** probarlo en real con un segundo servidor; quitar de
+"Seguir viendo de tus amigos" (no hay endpoint).
 
 ## Pilar 4 · Emparejar la tele con QR
 
@@ -143,7 +143,9 @@ colecciones, salvapantallas). Pendiente, en orden propuesto:
 1. **Desplegar el servidor actual** en `192.168.1.100:8097` (la caché de
    subtítulos, el id de instalación y los arreglos de hoy no están allí).
 2. **Remux con keyframes reales** (pilar 2) y verificar saltos en la Mi TV.
-3. **Sección "Compartido contigo"** (pilar 3).
+3. ~~**Sección "Compartido contigo"** (pilar 3)~~ — hecho 2026-11-26
+   (rama `claude/stoic-feynman-pyojkw`), junto con liberar sesiones de
+   ffmpeg al salir/zapear, quitar de Continuar viendo y logout real.
 4. Rails nuevos de Inicio (favoritos, colecciones, estrenos, por género…;
    necesitan endpoints) — propuestos el 2026-09-16, sin decidir.
 5. Bugs: estudio Lucasfilm 0 títulos, logos de canal 404, ficha sin
@@ -168,6 +170,7 @@ colecciones, salvapantallas). Pendiente, en orden propuesto:
 2. Pilar 2: ~~remux con keyframes reales~~ ✅ (2026-11-26); queda probar
    en la Mi TV, indexar tras el escaneo y el reinicio inmediato del
    transcode en saltos lejanos.
-3. Pilar 3 en la app: "Compartido contigo" (+ F-5/F-6 en servidor).
+3. Pilar 3: ~~"Compartido contigo" en la app~~ (2026-11-26, sin mergear);
+   queda F-5/F-6 en servidor y probarlo con dos servidores reales.
 4. Pilar 1/5: bugs de estudios/logos y rails nuevos.
 5. Release de la app (firma, Baseline Profile, Play Store).
