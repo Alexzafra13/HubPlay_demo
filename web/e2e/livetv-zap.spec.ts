@@ -9,16 +9,42 @@
 // `iptv.allow_private_upstreams: true` (ver helpers/server.ts) para
 // permitir upstreams de LAN/loopback en este smoke.
 import http from "node:http";
-import { createReadStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { test, expect, type Page } from "@playwright/test";
-import { LIVE_TS_FILE } from "./helpers/media";
+import { LIVE_TS_DURATION, LIVE_TS_FILE } from "./helpers/media";
 import { HubplayServer, binaryPath } from "./helpers/server";
 import { loginViaUI } from "./helpers/player";
 
 const CHANNELS = ["Canal Uno", "Canal Dos", "Canal Tres"];
 
+/** Emite `data` como un directo: una ráfaga inicial (para que el
+ *  transmux arranque rápido, como el buffer de un panel IPTV) y luego a
+ *  ~1,5x tiempo real hasta que el cliente cuelga. Un canal real nunca
+ *  llega a EOF; servir el fichero de golpe sí, y con el ffmpeg 8 de
+ *  Ubuntu 26.04 (runner de CI) `-reconnect_at_eof` no lo vuelve a pedir:
+ *  ffmpeg se comía los 180 s en ~200 ms y salía con código 0 antes del
+ *  primer segmento (502 TRANSMUX_FAILED y canal sin reproducir). */
+function streamLive(data: Buffer, res: http.ServerResponse): void {
+  const bytesPerSec = data.length / LIVE_TS_DURATION;
+  const tickMs = 100;
+  const chunk = Math.ceil((bytesPerSec * 1.5 * tickMs) / 1000);
+  let off = Math.min(data.length, Math.ceil(bytesPerSec * 4)); // ~4 s de ráfaga
+  res.write(data.subarray(0, off));
+  const timer = setInterval(() => {
+    if (off >= data.length) {
+      clearInterval(timer);
+      res.end();
+      return;
+    }
+    res.write(data.subarray(off, off + chunk));
+    off += chunk;
+  }, tickMs);
+  res.on("close", () => clearInterval(timer));
+}
+
 /** Upstream IPTV sintético: /playlist.m3u + /stream/N.ts en loopback. */
-function startUpstream(): Promise<{ url: string; close: () => void }> {
+async function startUpstream(): Promise<{ url: string; close: () => void }> {
+  const live = await readFile(LIVE_TS_FILE);
   const server = http.createServer((req, res) => {
     if (req.url === "/playlist.m3u") {
       const base = `http://${req.headers.host}`;
@@ -35,7 +61,7 @@ function startUpstream(): Promise<{ url: string; close: () => void }> {
     }
     if (req.url?.endsWith(".ts")) {
       res.writeHead(200, { "Content-Type": "video/mp2t" });
-      createReadStream(LIVE_TS_FILE).pipe(res);
+      streamLive(live, res);
       return;
     }
     res.writeHead(404).end();

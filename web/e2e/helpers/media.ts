@@ -21,10 +21,11 @@ export const MOVIES_DIR = path.join(MEDIA_ROOT, "movies");
 export const SHOWS_DIR = path.join(MEDIA_ROOT, "shows");
 const LIVE_DIR = path.join(MEDIA_ROOT, "live");
 /** Stream "en vivo" sintético para el smoke de Live TV: un MPEG-TS
- *  h264+aac servido por HTTP. Suficientemente largo como para que el
- *  zapping nunca alcance el EOF. */
+ *  h264+aac que el upstream del spec emite a ritmo de tiempo real (como
+ *  un canal de verdad). Suficientemente largo como para que el zapping
+ *  nunca alcance el EOF. */
 export const LIVE_TS_FILE = path.join(LIVE_DIR, "channel.ts");
-const LIVE_TS_DURATION = 180;
+export const LIVE_TS_DURATION = 180;
 
 /** Duración de la película de prueba (segundos). Más larga que el
  *  techo de buffer de hls.js (`maxMaxBufferLength`, 600 s por defecto):
@@ -56,6 +57,7 @@ async function generateVideo(
   outPath: string,
   seconds: number,
   audioTracks = 1,
+  gopFrames?: number,
 ): Promise<void> {
   if (await exists(outPath)) return; // cache entre runs locales
   await mkdir(path.dirname(outPath), { recursive: true });
@@ -71,6 +73,8 @@ async function generateVideo(
   }
   args.push(
     "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+    // Sin -g, x264 pone un keyframe cada 250 frames (25 s a 10 fps).
+    ...(gopFrames ? ["-g", String(gopFrames)] : []),
     "-c:a", "aac", "-b:a", "64k", "-ac", "2",
   );
   for (let i = 0; i < audioTracks; i++) {
@@ -105,5 +109,8 @@ export async function generateFixtures(): Promise<void> {
   );
   // La extensión .ts hace que ffmpeg muxee MPEG-TS (Annex-B), el
   // formato que el transmux de IPTV espera de un upstream típico.
-  await generateVideo(LIVE_TS_FILE, LIVE_TS_DURATION);
+  // Keyframe cada 2 s, como un canal real: el transmux copia el vídeo y
+  // solo puede cortar segmentos HLS en keyframes; con los 25 s por
+  // defecto el primer segmento de un directo a ritmo real tardaría ~15 s.
+  await generateVideo(LIVE_TS_FILE, LIVE_TS_DURATION, 1, 20);
 }

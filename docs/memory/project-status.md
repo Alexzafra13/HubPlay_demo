@@ -114,9 +114,20 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
   - Harness: el stdout del server (slog, nivel warn) va al log de CI y
     `livetv-zap` vuelca el estado del `<video>` al fallar (antes: solo
     "timeout", imposible de diagnosticar).
-  - El runner de GitHub es ya **Ubuntu 26.04 con ffmpeg 8.0.1**; Live TV
-    se probó también con el ffmpeg master de BtbN (el que empaqueta el
-    Release): funciona.
+  - **`livetv-zap` en CI, la causa real** (sacada con ese diagnóstico): el
+    runner es ya **Ubuntu 26.04 con ffmpeg 8.0.1**. El upstream del test
+    servía el `.ts` finito de golpe y contaba con `-reconnect_at_eof`
+    para repetirlo; ese ffmpeg no lo repite, se come los 180 s en
+    ~200 ms y sale con código 0 sin un segmento → 502 TRANSMUX_FAILED. En
+    local (ffmpeg 6 y master de BtbN) sí reconecta, por eso no se veía.
+    Un canal real nunca llega a EOF: ahora el upstream emite a ~1,5x
+    tiempo real tras 4 s de ráfaga, y el fixture tiene keyframe cada 2 s
+    (antes 25 s, el default de x264 a 10 fps). Además, "ffmpeg salió
+    limpio sin segmento" se logueaba a Info sin stderr: ahora Warn.
+  - **Pendiente (producto, no bloquea)**: un upstream IPTV *finito* (p. ej.
+    una entrada de M3U que en realidad es un fichero) que ffmpeg procese
+    entero antes de que el vigilante vea el primer segmento acaba en 502
+    aunque haya generado todo. Raro en directos reales; apuntado.
   - Ruido: "segmented remux failed: context canceled" (sesión parada con
     un segmento a medias al cerrar el player) pasa de ERROR a debug.
 - **Release macOS**: `https://evermeet.cx/ffmpeg/getrelease/zip` devuelve
