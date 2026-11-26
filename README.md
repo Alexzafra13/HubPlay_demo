@@ -76,7 +76,7 @@ datos SQLite se crea junto a la config; no hace falta nada más.
 
 ## Desarrollo
 
-Requisitos: Go 1.25, Node 22 + pnpm 10, FFmpeg.
+Requisitos: Go 1.26, Node 22 + pnpm 10, FFmpeg.
 
 ```bash
 cd web && pnpm install && pnpm build && cd ..   # SPA (se embebe en el binario)

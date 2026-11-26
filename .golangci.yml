@@ -33,9 +33,20 @@ linters:
       #   G104 — overlaps with errcheck (already on by default).
       #   G304 — file path tainted; pathmap + filepath.Clean make this
       #          a false positive on every call site.
+      #   G703 — the same check as G304 done by taint analysis (new in
+      #          the gosec of golangci-lint v2.15). It can't see our
+      #          sanitizers (imaging.IsSafePathSegment, segment-name
+      #          regexes + filepath.Dir checks, upload.ResolveSubpath,
+      #          sha256-addressed caches, paths read from the DB). All
+      #          43 hits were reviewed by hand on 2026-11-26: 42 false
+      #          positives and one real traversal (collection image
+      #          upload with a decoded "..%2F" id), fixed with a
+      #          regression test. Re-run with G703 enabled when adding
+      #          handlers that build paths from request input.
       excludes:
         - G104
         - G304
+        - G703
       severity: high
       confidence: high
 

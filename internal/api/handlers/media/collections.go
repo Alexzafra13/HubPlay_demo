@@ -467,6 +467,14 @@ func (h *CollectionHandler) parseCollectionImageRoute(w http.ResponseWriter, r *
 	if decoded, err := netUrl.PathUnescape(rawID); err == nil {
 		id = decoded
 	}
+	// El id acaba en el nombre del fichero subido; ya decodificado, un
+	// "..%2F" de la URL sería "../" y la imagen se escribiría fuera de
+	// collection-images/. Los ids reales ("collection:550") nunca llevan
+	// separadores.
+	if !imaging.IsSafePathSegment(id) {
+		handlers.RespondError(w, r, http.StatusBadRequest, "INVALID_ID", "invalid collection id")
+		return "", "", false
+	}
 	imageType := handlers.RequireParam(w, r, "type")
 	if imageType == "" {
 		return "", "", false
