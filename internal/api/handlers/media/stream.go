@@ -603,6 +603,11 @@ func (h *StreamHandler) serveSegmentedRemux(w http.ResponseWriter, r *http.Reque
 		handlers.RespondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
 	case r.Context().Err() != nil:
 		// El cliente se fue (seek rápido): nada que responder.
+	case errors.Is(err, context.Canceled):
+		// La sesión se paró con el segmento a medias (el usuario cerró el
+		// player o cambió de pista): esperado, no es un fallo de ffmpeg.
+		h.logger.Debug("segmented remux canceled", "segment", segIdx)
+		handlers.RespondError(w, r, http.StatusServiceUnavailable, "SEGMENT_FAILED", "could not produce segment")
 	default:
 		h.logger.Error("segmented remux failed", "segment", segIdx, "error", err)
 		handlers.RespondError(w, r, http.StatusServiceUnavailable, "SEGMENT_FAILED", "could not produce segment")

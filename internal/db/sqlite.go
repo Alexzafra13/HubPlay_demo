@@ -59,6 +59,17 @@ import (
 //
 //   - wal_autocheckpoint=1000: explicit at the default. Pinned here
 //     because a future PRAGMA edit might silently shift it.
+//
+//   - _txlock=immediate (driver option, not a pragma): every BEGIN is
+//     BEGIN IMMEDIATE, so a transaction takes the write lock up front
+//     and waits busy_timeout for it. With the default DEFERRED, two
+//     concurrent write transactions (two library scans ingesting
+//     items, or a scan + an IPTV channel import) failed at once with
+//     SQLITE_BUSY without waiting: busy_timeout doesn't cover the
+//     upgrade of a deferred transaction to a writer. The scanner then
+//     skipped the file until the next scan. Every BeginTx in the code
+//     writes, so taking the lock at BEGIN costs nothing.
+//     TestItemRepository_IngestItem_ConcurrentWritersDontFail pins it.
 const sqlitePragmas = "" +
 	"_pragma=journal_mode(WAL)" +
 	"&_pragma=synchronous(NORMAL)" +
@@ -67,7 +78,8 @@ const sqlitePragmas = "" +
 	"&_pragma=cache_size(-65536)" +
 	"&_pragma=temp_store(MEMORY)" +
 	"&_pragma=mmap_size(268435456)" +
-	"&_pragma=wal_autocheckpoint(1000)"
+	"&_pragma=wal_autocheckpoint(1000)" +
+	"&_txlock=immediate"
 
 // sqlitePoolMaxOpenConns caps concurrent SQLite connections. SQLite
 // with WAL allows multiple readers + one writer; capping helps avoid

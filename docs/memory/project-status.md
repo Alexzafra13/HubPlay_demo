@@ -35,15 +35,16 @@
 ## 🔭 Estado actual (2026-11-26, retomando tras ~2 meses parado)
 
 **Salud:** MVP funcional, cerca de early-production. `main` en
-`0d3cefd` (#552, mergeado sin esperar al CI) con **CI y Release en rojo**
-(Docker verde). Sin issues abiertos. Ver "Revisión pre-app de TV" abajo.
+`abf881a` (#553): Release (nightly de nuevo publicada), Docker,
+vulnerability scan y lint **verdes**; solo el job E2E en rojo, arreglado
+en la rama de la sesión (ver "Revisión pre-app de TV"). Sin issues abiertos.
 
 | Área | Estado |
 |---|---|
-| Tests backend | `go test ./...` verde: 45 paquetes (Linux, Go 1.25.13 en `main` y 1.26.11 en la rama de la revisión) |
+| Tests backend | `go test ./...` verde: 45 paquetes (Linux, Go 1.26.11) |
 | Tests frontend | **783/783** vitest (108 ficheros); `tsc -b`, `knip` limpios; eslint 0 errores / 1 warning conocido (React Compiler + `useVirtualizer`, no accionable) |
-| CI de `main` | ❌ Vulnerability scan (15 vulns, la mayoría de stdlib solo arregladas en Go 1.26) · ❌ E2E `livetv-zap` (timeout 30 s, 2/2 intentos) · ❌ Release macOS (evermeet `getrelease` → 410) ⇒ **no se publica la nightly** |
-| Rama de trabajo | `claude/affectionate-euler-y94rf9` (revisión 2026-11-26, sin mergear) |
+| CI de `main` | ✅ todo salvo ❌ E2E (`livetv-zap`, `server-down`): causas encontradas y arregladas en la rama (SQLite `SQLITE_BUSY` + tests que ya no probaban lo que decían). E2E local con Chrome: 20/20 |
+| Rama de trabajo | `claude/affectionate-euler-y94rf9` (rehecha desde `main` tras #553; sin mergear) |
 | Audit playback 2026-06-10 | P0/P1/P2 ✅. **P3 abierta** (ver tabla de trabajo abierto) |
 | Audit torrent 2026-09-10 | **Todos los hallazgos ✅** (T-8/T-9 el 2026-11-26). Queda: tests de handler `Play`/`HLSPlaylist`/`HLSSegment` y refcount explícito VOD (T-6) |
 | Audit prod 2026-06-08 | Fases 0/1/2 ✅. Fase 3: M18/M19/M20 ✅, M24 parcial, M21/M23 abiertos. Fases 4–5 abiertas |
@@ -84,12 +85,51 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
   `TestCollectionHandler_UploadImage_RejectsTraversalID` (falla sin el
   fix). Con eso, G703 excluido en `.golangci.yml` como G304, con el
   motivo apuntado. El errcheck nuevo (`procutil_unix_test.go`), arreglado.
-- **E2E `livetv-zap`**: falla en CI (el `<video>` del canal no llega a
-  reproducir en 30 s, 2/2 intentos); #552 no tocó IPTV y en local pasa
-  siempre (3 s, Chromium). Los demás specs fallan en local por el Chromium
-  sin H.264 (el README ya pide Chrome real), así que aquí no se puede
-  reproducir el entorno del CI. Siguiente paso: relanzar el job; si
-  vuelve a fallar, bajar el artefacto `playwright-report` (trace).
+- **E2E** (tras #553 seguía rojo: `livetv-zap` y ahora `server-down`).
+  Reproducido en local con `/usr/bin/google-chrome` (el CI usa Chrome; el
+  Chromium de Playwright no trae H.264 y falla por otras razones). Cuatro
+  causas, ninguna de "flake":
+  - **Bug real — SQLite `SQLITE_BUSY` con escrituras concurrentes.** Con
+    `BEGIN DEFERRED`, dos transacciones de escritura a la vez (dos
+    bibliotecas escaneando, o un escaneo + importar canales IPTV/EPG)
+    fallaban al instante sin esperar `busy_timeout`: el scanner se saltaba
+    el fichero hasta el siguiente escaneo ("create item: database is
+    locked"). En el E2E, la importación de canales coincide con el escaneo
+    de pelis/series → canal sin reproducir (`readyState 0`). Fix:
+    `_txlock=immediate` en el DSN (`db/sqlite.go`; todos los `BeginTx`
+    escriben). Test: `TestItemRepository_IngestItem_ConcurrentWritersDontFail`
+    (4×150 ingestas; sin el fix fallan varias).
+  - **`server-down` dejó de probar nada con #552**: la peli de prueba
+    (5 min, bitrate ínfimo) cabe entera en el buffer de hls.js (techo
+    `maxMaxBufferLength` 600 s) y el remux por segmentos la sirve en
+    segundos, así que el seek fijo a 200 s nunca tocaba la red. Peli de
+    15 min y seek calculado tras el final de lo bufferizado (falla con
+    mensaje claro si toda la peli está en buffer).
+  - **`upnext`, carrera del test**: `waitForPlayback(0.5)` se cumplía con
+    el `<video>` del episodio terminado (t=30). Ahora espera reproducción
+    dentro del rango del episodio nuevo.
+  - **`playback`, carrera del test**: al cerrar, ItemDetail guarda progreso
+    y DESPUÉS `navigate(-1)`; reabrir enseguida chocaba con esa navegación.
+    Ahora espera a salir de la ficha.
+  - Harness: el stdout del server (slog, nivel warn) va al log de CI y
+    `livetv-zap` vuelca el estado del `<video>` al fallar (antes: solo
+    "timeout", imposible de diagnosticar).
+  - **`livetv-zap` en CI, la causa real** (sacada con ese diagnóstico): el
+    runner es ya **Ubuntu 26.04 con ffmpeg 8.0.1**. El upstream del test
+    servía el `.ts` finito de golpe y contaba con `-reconnect_at_eof`
+    para repetirlo; ese ffmpeg no lo repite, se come los 180 s en
+    ~200 ms y sale con código 0 sin un segmento → 502 TRANSMUX_FAILED. En
+    local (ffmpeg 6 y master de BtbN) sí reconecta, por eso no se veía.
+    Un canal real nunca llega a EOF: ahora el upstream emite a ~1,5x
+    tiempo real tras 4 s de ráfaga, y el fixture tiene keyframe cada 2 s
+    (antes 25 s, el default de x264 a 10 fps). Además, "ffmpeg salió
+    limpio sin segmento" se logueaba a Info sin stderr: ahora Warn.
+  - **Pendiente (producto, no bloquea)**: un upstream IPTV *finito* (p. ej.
+    una entrada de M3U que en realidad es un fichero) que ffmpeg procese
+    entero antes de que el vigilante vea el primer segmento acaba en 502
+    aunque haya generado todo. Raro en directos reales; apuntado.
+  - Ruido: "segmented remux failed: context canceled" (sesión parada con
+    un segmento a medias al cerrar el player) pasa de ERROR a debug.
 - **Release macOS**: `https://evermeet.cx/ffmpeg/getrelease/zip` devuelve
   **410 Gone**. Arreglado en `scripts/fetch-ffmpeg.sh`: la URL versionada
   (`ffmpeg-9.1.zip`) se saca de la API de info (`download.zip.url`). No
@@ -183,8 +223,9 @@ golangci-lint v2.5.0 (0 issues), `tsc -b`, knip, eslint y vitest 783/783
 ## ▶️ Próxima sesión (en orden)
 
 0. **CI de `main` en verde** (rama `claude/affectionate-euler-y94rf9`):
-   PR → main **esperando al CI**, relanzar/investigar el E2E `livetv-zap` y
-   confirmar que el Release de macOS publica la nightly.
+   PR → main **esperando a que el CI termine en verde** (#552 y #553 se
+   mergearon a los 11 s y a los 2 min, con el CI a medias). Release macOS
+   y nightly ya confirmados en verde con #553.
 1. **Desplegar** `main` en el servidor de la TV (lleva #552: remux por
    segmentos, QR, búsqueda) y probar el QR con el móvil en real. Incluir
    la rama `claude/stoic-curie-9je0wx` (2026-11-26): `/me/next-up` ahora

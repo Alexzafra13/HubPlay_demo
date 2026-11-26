@@ -21,14 +21,20 @@ export const MOVIES_DIR = path.join(MEDIA_ROOT, "movies");
 export const SHOWS_DIR = path.join(MEDIA_ROOT, "shows");
 const LIVE_DIR = path.join(MEDIA_ROOT, "live");
 /** Stream "en vivo" sintético para el smoke de Live TV: un MPEG-TS
- *  h264+aac servido por HTTP. Suficientemente largo como para que el
- *  zapping nunca alcance el EOF. */
+ *  h264+aac que el upstream del spec emite a ritmo de tiempo real (como
+ *  un canal de verdad). Suficientemente largo como para que el zapping
+ *  nunca alcance el EOF. */
 export const LIVE_TS_FILE = path.join(LIVE_DIR, "channel.ts");
-const LIVE_TS_DURATION = 180;
+export const LIVE_TS_DURATION = 180;
 
-/** Duración de la película de prueba (segundos). Suficiente para
- *  seeks "lejanos" (>1 min) sin que el encode del fixture tarde. */
-const MOVIE_DURATION = 300;
+/** Duración de la película de prueba (segundos). Más larga que el
+ *  techo de buffer de hls.js (`maxMaxBufferLength`, 600 s por defecto):
+ *  con este bitrate tan bajo hls.js se permite ese techo entero, y el
+ *  remux por segmentos sirve cada uno en < 100 ms, así que una película
+ *  más corta acaba entera en el buffer y ningún seek llega a la red
+ *  (el smoke de server-down dejaría de probar nada). A 320x180 y 10 fps
+ *  el encode sigue siendo de segundos. */
+const MOVIE_DURATION = 900;
 /** Duración de cada episodio (segundos). Cortos: el smoke de UpNext
  *  seekea cerca del final y espera el `ended` real. */
 export const EPISODE_DURATION = 30;
@@ -51,6 +57,7 @@ async function generateVideo(
   outPath: string,
   seconds: number,
   audioTracks = 1,
+  gopFrames?: number,
 ): Promise<void> {
   if (await exists(outPath)) return; // cache entre runs locales
   await mkdir(path.dirname(outPath), { recursive: true });
@@ -66,6 +73,8 @@ async function generateVideo(
   }
   args.push(
     "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+    // Sin -g, x264 pone un keyframe cada 250 frames (25 s a 10 fps).
+    ...(gopFrames ? ["-g", String(gopFrames)] : []),
     "-c:a", "aac", "-b:a", "64k", "-ac", "2",
   );
   for (let i = 0; i < audioTracks; i++) {
@@ -80,8 +89,8 @@ async function generateVideo(
  *
  *  La película va en MKV a propósito: el navegador no demuxea
  *  Matroska, así que el server decide DirectStream (remux HLS) y el
- *  smoke ejercita la cadena completa de sesiones — manifest VOD
- *  sintético, segmentos bajo demanda y seek-restart — sin el coste de
+ *  smoke ejercita la cadena completa de sesiones — remux por segmentos
+ *  cortados en los keyframes, generados bajo demanda — sin el coste de
  *  un re-encode. Los episodios van en MP4 (DirectPlay): para UpNext lo
  *  que importa es el `ended` → auto-advance, no el transcoder. */
 export async function generateFixtures(): Promise<void> {
@@ -100,5 +109,8 @@ export async function generateFixtures(): Promise<void> {
   );
   // La extensión .ts hace que ffmpeg muxee MPEG-TS (Annex-B), el
   // formato que el transmux de IPTV espera de un upstream típico.
-  await generateVideo(LIVE_TS_FILE, LIVE_TS_DURATION);
+  // Keyframe cada 2 s, como un canal real: el transmux copia el vídeo y
+  // solo puede cortar segmentos HLS en keyframes; con los 25 s por
+  // defecto el primer segmento de un directo a ritmo real tardaría ~15 s.
+  await generateVideo(LIVE_TS_FILE, LIVE_TS_DURATION, 1, 20);
 }

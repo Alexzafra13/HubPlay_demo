@@ -88,11 +88,15 @@ export class HubplayServer {
     this.proc = spawn(this.binPath, ["--config", configPath], {
       stdio: ["ignore", "pipe", "pipe"],
     });
-    // El stderr del server es la única pista cuando un smoke falla por
-    // backend; volcarlo con prefijo mantiene el log de playwright legible.
-    this.proc.stderr?.on("data", (chunk: Buffer) => {
+    // La salida del server es la única pista cuando un smoke falla por
+    // backend; volcarla con prefijo mantiene el log de playwright legible.
+    // El log de slog va a stdout (con level "warn" solo avisos y errores,
+    // p. ej. un ffmpeg de transmux que muere); stderr lleva panics.
+    const forward = (chunk: Buffer) => {
       process.stderr.write(`[hubplay:${this.port}] ${chunk}`);
-    });
+    };
+    this.proc.stdout?.on("data", forward);
+    this.proc.stderr?.on("data", forward);
 
     await this.waitHealthy();
   }

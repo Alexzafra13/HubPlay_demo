@@ -9,16 +9,42 @@
 // `iptv.allow_private_upstreams: true` (ver helpers/server.ts) para
 // permitir upstreams de LAN/loopback en este smoke.
 import http from "node:http";
-import { createReadStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { test, expect, type Page } from "@playwright/test";
-import { LIVE_TS_FILE } from "./helpers/media";
+import { LIVE_TS_DURATION, LIVE_TS_FILE } from "./helpers/media";
 import { HubplayServer, binaryPath } from "./helpers/server";
 import { loginViaUI } from "./helpers/player";
 
 const CHANNELS = ["Canal Uno", "Canal Dos", "Canal Tres"];
 
+/** Emite `data` como un directo: una ráfaga inicial (para que el
+ *  transmux arranque rápido, como el buffer de un panel IPTV) y luego a
+ *  ~1,5x tiempo real hasta que el cliente cuelga. Un canal real nunca
+ *  llega a EOF; servir el fichero de golpe sí, y con el ffmpeg 8 de
+ *  Ubuntu 26.04 (runner de CI) `-reconnect_at_eof` no lo vuelve a pedir:
+ *  ffmpeg se comía los 180 s en ~200 ms y salía con código 0 antes del
+ *  primer segmento (502 TRANSMUX_FAILED y canal sin reproducir). */
+function streamLive(data: Buffer, res: http.ServerResponse): void {
+  const bytesPerSec = data.length / LIVE_TS_DURATION;
+  const tickMs = 100;
+  const chunk = Math.ceil((bytesPerSec * 1.5 * tickMs) / 1000);
+  let off = Math.min(data.length, Math.ceil(bytesPerSec * 4)); // ~4 s de ráfaga
+  res.write(data.subarray(0, off));
+  const timer = setInterval(() => {
+    if (off >= data.length) {
+      clearInterval(timer);
+      res.end();
+      return;
+    }
+    res.write(data.subarray(off, off + chunk));
+    off += chunk;
+  }, tickMs);
+  res.on("close", () => clearInterval(timer));
+}
+
 /** Upstream IPTV sintético: /playlist.m3u + /stream/N.ts en loopback. */
-function startUpstream(): Promise<{ url: string; close: () => void }> {
+async function startUpstream(): Promise<{ url: string; close: () => void }> {
+  const live = await readFile(LIVE_TS_FILE);
   const server = http.createServer((req, res) => {
     if (req.url === "/playlist.m3u") {
       const base = `http://${req.headers.host}`;
@@ -35,7 +61,7 @@ function startUpstream(): Promise<{ url: string; close: () => void }> {
     }
     if (req.url?.endsWith(".ts")) {
       res.writeHead(200, { "Content-Type": "video/mp2t" });
-      createReadStream(LIVE_TS_FILE).pipe(res);
+      streamLive(live, res);
       return;
     }
     res.writeHead(404).end();
@@ -54,15 +80,43 @@ function startUpstream(): Promise<{ url: string; close: () => void }> {
 
 /** El <video> del canal (ChannelPlayer lo etiqueta con el nombre)
  *  reproduce de verdad — la definición de "sin spinner colgado". */
+/** Peticiones a /api/ y errores de consola del test en curso (ver test). */
+const netLog: string[] = [];
+
 async function waitChannelPlaying(page: Page, name: string): Promise<void> {
-  await page.waitForFunction(
-    (n) => {
+  try {
+    await page.waitForFunction(
+      (n) => {
+        const v = document.querySelector(`video[aria-label="${n}"]`);
+        return v instanceof HTMLVideoElement && v.readyState >= 2 && v.currentTime > 0.5;
+      },
+      name,
+      { timeout: 30_000 },
+    );
+  } catch (err) {
+    // Estado del <video> al vencer el plazo: distingue "nunca cargó"
+    // (readyState 0, networkState) de "cargó pero no avanza" o de un
+    // MediaError del decoder. Sin esto el fallo solo dice "timeout".
+    const state = await page.evaluate((n) => {
       const v = document.querySelector(`video[aria-label="${n}"]`);
-      return v instanceof HTMLVideoElement && v.readyState >= 2 && v.currentTime > 0.5;
-    },
-    name,
-    { timeout: 30_000 },
-  );
+      if (!(v instanceof HTMLVideoElement)) return { found: false };
+      const ranges: string[] = [];
+      for (let i = 0; i < v.buffered.length; i++) {
+        ranges.push(`${v.buffered.start(i).toFixed(1)}-${v.buffered.end(i).toFixed(1)}`);
+      }
+      return {
+        found: true,
+        readyState: v.readyState,
+        networkState: v.networkState,
+        currentTime: v.currentTime,
+        paused: v.paused,
+        buffered: ranges.join(","),
+        error: v.error ? `${v.error.code} ${v.error.message}` : null,
+      };
+    }, name);
+    const trail = netLog.filter((l) => !l.includes("/events")).slice(-40).join("\n  ");
+    throw new Error(`canal "${name}" sin reproducir: ${JSON.stringify(state)}\n  ${trail}`, { cause: err });
+  }
 }
 
 test.describe("smoke: zapping Live TV", () => {
@@ -83,6 +137,26 @@ test.describe("smoke: zapping Live TV", () => {
   });
 
   test("zapear 3 canales sin spinner colgado", async ({ page }) => {
+    // Rastro de red de la API para el diagnóstico de waitChannelPlaying:
+    // distingue "el player nunca pidió el manifest" de "el server no
+    // contestó" o "contestó con error".
+    netLog.length = 0;
+    const t0 = Date.now();
+    const stamp = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+    const short = (u: string) => u.replace(/^https?:\/\/[^/]+/, "");
+    page.on("request", (r) => {
+      if (r.url().includes("/api/")) netLog.push(`${stamp()} → ${r.method()} ${short(r.url())}`);
+    });
+    page.on("response", (r) => {
+      if (r.url().includes("/api/")) netLog.push(`${stamp()} ← ${r.status()} ${short(r.url())}`);
+    });
+    page.on("requestfailed", (r) => {
+      if (r.url().includes("/api/")) netLog.push(`${stamp()} ✗ ${r.failure()?.errorText} ${short(r.url())}`);
+    });
+    page.on("console", (m) => {
+      if (m.type() === "error" || m.type() === "warning") netLog.push(`${stamp()} console.${m.type()}: ${m.text().slice(0, 200)}`);
+    });
+
     await loginViaUI(page, server);
     await page.goto(`${server.baseURL}/live-tv`);
 
