@@ -949,10 +949,7 @@ func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 		handlers.HandleServiceError(w, r, err)
 		return
 	}
-	currentID := ""
-	if c, cerr := r.Cookie(refreshCookieName); cerr == nil {
-		currentID = h.auth.CurrentSessionID(r.Context(), c.Value)
-	}
+	currentID := h.auth.CurrentSessionID(r.Context(), callerRefreshToken(r))
 	out := make([]map[string]any, len(rows))
 	for i, s := range rows {
 		out[i] = map[string]any{
@@ -968,6 +965,21 @@ func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	handlers.RespondData(w, http.StatusOK, out)
+}
+
+// refreshTokenHeader lleva el refresh token de los clientes que no usan
+// cookies (la app de TV: Bearer + refresh en su almacén). Solo sirve para
+// saber cuál de las sesiones es la del que llama ("Este dispositivo");
+// nunca autentica (eso lo hace el Bearer).
+const refreshTokenHeader = "X-Hubplay-Refresh-Token"
+
+// callerRefreshToken: el refresh token del que llama, de la cookie de la
+// web o, si no hay, de la cabecera de los clientes nativos. "" si ninguno.
+func callerRefreshToken(r *http.Request) string {
+	if c, err := r.Cookie(refreshCookieName); err == nil && c.Value != "" {
+		return c.Value
+	}
+	return r.Header.Get(refreshTokenHeader)
 }
 
 // sessionAuthMethod classifies a session by how it was minted. The
@@ -1001,12 +1013,7 @@ func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
 
 	// Detect "user revoked themselves" before the row is gone so we
 	// can clear cookies on the response.
-	revokedSelf := false
-	if c, cerr := r.Cookie(refreshCookieName); cerr == nil {
-		if h.auth.CurrentSessionID(r.Context(), c.Value) == sessionID {
-			revokedSelf = true
-		}
-	}
+	revokedSelf := h.auth.CurrentSessionID(r.Context(), callerRefreshToken(r)) == sessionID
 
 	if err := h.auth.RevokeSession(r.Context(), claims.UserID, sessionID); err != nil {
 		handlers.HandleServiceError(w, r, err)

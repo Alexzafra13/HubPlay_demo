@@ -379,3 +379,45 @@ func TestSetup_Validation(t *testing.T) {
 		})
 	}
 }
+
+// La app de TV no usa cookies: manda su refresh token en
+// X-Hubplay-Refresh-Token y /me/sessions marca su fila como `current`
+// ("Este dispositivo"); sin cabecera ni cookie ninguna sale marcada.
+func TestMySessions_CurrentByHeader(t *testing.T) {
+	app := newTestApp(t)
+	resp := app.do(t, "POST", "/api/v1/auth/setup", map[string]string{"username": "admin", "password": "admin12345"}, "")
+	_ = resp.Body.Close()
+	resp = app.do(t, "POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "admin12345"}, "")
+	data := app.decode(t, resp)["data"].(map[string]any)
+	access := data["access_token"].(string)
+	refresh := data["refresh_token"].(string)
+
+	currentRows := func(withHeader bool) int {
+		req, _ := http.NewRequest(http.MethodGet, app.server.URL+"/api/v1/me/sessions", nil)
+		req.Header.Set("Authorization", "Bearer "+access)
+		if withHeader {
+			req.Header.Set("X-Hubplay-Refresh-Token", refresh)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("status %d", r.StatusCode)
+		}
+		rows := app.decode(t, r)["data"].([]any)
+		n := 0
+		for _, row := range rows {
+			if row.(map[string]any)["current"] == true {
+				n++
+			}
+		}
+		return n
+	}
+	if got := currentRows(false); got != 0 {
+		t.Errorf("without cookie or header no row is current, got %d", got)
+	}
+	if got := currentRows(true); got != 1 {
+		t.Errorf("with the refresh header exactly one row must be current, got %d", got)
+	}
+}
